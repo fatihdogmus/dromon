@@ -10,7 +10,7 @@ The plan is `.plans/dromon-plan.md`; where implementation stands is `.plans/prog
 - `crates/dromon-sftp`: the SFTP session over the ssh child's stdio (russh-sftp raw session), extensions (posix-rename, limits, copy-data), listing diff, poll schedule.
 - `crates/dromon-transfer`: conflict naming, part files, task state machine, progress maths.
 - `crates/dromon-app`: the Rune app (lib + `dromon` bin). `state/` is pure app state, `views/` the UI, `service/` the network thread, `fixture/` the data-driven fake backend.
-- `crates/dromon-testkit`: the Docker sshd fixture for tests (testcontainers, `tests/docker/`).
+- `crates/dromon-testkit`: the sshd fixture for tests: Docker (testcontainers, `tests/docker/`; on Windows CI through Docker in WSL2), or with `DROMON_FIXTURE_BACKEND=native` a private native `sshd` (macOS CI; creates `dromon_*` users, so CI or `DROMON_FIXTURE_NATIVE_OK=1` only). Tests take users and homes from it (`Role`, `user()`, `home()`), never `/home/...` literals. See `tests/docker/README.md`.
 - Rune is pinned to one `dev` rev in the root `Cargo.toml`, together with its `[patch.crates-io]` block; bump them together.
 
 ## Commands

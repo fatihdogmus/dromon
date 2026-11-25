@@ -8,9 +8,9 @@ Tracks where implementation stands against `dromon-plan.md`. Newest first.
 
 | Spike | Status | Evidence |
 |---|---|---|
-| S1 Rune pinned build + headless `--snap` | ✅ Linux · ⏳ macOS, Windows | `cargo build -p dromon-app`; `scripts/goldens.sh` |
-| S2 `ssh -s host sftp` + russh-sftp over child stdio | ✅ Linux · ⏳ macOS, Windows | `cargo run -p dromon-sftp --example s2_list`; `crates/dromon-sftp/tests/fixture.rs` |
-| S3 Askpass round trip | ✅ Linux (host key, password, wrong password, passphrase, confirm, ProxyJump) · ◐ Windows: named-pipe transport implemented (`\\.\pipe\dromon-askpass-<pid>-<random>`, user-only DACL, client-user check), to be verified by CI tests only (round trips, cancel, bad token, concurrency, `ssh-keygen -y` passphrase via askpass); not yet with ssh's real password/host-key/2FA prompts | `crates/dromon-ssh/tests/askpass_e2e.rs`, `askpass_transport.rs`; helper start ≈ 2–6 ms |
+| S1 Rune pinned build + headless `--snap` | ✅ Linux · builds and tests on macOS, Windows in CI; headless render there non-blocking (passed once on Windows) | `cargo build -p dromon-app`; `scripts/goldens.sh` |
+| S2 `ssh -s host sftp` + russh-sftp over child stdio | ✅ Linux, macOS (Apple's sshd), Windows (inbox `ssh.exe`) in CI | `crates/dromon-sftp/tests/fixture.rs`, `crates/dromon-transfer/tests/io.rs` |
+| S3 Askpass round trip | ✅ Linux, macOS, Windows in CI with each OS's own ssh: host key, password, wrong password, passphrase, keyboard-interactive + TOTP (not macOS: no TOTP PAM there), ProxyJump, publickey,password; confirm prompts Linux/macOS only. Windows: named pipe `\\.\pipe\dromon-askpass-<pid>-<random>`, user-only DACL, client-user check | `crates/dromon-ssh/tests/askpass_e2e.rs`, `askpass_transport.rs`; helper start ≈ 2–6 ms |
 | S4 `copy-data` via russh-sftp | ✅ `RawSftpSession::extended`; 1 GiB in ~1.7 s vs ~15 s streaming | `fixture.rs` |
 | S5 Rune features (menus, clipboard files, drop, fonts, badge, notify) | ◐ fonts + tnum + titlebar done; rest pending | |
 | S6 wake / network-change signal | ⏳ | |
@@ -48,11 +48,15 @@ Tracks where implementation stands against `dromon-plan.md`. Newest first.
   - The UI runs on the real engine (`service/transfers.rs`) in the app; closing the window with transfers running asks "N transfers in progress" (Quit / Cancel, `views/quit.rs`, Rune's `on_close_request`; macOS ⌘Q and logout bypass it).
   - Missing: sizes and dates of both items in the conflict sheet (`ConflictView` has neither); the done flourish and the ring's pulse; ⌘⇧J; drag from a real Finder/Explorer window is untested (headless drags only); Dock badge, taskbar progress and notifications (S5).
 
-- Windows CI can run Linux containers: the `windows-2025` runner has nested virtualisation, so WSL2 (Ubuntu 24.04, `Vampire/setup-wsl`) runs Docker, and Windows reaches it on `127.0.0.1` (Docker API on tcp 2375 via a systemd drop-in, published ports via WSL's localhost forwarding). Probe workflow on branch `probe/windows-ssh`. Plan: point the testkit's `DOCKER_HOST` at it so the Docker tests and the e2e sign-in tests run on Windows too.
+- The sshd fixture tests run on all three OSes in CI, each with its own system OpenSSH client:
+  - Linux: the Docker image (testcontainers).
+  - Windows (`windows` job, after the plain suite): the same image on Docker in WSL2 (`windows-2025` has nested virtualisation; dockerd answers on tcp 2375 via a systemd drop-in, published ports reach Windows through WSL's localhost forwarding). Windows' own `ssh.exe` 9.5 with our named-pipe askpass passes every askpass e2e (host key, password, wrong password, passphrase, keyboard-interactive + TOTP, ProxyJump, publickey,password), SFTP and transfer test. Found on the way: Windows' `ssh-keyscan` gives up on sntrup761 (not used any more); the `docker` CLI over TCP returned no `exec` output (the testkit uses the Docker API); an askpass answer must end in `\n`, not `\r\n`.
+  - macOS (`macos` job, after the plain suite): Apple's own `sshd` through the testkit's native backend (users `dromon_*` via `dscl`, root watchdog cleans up). Everything passes except the 3 TOTP tests, which skip (no TOTP PAM module on macOS). Apple-silicon runners can't run Docker (no nested virtualisation).
+  - S3 (askpass) is therefore verified with real prompts on Linux, macOS and Windows; S1/S2 (build, ssh + SFTP) on all three in CI.
 
 **Next**
-1. Windows CI through WSL2: the Docker tests and real `ssh.exe` prompts (host key, password, passphrase, 2FA) through our named-pipe askpass.
-2. A first run in a real window on a macOS and a Linux desktop (real GPU, real input, Wayland).
+1. A first run in a real window on a macOS and a Linux desktop (real GPU, real input, Wayland), and on Windows.
+2. The app's own e2e tests (`e2e.rs`, `transfers_e2e.rs`) are `cfg(unix)`: run them on Windows too.
 3. M3: file operations (new folder, rename, delete, copy/cut/paste, drag to move), then M4.
 4. Window frames across launches.
 
