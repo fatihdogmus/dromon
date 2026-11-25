@@ -123,7 +123,7 @@ fn filter(s: &App, c: &ConnView, p: Paint) -> El {
         .mr(space::S1)
         .radius(radius::ROW)
         .center_y()
-        .fill(t.hover)
+        .fill(t.field)
         .border(p.hair, if on { t.border_strong } else { t.border_subtle })
         .child(icon(icons::SEARCH.at(p.scale), size::ICON).color(if on { t.text_2 } else { t.text_3 }));
     if !on {

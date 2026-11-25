@@ -368,6 +368,54 @@ pub fn file_ops_light(s: &mut App) {
     s.ui.appearance = Appearance::Light;
 }
 
+fn lit(s: &mut App, scene: fn(&mut App)) {
+    scene(s);
+    s.ui.appearance = Appearance::Light;
+}
+
+/// The sign-in sheet in the light theme.
+pub fn sheet_light(s: &mut App) {
+    lit(s, auth_password);
+}
+
+/// The conflict sheet in the light theme.
+pub fn conflict_light(s: &mut App) {
+    lit(s, transfer_conflict);
+}
+
+/// The delete sheet in the light theme.
+pub fn delete_light(s: &mut App) {
+    lit(s, delete_confirm);
+}
+
+/// The transfers popover in the light theme.
+pub fn transfers_light(s: &mut App) {
+    lit(s, transfers);
+}
+
+/// A failed delete's toast in the light theme.
+pub fn toast_light(s: &mut App) {
+    lit(s, delete_failed);
+}
+
+/// Increased contrast (§6.9): stronger borders, solid fields; the transfers popover open over
+/// the listing with the filter field.
+pub fn contrast(s: &mut App) {
+    transfers(s);
+    s.ui.access.increase_contrast = true;
+}
+
+/// [`contrast`] in the light theme.
+pub fn contrast_light(s: &mut App) {
+    lit(s, contrast);
+}
+
+/// Reduce transparency (§6.5): the reconnecting banner and the fields are opaque.
+pub fn solid(s: &mut App) {
+    reconnecting(s);
+    s.ui.access.reduce_transparency = true;
+}
+
 /// Every file icon in the list, one row per category (folder, plain, code, text, log, image,
 /// audio, video, PDF, archive, binary), to look at the set as the views draw it.
 pub fn icons(s: &mut App) {
@@ -527,4 +575,12 @@ pub const SCENES: &[Scene] = &[
     ("quick-connect-error", quick_connect_error),
     ("add-to-config", add_to_config),
     ("host-menu", host_menu),
+    ("sheet-light", sheet_light),
+    ("conflict-light", conflict_light),
+    ("delete-light", delete_light),
+    ("transfers-light", transfers_light),
+    ("toast-light", toast_light),
+    ("contrast", contrast),
+    ("contrast-light", contrast_light),
+    ("solid", solid),
 ];

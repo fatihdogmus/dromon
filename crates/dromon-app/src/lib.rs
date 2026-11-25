@@ -31,6 +31,8 @@ mod theme;
 mod views;
 
 #[cfg(test)]
+mod ui_access_tests;
+#[cfg(test)]
 mod ui_file_tests;
 #[cfg(test)]
 mod ui_menu_tests;
@@ -113,21 +115,36 @@ fn mock_requested() -> bool {
 /// left to the app. Rune's debug builds and its `tooling` feature take their own flags and hand
 /// the rest on; a release build without it hands on everything, so this works in both.
 fn fixture_arg(args: &[String]) -> Result<Option<String>, String> {
+    value_arg(args, "--fixture", "the path of a fixture JSON file")
+}
+
+/// The value of the app's own `flag VALUE` (or `flag=VALUE`), once at most; `needs` says what
+/// the value is when it's missing.
+fn value_arg(args: &[String], flag: &str, needs: &str) -> Result<Option<String>, String> {
     let mut found = None;
     let mut it = args.iter();
     while let Some(a) = it.next() {
-        let value = if a == "--fixture" {
-            it.next().filter(|v| !v.is_empty()).cloned().ok_or("--fixture needs the path of a fixture JSON file")?
-        } else if let Some(v) = a.strip_prefix("--fixture=") {
+        let value = if a == flag {
+            it.next().filter(|v| !v.is_empty()).cloned().ok_or_else(|| format!("{flag} needs {needs}"))?
+        } else if let Some(v) = a.strip_prefix(flag).and_then(|v| v.strip_prefix('=')) {
             v.to_owned()
         } else {
             continue;
         };
         if found.replace(value).is_some() {
-            return Err("--fixture is given twice".into());
+            return Err(format!("{flag} is given twice"));
         }
     }
     Ok(found)
+}
+
+/// `--accent a|b|c` paints with another accent candidate (§6.3) for comparing them
+/// (`scripts/accents.sh`); without it, the default ([`theme::ACCENT`]).
+fn choose_accent(args: &[String]) -> Result<(), String> {
+    match value_arg(args, "--accent", "a, b or c")? {
+        Some(id) => theme::choose_accent(&id).map(drop),
+        None => Ok(()),
+    }
 }
 
 /// The fixture to run on: `--fixture`'s, else the demo with `DROMON_MOCK=1`, else none (the
@@ -146,6 +163,10 @@ fn chosen_fixture() -> Result<Option<std::sync::Arc<fixture::Fixture>>, String> 
 /// Returns when the app quits.
 pub fn run() {
     rune::set_app_id("dromon");
+    if let Err(msg) = choose_accent(rune::extra_args()) {
+        eprintln!("dromon: {msg}");
+        std::process::exit(2);
+    }
     match chosen_fixture() {
         Ok(Some(fx)) => {
             fixture::activate(fx.clone());

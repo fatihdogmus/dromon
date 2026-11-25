@@ -142,7 +142,7 @@ pub fn popover(s: &App, p: Paint) -> Option<El> {
         .anchored_round()
         .radius(radius::POPOVER)
         .fill(t.raised)
-        .border(p.hair, if t.dark { t.border } else { t.border_subtle })
+        .border(p.hair, t.elevated_edge())
         .shadow(8.0, 24.0, t.shadow)
         .origin(1.0, 0.0)
         .transition(Transition::scale(0.96).combined(Transition::opacity()))
@@ -188,7 +188,7 @@ fn tabs(s: &App, p: Paint) -> El {
         .padding(2.0)
         .gap(2.0)
         .radius(radius::ROW + 1.0)
-        .fill(t.hover)
+        .fill(t.field)
         .child(seg(Tab::Downloads, "tr-tab-downloads", "Downloads"))
         .child(seg(Tab::Uploads, "tr-tab-uploads", "Uploads"));
     row().w_full().padding(space::S3).border_sides([0.0, 0.0, p.hair, 0.0], t.border_subtle).child(control)
@@ -285,7 +285,7 @@ fn job_row(p: Paint, j: &JobView) -> El {
         _ if j.kind == JobKind::Download => (&icons::DOWNLOAD, t.text_2),
         _ => (&icons::UPLOAD, t.text_2),
     };
-    let tile = el().size(28.0, 28.0).radius(radius::ROW).center().fill(t.hover).child(icon(glyph.at(p.scale), size::ICON).color(tint));
+    let tile = el().size(28.0, 28.0).radius(radius::ROW).center().fill(t.field).child(icon(glyph.at(p.scale), size::ICON).color(tint));
 
     let buttons = controls(j).into_iter().map(|(name, label, glyph, cmd)| {
         el().key(format!("tr-{name}-{}", id.0))

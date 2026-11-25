@@ -27,7 +27,7 @@ use rune::{ChromeInsets, Cx, El, Tx, col, row};
 pub use menu::popup as menu_popup;
 
 use crate::state::{Action, App, Effect, FileAction};
-use crate::theme::{self, Tokens};
+use crate::theme::{self, Access, Tokens};
 
 /// What every part needs to paint itself.
 #[derive(Clone, Copy)]
@@ -38,9 +38,27 @@ pub struct Paint {
     /// The device scale, for picking each icon's 1× or 2× body (`IconPair::at`).
     pub scale: f32,
     pub insets: ChromeInsets,
-    /// Reduced motion (`list::reduce_motion`): what moves fades instead, and the refresh
+    /// Reduced motion (`access.reduce_motion`): what moves fades instead, and the refresh
     /// highlight holds, then fades quickly (§6.6).
     pub reduced: bool,
+    /// The OS display preferences in force (reduce motion, reduce transparency, increased
+    /// contrast; [`access`]). `t` already follows them; Rune reduces every transition,
+    /// sequence and loop itself; the list's refresh highlight reads `reduced`.
+    #[allow(dead_code)]
+    pub access: Access,
+}
+
+/// The display preferences for this run of the view: the system's (Rune reads reduce motion and
+/// increased contrast from the OS and re-runs the view when they change) or'd with what the app
+/// forces on (`UiState::access`, for scenes and tests). Rune has no reduce-transparency reading
+/// yet, so that one comes from `UiState::access` only.
+pub fn access(s: &App, cx: &Cx<App>) -> Access {
+    let system = Access {
+        reduce_motion: cx.system_reduced_motion(),
+        reduce_transparency: false,
+        increase_contrast: cx.system_increased_contrast(),
+    };
+    system.or(s.ui.access)
 }
 
 /// Key of the list's scroll viewport, and of the stack of rows in it.
@@ -110,11 +128,19 @@ fn pasted(s: &mut App, content: &rune::ClipboardContent, as_move: bool, tx: &mut
 
 pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let dark = s.ui.appearance.is_dark(cx.system_dark());
-    let t = theme::tokens(dark);
+    let access = access(s, cx);
+    // Rune reduces every transition, spring, sequence and loop of a commit that reduces motion
+    // (§6.6: travel lands at once, opacity cross-fades); a forced preference has to say so.
+    if access.reduce_motion {
+        cx.reduced_motion(true);
+    }
+    let t = theme::tokens_for(dark, access);
     cx.caption_color(t.text_2);
     cx.foreground(t.text);
+    // §6.3: keyboard focus is a 2 pt ring in the accent, just outside the element.
+    cx.focus_ring(2.0, 1.0, t.focus);
     let scale = cx.env().scale;
-    let p = Paint { t, hair: 1.0 / scale, scale, insets: cx.chrome_insets(), reduced: list::reduce_motion(s, cx) };
+    let p = Paint { t, hair: 1.0 / scale, scale, insets: cx.chrome_insets(), reduced: access.reduce_motion, access };
     let main = col()
         .key("main")
         .grow(1.0)

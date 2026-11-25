@@ -389,9 +389,9 @@ The final accent is chosen from three headless-rendered mockups in M4. Ramps are
 
 | Variant | Dark theme | Light theme (darker for text and icon contrast) |
 |---|---|---|
-| A · Spearmint | `#3DDC97` | `#0E9F6E` |
-| B · Teal | `#2DD4BF` | `#0F8F85` |
-| C · Seafoam | `#6EE7C8` | `#13896F` |
+| A · Spearmint | `#3DDC97` | `#008051` (was `#0E9F6E`; darkened in the M4 contrast audit) |
+| B · Teal | `#2DD4BF` | `#007E74` (was `#0F8F85`) |
+| C · Seafoam | `#6EE7C8` | `#007F66` (was `#13896F`) |
 
 **Semantic roles**
 
@@ -406,16 +406,16 @@ The final accent is chosen from three headless-rendered mockups in M4. Ramps are
 | `border` | `rgba(255,255,255,.09)` | `rgba(0,0,0,.09)` | Control outlines |
 | `border-strong` | `rgba(255,255,255,.14)` | `rgba(0,0,0,.14)` | Focused fields |
 | `text` | `#ECEFEE` | `#111515` | Primary text |
-| `text-2` | `#A3ABA9` | `#5B6563` | Secondary (size, date) |
-| `text-3` | `#6B7472` | `#8C9593` | Tertiary, hidden files, placeholders |
+| `text-2` | `#A9B1AF` | `#545E5C` | Secondary (size, date) |
+| `text-3` | `#87908E` | `#717A78` | Tertiary, hidden files, placeholders |
 | `hover` | `rgba(255,255,255,.04)` | `rgba(0,0,0,.035)` | Row and button hover |
 | `press` | `rgba(255,255,255,.07)` | `rgba(0,0,0,.06)` | Pointer-down |
 | `selection` | accent @ 16% | accent @ 12% | Selected rows |
 | `focus` | accent, 2px | accent, 2px | Keyboard focus ring |
-| `danger` | `#FF6B6B` | `#D64545` | Delete, errors |
-| `warning` | `#F5B94A` | `#B7791F` | Reconnecting dot, conflicts |
+| `danger` | `#FF6F6F` | `#C23034` | Delete, errors |
+| `warning` | `#F5B94A` | `#A66900` | Reconnecting dot, conflicts |
 
-Contrast rules: body text 4.5:1, icons and focus rings 3:1, checked for every pair in both themes and every state in M4. Hidden files at `text-3` must still pass 3:1 against `canvas` and `selection`.
+Contrast rules: body text 4.5:1, icons and focus rings 3:1, checked for every pair in both themes and every state in M4. Hidden files at `text-3` must still pass 3:1 against `canvas` and `selection`. The values above are the ones `theme/contrast_tests.rs` passes for all three accents (M4 audit: the `text-2`, `text-3`, `danger`, `warning` and light accent values were nudged in OKLCH lightness only). Known exceptions it lists for a design decision: the idle transfers glyph (quiet on purpose), a danger label on its own pressed danger wash, accent text on its own accent hover wash, and the folder icon on accent fills in light.
 
 ### 6.4 Typography
 - **Interface font: Inter** (variable, bundled with `add_font`), tabular figures (`tnum`) for every number column, the transfer stats and the status bar.

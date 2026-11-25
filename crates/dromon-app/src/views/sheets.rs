@@ -76,7 +76,7 @@ pub(super) fn frame(p: Paint, key: &'static str, title: &str, width: f32) -> El 
         .gap(space::S3)
         .radius(radius::SHEET)
         .fill(t.sheet)
-        .border(p.hair, t.border)
+        .border(p.hair, t.elevated_edge())
         .shadow(16.0, 48.0, t.sheet_shadow)
         .transition(Transition::offset(0.0, -16.0).combined(Transition::opacity()))
         .transition_motion(motion::MOVE, motion::MOVE)
@@ -163,7 +163,7 @@ fn sign_in(s: &App, p: Paint, host: &str, prompt: &Prompt, sent: bool) -> El {
             .px(space::S2)
             .center_y()
             .radius(radius::ROW)
-            .fill(t.hover)
+            .fill(t.field)
             .border(p.hair, if error { t.danger } else { t.border_strong })
             .child(input);
         if error {
@@ -279,7 +279,7 @@ pub fn notices(s: &App, p: Paint) -> Option<El> {
             .center_y()
             .radius(radius::POPOVER)
             .fill(t.sheet)
-            .border(p.hair, t.border)
+            .border(p.hair, t.elevated_edge())
             .shadow(8.0, 24.0, t.shadow)
             .transition(Transition::offset(0.0, 8.0).combined(Transition::opacity()))
             .transition_motion(motion::MOVE, motion::MOVE)

@@ -53,7 +53,7 @@ pub fn toast(toast: &Toast, p: Paint) -> El {
         .center_y()
         .radius(radius::POPOVER)
         .fill(t.sheet)
-        .border(p.hair, if toast.tone == Tone::Error { t.danger.alpha(0.5) } else { t.border })
+        .border(p.hair, if toast.tone == Tone::Error { t.danger.alpha(0.5) } else { t.elevated_edge() })
         .shadow(8.0, 24.0, t.shadow)
         .transition(Transition::offset(0.0, 8.0).combined(Transition::opacity()))
         .transition_motion(motion::MOVE, motion::MOVE)

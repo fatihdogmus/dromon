@@ -31,6 +31,7 @@ bash scripts/repro.sh <issue-number|issue.md>
 Tests stay: unit tests for pure logic, headless UI tests (`ui_tests.rs`, `ui_sheet_tests.rs`), end-to-end tests against the real sshd (`crates/dromon-app/tests/e2e.rs`). Also look at the app:
 
 - `cargo run -p dromon-app -- --fixture <file.json> --scene <name> --snap out.png` renders a state headless; open the PNG. `--tree out.json` dumps the element tree; `--script s.json --strip out.png` replays clicks and keys. The fixture format is `docs/fixtures.md`; without `--fixture`, `DROMON_MOCK=1` uses the built-in demo.
+- `--accent a|b|c` renders with another accent candidate (§6.3; default A, Spearmint); `bash scripts/accents.sh` renders the comparison scenes for all three in both themes to `target/accents/`, with a `compare-<theme>.png` contact sheet each.
 - A visual change re-renders goldens; look at every image that changed before committing it.
 - `DROMON_TRACE=1` names each service event on stderr (never its contents).
 

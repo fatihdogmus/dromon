@@ -4,7 +4,7 @@
 use std::borrow::Cow;
 
 use dromon_core::{ConnStatus, Entry, SortDir, SortKey};
-use rune::{Align, Anim, AnimExt, Color, Curve, Cx, Easing, El, GrowthSpec, ScrollSpec, Transition, Tx, col, el, icon, oklch, row, text};
+use rune::{Align, Anim, AnimExt, Color, Curve, Easing, El, GrowthSpec, ScrollSpec, Transition, Tx, col, el, icon, oklch, row, text};
 
 use super::{LIST, Paint, ROWS, drag, drop, edit, menu, run, states};
 use crate::fmt;
@@ -217,13 +217,6 @@ fn file_row(s: &App, c: &ConnView, i: usize, p: Paint) -> El {
         r = drop::folder_row(r, &e.name).data(target);
     }
     r
-}
-
-/// Whether the list's refresh animations take the reduce-motion path (§6.6): no slide or
-/// collapse, the wash holds and then fades quickly. The one place they read the preference:
-/// today the system's (or a test's, `Runtime::set_system_reduced_motion`) through Rune.
-pub(super) fn reduce_motion(_s: &App, cx: &Cx<App>) -> bool {
-    cx.is_reduced_motion()
 }
 
 /// The mint wash under a row the last refresh brought (§4.5): it shows whole as the row

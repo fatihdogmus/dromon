@@ -72,7 +72,7 @@ pub fn layer(s: &App, p: Paint) -> Option<El> {
         .padding(space::S1)
         .radius(radius::POPOVER)
         .fill(t.raised)
-        .border(p.hair, if t.dark { t.border } else { t.border_subtle })
+        .border(p.hair, t.elevated_edge())
         .shadow(8.0, 24.0, t.shadow)
         .anchored_fit(ANCHOR, Side::Bottom, Align::Start, 2.0)
         .origin(0.0, 0.0)

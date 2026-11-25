@@ -51,11 +51,14 @@ pub use transfers::{DropHover, DropTarget, Tab, Transfers};
 
 use dromon_transfer::{ConflictChoice, JobId};
 
-use crate::theme::{Appearance, size};
+use crate::theme::{Access, Appearance, size};
 
 /// Window-level UI state that isn't about any one connection.
 pub struct UiState {
     pub appearance: Appearance,
+    /// Display preferences forced on over the system's (scenes and tests; later a setting):
+    /// the view ORs them with what the OS asks for (`views::access`).
+    pub access: Access,
     pub sidebar_width: f32,
     /// The ⌘F field's text model; its query is mirrored into the active `ConnView::filter`.
     pub filter_edit: TextEdit,
@@ -76,6 +79,7 @@ impl Default for UiState {
     fn default() -> Self {
         UiState {
             appearance: Appearance::System,
+            access: Access::default(),
             sidebar_width: size::SIDEBAR,
             filter_edit: TextEdit::new(""),
             type_select: TypeSelect::default(),
