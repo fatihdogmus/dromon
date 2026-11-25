@@ -39,7 +39,8 @@ Tracks where implementation stands against `dromon-plan.md`. Newest first.
   - `dromon-transfer::queue`: pure model of jobs, items and files; per-host scheduler (3 files); upload clashes one at a time with apply-to-all; pause/resume/cancel/retry keep progress; a dropped host parks running files.
   - `dromon-transfer::io`: depth-first scans (links to folders, specials and unreadable folders skipped with reasons), pipelined download/upload into part files (16 requests in flight), resume when the source's size and mtime are unchanged, mtime kept both ways, atomic finish (`posix-rename` for Replace, a free name when the target appeared meanwhile). Local Docker: 89–108 % of scp down, 112–124 % up.
   - `service/transfers.rs`: the engine task on the service thread; connection tasks hand it each host's SFTP session on open/reconnect and tell it when the session goes; snapshots to the UI at most every 100 ms.
-  - Open issues: a retry after the source changed fails again (the plan isn't rescanned); a cancelled download restarted at once against a changed source can, rarely, get the cancelled copy's last chunk written into the new part; upload resume trusts that the server applied writes in order (true for OpenSSH); no posix-rename fallback test (the fixture has it); Windows and macOS untested.
+  - A download fetches the source as it is when the copy starts (a retry after "changed on the server" works); only a change during the copy fails it.
+  - Open issues: a cancelled download restarted at once against a changed source can, rarely, get the cancelled copy's last chunk written into the new part; upload resume trusts that the server applied writes in order (true for OpenSSH); no posix-rename fallback test (the fixture has it); Windows and macOS untested.
 
 **Next**
 1. A first run in a real window on a macOS and a Linux desktop (real GPU, real input, Wayland).

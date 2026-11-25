@@ -45,10 +45,10 @@ pub async fn download(
     let name = plan.name();
 
     let reader = sftp.open_read(src).await?;
+    // The file as it is now: a source that changed since the scan (a retry after "changed on
+    // the server") is downloaded afresh, not refused again. Only a change while this copy runs
+    // fails it.
     let now = reader.stat().await?;
-    if now.size < *size {
-        return Err(changed_on_server(&name));
-    }
     let unchanged = now.size == *size && now.mtime == *mtime;
     let offset = match tokio::fs::metadata(&part).await {
         Ok(m) if unchanged && m.is_file() && m.len() <= now.size => m.len(),

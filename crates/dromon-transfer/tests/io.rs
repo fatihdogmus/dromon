@@ -343,14 +343,12 @@ async fn download_resumes_from_the_part_file() {
     download(s, &plan, CopyOptions::default(), |_| {}).await.unwrap();
     assert_eq!(sha_local(&dst), sha_remote(c.fixture, &src));
 
-    // A source that shrank below the planned size is an error, and nothing is renamed.
+    // A source smaller than planned (it changed since the scan, or a retry after "changed on
+    // the server") is downloaded as it is now, not refused again.
     std::fs::remove_file(&dst).unwrap();
-    let grown = FilePlan::Download { src: src.clone(), dst: dst.clone(), size: 9 * MIB, mtime: *mtime };
-    assert_eq!(
-        download(s, &grown, CopyOptions::default(), |_| {}).await,
-        Err(Error::Io("big.bin changed on the server while downloading".into()))
-    );
-    assert!(!dst.exists());
+    let shrunk = FilePlan::Download { src: src.clone(), dst: dst.clone(), size: 9 * MIB, mtime: *mtime };
+    download(s, &shrunk, CopyOptions::default(), |_| {}).await.unwrap();
+    assert_eq!(sha_local(&dst), sha_remote(c.fixture, &src));
     rm_rf(s, &dir).await;
 }
 
