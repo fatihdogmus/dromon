@@ -120,7 +120,7 @@ jobs:
         run: |
           status=0
           cargo test --locked --no-fail-fast -p dromon-testkit -p dromon-ssh -p dromon-sftp -p dromon-transfer || status=1
-          cargo test --locked --no-fail-fast -p dromon-app --test e2e --test transfers_e2e || status=1
+          cargo test --locked --no-fail-fast -p dromon-app --test e2e --test transfers_e2e --test fileops_e2e || status=1
           exit "$status"
       # GitHub's macOS runners may not expose Metal to headless rendering; non-blocking until a
       # first green run proves it.

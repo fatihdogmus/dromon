@@ -8,6 +8,7 @@ pub mod history;
 pub mod hosts;
 pub mod keys;
 pub mod log;
+pub mod ops;
 pub mod prefs;
 pub mod selection;
 pub mod service;
@@ -26,11 +27,12 @@ use rune::TextEdit;
 pub use conn::{ConnView, Filter, ListError, Listing, Nav, Sort};
 pub use hosts::{HostDirectory, Section};
 pub use keys::Shortcut;
+pub use ops::{OpView, Ops};
 pub use prefs::{NoStore, Saved, Store};
 pub use selection::{Selection, TypeSelect};
 #[cfg(test)]
 pub use service::Recorder;
-pub use service::{Backend, Command, ServiceEvent, Silent, TransferCommand};
+pub use service::{Backend, Command, FileOp, FileOpKind, OpId, ServiceEvent, Silent, TransferCommand};
 pub use sheets::{Sheet, Sheets};
 pub use transfers::{DropHover, DropTarget, Tab, Transfers};
 
@@ -95,6 +97,8 @@ pub struct App {
     store: Box<dyn Store>,
     /// The transfer engine's jobs and the popover.
     pub transfers: Transfers,
+    /// New folder, rename and delete operations and how each is going.
+    pub ops: Ops,
     /// Where downloads go (§3.5: Downloads, or the folder set in Settings).
     pub downloads: PathBuf,
     inbox: VecDeque<ServiceEvent>,
@@ -193,6 +197,7 @@ impl App {
             saved: Saved::default(),
             store: Box::new(NoStore),
             transfers: Transfers::default(),
+            ops: Ops::default(),
             // `run` puts the user's real Downloads folder here; scenes and tests keep this.
             downloads: PathBuf::from("Downloads"),
             inbox: VecDeque::new(),
@@ -352,6 +357,9 @@ impl App {
                 }
             }
             ServiceEvent::Transfers(jobs) => self.transfers.set(jobs),
+            ServiceEvent::FileOpProgress { id, host, done, total } => self.ops.progress(id, &host, done, total),
+            ServiceEvent::FileOpDone { id, host } => self.ops.done(id, &host),
+            ServiceEvent::FileOpFailed { id, host, error } => self.ops.failed(id, &host, error),
         }
     }
 

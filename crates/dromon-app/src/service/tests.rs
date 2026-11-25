@@ -20,11 +20,11 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use dromon_core::{ConnStatus, HostId, HostSpec, Prompt, PromptAnswer, PromptKind, RemotePath};
+use dromon_core::{ConnStatus, Error, HostId, HostSpec, Prompt, PromptAnswer, PromptKind, RemotePath};
 use tokio::sync::mpsc;
 
 use super::{Config, Sink, run};
-use crate::state::{Command, ServiceEvent};
+use crate::state::{Command, FileOp, OpId, ServiceEvent};
 
 const SFTP_SERVERS: [&str; 2] = ["/usr/lib/openssh/sftp-server", "/usr/lib/ssh/sftp-server"];
 const WAIT: Duration = Duration::from_secs(20);
@@ -214,6 +214,157 @@ impl Fixture {
     fn saw_since(&self, from: usize, f: impl Fn(&ServiceEvent) -> bool) -> bool {
         self.seen[from..].iter().any(f)
     }
+
+    /// Connects `pw` (answering its password) and returns the start folder.
+    async fn sign_in(&mut self) -> RemotePath {
+        self.send(Command::Connect { host: host("pw") });
+        let p = self.prompt().await;
+        self.answer(&p, "secret");
+        self.until("Opened", |ev| match ev {
+            ServiceEvent::Opened { start, .. } => Some(start.clone()),
+            _ => None,
+        })
+        .await
+    }
+
+    fn op(&self, id: u64, op: FileOp) {
+        self.send(Command::FileOp { id: OpId(id), host: host("pw"), op });
+    }
+
+    /// How operation `id` ended.
+    async fn op_end(&mut self, id: u64) -> Result<(), Error> {
+        let id = OpId(id);
+        self.until("the operation to end", |ev| match ev {
+            ServiceEvent::FileOpDone { id: i, .. } if *i == id => Some(Ok(())),
+            ServiceEvent::FileOpFailed { id: i, error, .. } if *i == id => Some(Err(error.clone())),
+            _ => None,
+        })
+        .await
+    }
+
+    /// True when nothing matching `f` arrives for `quiet`.
+    async fn none_for(&mut self, quiet: Duration, f: impl Fn(&ServiceEvent) -> bool) -> bool {
+        let deadline = tokio::time::Instant::now() + quiet;
+        while let Ok(Some(ev)) = tokio::time::timeout_at(deadline, self.events.recv()).await {
+            let hit = f(&ev);
+            self.seen.push(ev);
+            if hit {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// `rel` under the served root.
+    fn local(&self, rel: &str) -> PathBuf {
+        self.dir.path().join("root").join(rel)
+    }
+}
+
+fn p(s: &str) -> RemotePath {
+    RemotePath::new(s)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn file_ops_run_on_the_session_and_list_the_folder_on_screen_again() {
+    let Some(mut fx) = Fixture::start() else { return };
+    // Not connected (no connection at all): fails at once.
+    fx.op(1, FileOp::Mkdir { path: p("/nope") });
+    assert_eq!(fx.op_end(1).await, Err(Error::ConnectionLost));
+
+    let start = fx.sign_in().await;
+    fx.send(Command::List { host: host("pw"), path: start.clone() });
+    assert_eq!(fx.listing(&start).await, [".hidden", "a.txt", "sub"]);
+
+    // A new folder, then the folder on screen again with it; the same name again is taken.
+    fx.op(2, FileOp::Mkdir { path: start.join("new") });
+    assert_eq!(fx.op_end(2).await, Ok(()));
+    assert_eq!(fx.listing(&start).await, [".hidden", "a.txt", "new", "sub"]);
+    assert!(fx.local("new").is_dir());
+    fx.op(3, FileOp::Mkdir { path: start.join("new") });
+    assert_eq!(fx.op_end(3).await, Err(Error::AlreadyExists(start.join("new"))));
+    fx.op(4, FileOp::Mkdir { path: start.join("missing/new") });
+    assert_eq!(fx.op_end(4).await, Err(Error::NotFound(start.join("missing/new"))));
+
+    // Rename; onto a name that's taken it refuses and nothing changes.
+    fx.op(5, FileOp::Rename { from: start.join("a.txt"), to: start.join("b.txt") });
+    assert_eq!(fx.op_end(5).await, Ok(()));
+    assert_eq!(fx.listing(&start).await, [".hidden", "b.txt", "new", "sub"]);
+    fx.op(6, FileOp::Rename { from: start.join("b.txt"), to: start.join("sub") });
+    assert_eq!(fx.op_end(6).await, Err(Error::AlreadyExists(start.join("sub"))));
+    assert_eq!(std::fs::read_to_string(fx.local("b.txt")).unwrap(), "hello");
+
+    // Delete a tree (a link in it to a folder outside stays a link: its target is kept) and a
+    // folder, with progress; then the folder on screen without them.
+    std::fs::create_dir_all(fx.local("tree/x/y")).unwrap();
+    std::fs::write(fx.local("tree/x/y/z.txt"), "z").unwrap();
+    std::fs::write(fx.local("tree/f.txt"), "f").unwrap();
+    std::os::unix::fs::symlink("../sub", fx.local("tree/link")).unwrap();
+    std::fs::write(fx.local("sub/keep.txt"), "keep").unwrap();
+    let mark = fx.seen.len();
+    fx.op(7, FileOp::Delete { paths: vec![start.join("tree"), start.join("new")] });
+    assert_eq!(fx.op_end(7).await, Ok(()));
+    assert!(fx.saw_since(mark, |ev| matches!(ev, ServiceEvent::FileOpProgress { id: OpId(7), .. })));
+    assert_eq!(fx.listing(&start).await, [".hidden", "b.txt", "sub"]);
+    assert!(fx.local("sub/keep.txt").is_file());
+
+    // Deleting the folder on screen: it's gone, so it isn't listed again.
+    std::fs::create_dir_all(fx.local("gone/inner")).unwrap();
+    let gone = start.join("gone");
+    fx.send(Command::List { host: host("pw"), path: gone.clone() });
+    assert_eq!(fx.listing(&gone).await, ["inner"]);
+    fx.op(8, FileOp::Delete { paths: vec![gone.clone()] });
+    assert_eq!(fx.op_end(8).await, Ok(()));
+    let listed = |ev: &ServiceEvent| matches!(ev, ServiceEvent::ListingPage { path, .. } | ServiceEvent::ListFailed { path, .. } if path.starts_with(&start));
+    assert!(fx.none_for(Duration::from_millis(500), listed).await, "nothing is listed again");
+
+    // Two deletes at once run one after the other, in order.
+    for name in ["d1", "d2"] {
+        std::fs::create_dir_all(fx.local(&format!("{name}/a/b"))).unwrap();
+    }
+    fx.send(Command::List { host: host("pw"), path: start.clone() });
+    fx.listing(&start).await;
+    fx.op(9, FileOp::Delete { paths: vec![start.join("d1")] });
+    fx.op(10, FileOp::Delete { paths: vec![start.join("d2"), start.join("missing")] });
+    let order = fx
+        .until("the first delete to end", |ev| match ev {
+            ServiceEvent::FileOpDone { id, .. } | ServiceEvent::FileOpFailed { id, .. } => Some(*id),
+            _ => None,
+        })
+        .await;
+    assert_eq!(order, OpId(9));
+    assert_eq!(fx.op_end(10).await, Err(Error::NotFound(start.join("missing"))));
+    assert!(fx.local("d2").is_dir(), "the count stops at the missing path before removing anything");
+
+    // Disconnected: fails at once again.
+    fx.send(Command::Disconnect { host: host("pw") });
+    fx.status("pw", ConnStatus::Disconnected).await;
+    fx.op(11, FileOp::Delete { paths: vec![start.join("d2")] });
+    assert_eq!(fx.op_end(11).await, Err(Error::ConnectionLost));
+    assert!(fx.local("d2").is_dir());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_connection_dropped_mid_delete_fails_it_with_connection_lost() {
+    let Some(mut fx) = Fixture::start() else { return };
+    // Enough files that removing them takes a while.
+    for d in 0..40 {
+        let dir = fx.local(&format!("big/d{d:02}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        for f in 0..1000 {
+            std::fs::write(dir.join(format!("f{f:04}")), "").unwrap();
+        }
+    }
+    let start = fx.sign_in().await;
+    fx.op(1, FileOp::Delete { paths: vec![start.join("big")] });
+    // Once removing has begun, the network drops.
+    fx.until("removal progress", |ev| matches!(ev, ServiceEvent::FileOpProgress { total: Some(_), .. }).then_some(())).await;
+    // (Here the whole delete takes about a second; the drop ends it within ~0.1 s.)
+    std::fs::write(fx.dir.path().join("drop"), "").unwrap();
+    assert_eq!(fx.op_end(1).await, Err(Error::ConnectionLost));
+    assert!(fx.local("big").is_dir(), "partly deleted");
+    // The connection comes back by itself; nothing resumes.
+    fx.status("pw", ConnStatus::Ready).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

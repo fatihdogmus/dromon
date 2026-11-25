@@ -9,11 +9,13 @@
 //!
 //! The manager ([`run`]) routes commands and askpass requests to one task per host
 //! (`conn.rs`), whose lifecycle is the pure machine in `lifecycle.rs` and whose prompts go
-//! through `auth.rs`. The password store lives here only: cleared per host on Disconnect, and
+//! through `auth.rs`; its file operations (new folder, rename, delete) run in `fileops.rs`
+//! on its SFTP session. The password store lives here only: cleared per host on Disconnect, and
 //! all of it when the UI goes away.
 
 mod auth;
 mod conn;
+mod fileops;
 pub(crate) mod hosts;
 /// Also drives the fixture backend's connections, so both change status alike.
 pub(crate) mod lifecycle;
@@ -223,6 +225,17 @@ fn dispatch<S: Sink>(cmd: Command, known: &HashMap<HostId, HostSpec>, conns: &mu
         }
         Command::Transfer(cmd) => {
             let _ = shared.engine.send(transfers::EngineMsg::Command(cmd));
+        }
+        Command::FileOp { id, host, op } => {
+            // The host's task runs it; a host without one isn't connected.
+            let cmd = ConnCmd::FileOp(id, op);
+            let unsent = match conns.get(&host) {
+                Some(c) => c.cmds.send(cmd).is_err(),
+                None => true,
+            };
+            if unsent {
+                sink.emit(ServiceEvent::FileOpFailed { id, host, error: dromon_core::Error::ConnectionLost });
+            }
         }
     }
 }

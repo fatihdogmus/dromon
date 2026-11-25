@@ -22,10 +22,11 @@ use tokio::time::Instant;
 use zeroize::Zeroizing;
 
 use super::auth::{self, AttemptPrompts, PromptIds, Routed};
+use super::fileops::{FileOps, Finished};
 use super::lifecycle::{Effect, Event, Lifecycle, Phase, step};
 use super::transfers::EngineMsg;
 use super::{Config, Sink};
-use crate::state::ServiceEvent;
+use crate::state::{FileOp, OpId, ServiceEvent};
 
 /// Entries per listing page (§4.4).
 pub const PAGE: usize = 512;
@@ -40,6 +41,7 @@ pub enum ConnCmd {
     List(RemotePath),
     Answer(PromptId, PromptAnswer),
     Disconnect,
+    FileOp(OpId, FileOp),
 }
 
 /// What the connection tasks share: configuration, the askpass endpoint, the password store,
@@ -63,7 +65,18 @@ pub struct ConnHandle {
 pub fn start<S: Sink>(spec: HostSpec, shared: Shared, sink: S) -> ConnHandle {
     let (cmds, cmd_rx) = mpsc::unbounded_channel();
     let (asks, ask_rx) = mpsc::unbounded_channel();
-    let task = Task { host: spec.id.clone(), spec, shared, sink, life: Lifecycle::default(), session: None, retry: None, path: None };
+    let task = Task {
+        host: spec.id.clone(),
+        spec,
+        shared,
+        sink,
+        life: Lifecycle::default(),
+        session: None,
+        retry: None,
+        path: None,
+        ops: FileOps::default(),
+        epoch: 0,
+    };
     tokio::spawn(task.run(cmd_rx, ask_rx));
     ConnHandle { cmds, asks }
 }
@@ -257,6 +270,7 @@ enum Input {
     Ask(AskpassRequest),
     Session(SessionEvent),
     Retry(u32),
+    OpEnded(Finished),
 }
 
 struct Task<S: Sink> {
@@ -267,8 +281,14 @@ struct Task<S: Sink> {
     life: Lifecycle,
     session: Option<Session>,
     retry: Option<(u32, Instant)>,
-    /// The folder on screen, listed again after a reconnect.
+    /// The folder on screen, listed again after a reconnect and after a file operation
+    /// changed it.
     path: Option<RemotePath>,
+    /// New folder, rename and delete, running on the session (`fileops.rs`).
+    ops: FileOps,
+    /// Counts SFTP sessions that came up: an operation's lost connection only ends the
+    /// session it ran on.
+    epoch: u64,
 }
 
 impl<S: Sink> Task<S> {
@@ -282,6 +302,7 @@ impl<S: Sink> Task<S> {
                 Some(req) = asks.recv() => Input::Ask(req),
                 ev = session_next(&mut self.session) => Input::Session(ev),
                 attempt = retry_due(&self.retry) => Input::Retry(attempt),
+                ended = self.ops.next() => Input::OpEnded(ended),
             };
             match input {
                 Input::Cmd(cmd) => self.on_command(cmd).await,
@@ -291,6 +312,7 @@ impl<S: Sink> Task<S> {
                     self.retry = None;
                     self.drive(Event::RetryDue { attempt }, None).await;
                 }
+                Input::OpEnded(ended) => self.on_op_ended(ended).await,
             }
         }
         // The app is quitting: the session drops, killing ssh.
@@ -311,10 +333,50 @@ impl<S: Sink> Task<S> {
         }
     }
 
-    /// Tells the transfer engine a session it had is gone (`s` is being dropped).
-    fn session_gone(&self, s: &Session) {
+    /// Tells the transfer engine a session it had is gone (`s` is being dropped), and fails
+    /// the deletes waiting for it.
+    fn session_gone(&mut self, s: &Session) {
         if s.sftp.is_some() {
             let _ = self.shared.engine.send(EngineMsg::HostDown(self.host.clone()));
+            self.ops.fail_queued(&self.host, &self.sink);
+        }
+    }
+
+    /// The live SFTP session, if any.
+    fn sftp(&self) -> Option<Sftp> {
+        self.session.as_ref().and_then(|s| s.sftp.clone())
+    }
+
+    /// Runs a file operation on the live session; without one it fails at once.
+    fn file_op(&mut self, id: OpId, op: FileOp) {
+        match self.sftp() {
+            Some(sftp) => self.ops.start(id, op, &sftp, self.epoch, &self.host, &self.sink),
+            None => self.emit(ServiceEvent::FileOpFailed { id, host: self.host.clone(), error: Error::ConnectionLost }),
+        }
+    }
+
+    /// A file operation ended: says so, lists the folder on screen again if the operation
+    /// changed it (never a folder it removed), and starts the next delete waiting. A lost
+    /// connection on the session still up ends that session, as a listing's does.
+    async fn on_op_ended(&mut self, ended: Finished) {
+        let Finished { id, op, epoch, result } = ended;
+        let host = self.host.clone();
+        let ok = result.is_ok();
+        let lost = matches!(result, Err(Error::ConnectionLost));
+        match result {
+            Ok(()) => self.emit(ServiceEvent::FileOpDone { id, host: host.clone() }),
+            Err(error) => self.emit(ServiceEvent::FileOpFailed { id, host: host.clone(), error }),
+        }
+        let drop_session = lost && epoch == self.epoch && self.sftp().is_some();
+        if drop_session {
+            self.drive(Event::Lost, None).await;
+        }
+        if matches!(op, FileOp::Delete { .. }) {
+            let sftp = self.sftp();
+            self.ops.delete_ended(sftp.as_ref(), self.epoch, &host, &self.sink);
+        }
+        if let Some(path) = self.path.clone().filter(|p| !drop_session && op.relists(p, ok)) {
+            self.list(path);
         }
     }
 
@@ -345,6 +407,7 @@ impl<S: Sink> Task<S> {
                 }
             }
             ConnCmd::Disconnect => self.drive(Event::Disconnect, None).await,
+            ConnCmd::FileOp(id, op) => self.file_op(id, op),
         }
     }
 
@@ -383,6 +446,7 @@ impl<S: Sink> Task<S> {
                 s.handshake = None;
                 s.sftp = Some(sftp);
                 s.home = home;
+                self.epoch += 1;
                 self.log("SFTP session started.");
                 self.drive(Event::Up, None).await;
             }

@@ -27,6 +27,83 @@ pub enum Command {
     AnswerPrompt { id: PromptId, answer: PromptAnswer },
     /// Something for the transfer engine; answered with `Transfers` snapshots.
     Transfer(TransferCommand),
+    /// A one-shot file operation on the host's session; answered with `FileOpProgress`
+    /// (deletes), then `FileOpDone` or `FileOpFailed`, then a fresh listing of the folder on
+    /// screen when the operation changed it ([`FileOp::relists`]). A host that isn't connected
+    /// answers `FileOpFailed` with [`Error::ConnectionLost`] at once.
+    FileOp { id: OpId, host: HostId, op: FileOp },
+}
+
+/// Identifies one file operation, chosen by the UI (unique per session).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct OpId(pub u64);
+
+/// A simple file operation (§5 M3): new folder, rename, delete.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FileOp {
+    /// Create one folder (its parent must exist).
+    Mkdir { path: RemotePath },
+    /// Rename an item within its folder (`to` is a sibling of `from`); fails with AlreadyExists if `to` exists.
+    Rename { from: RemotePath, to: RemotePath },
+    /// Delete items; folders recursively. Symlinks are removed themselves, never followed.
+    Delete { paths: Vec<RemotePath> },
+}
+
+/// What kind of [`FileOp`] it is, without its paths (for trace lines and the ops list).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FileOpKind {
+    Mkdir,
+    Rename,
+    Delete,
+}
+
+impl FileOpKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            FileOpKind::Mkdir => "Mkdir",
+            FileOpKind::Rename => "Rename",
+            FileOpKind::Delete => "Delete",
+        }
+    }
+}
+
+impl FileOp {
+    pub fn kind(&self) -> FileOpKind {
+        match self {
+            FileOp::Mkdir { .. } => FileOpKind::Mkdir,
+            FileOp::Rename { .. } => FileOpKind::Rename,
+            FileOp::Delete { .. } => FileOpKind::Delete,
+        }
+    }
+
+    /// Every path the operation changes.
+    pub fn affected(&self) -> Vec<&RemotePath> {
+        match self {
+            FileOp::Mkdir { path } => vec![path],
+            FileOp::Rename { from, to } => vec![from, to],
+            FileOp::Delete { paths } => paths.iter().collect(),
+        }
+    }
+
+    /// The paths that no longer exist once the operation succeeded.
+    pub fn removed(&self) -> Vec<&RemotePath> {
+        match self {
+            FileOp::Mkdir { .. } => Vec::new(),
+            FileOp::Rename { from, to } if from != to => vec![from],
+            FileOp::Rename { .. } => Vec::new(),
+            FileOp::Delete { paths } => paths.iter().collect(),
+        }
+    }
+
+    /// Whether the folder on screen, `on_screen`, is listed again after the operation ended
+    /// (`ok`: it succeeded). It is when it's the parent of an affected path, or affected itself
+    /// (or lies inside one) — except after a success that removed it (it, or an ancestor, was
+    /// deleted or renamed away): a path that's gone isn't listed, and the UI moves away from it.
+    pub fn relists(&self, on_screen: &RemotePath, ok: bool) -> bool {
+        let touched = self.affected().iter().any(|a| a.parent().as_ref() == Some(on_screen) || on_screen.starts_with(a));
+        let gone = ok && self.removed().iter().any(|r| on_screen.starts_with(r));
+        touched && !gone
+    }
 }
 
 /// What the UI asks of the transfer engine (§4.6). Unknown or finished job ids are ignored.
@@ -68,6 +145,14 @@ pub enum ServiceEvent {
     /// Every transfer job, newest first: replaces the list. Sent when something changed, at
     /// most about ten times a second while bytes move.
     Transfers(Vec<JobView>),
+    /// How far a delete got, at most about ten times a second: while it counts what's there,
+    /// `done` is the entries found so far and `total` is `None`; while it removes them, `done`
+    /// is the entries removed and `total` all of them.
+    FileOpProgress { id: OpId, host: HostId, done: u64, total: Option<u64> },
+    /// The operation succeeded.
+    FileOpDone { id: OpId, host: HostId },
+    /// The operation stopped at its first error (a delete may have removed some entries).
+    FileOpFailed { id: OpId, host: HostId, error: Error },
 }
 
 /// Set to `1` to have [`super::App::apply`] write one [`trace_line`] per event to stderr.
@@ -109,6 +194,9 @@ pub fn trace_line(ev: &ServiceEvent) -> String {
             let done = jobs.iter().filter(|j| j.state == TaskState::Done).count();
             format!("Transfers jobs={} active={active} done={done}", jobs.len())
         }
+        ServiceEvent::FileOpProgress { id, host, .. } => format!("FileOpProgress host={host} id={}", id.0),
+        ServiceEvent::FileOpDone { id, host } => format!("FileOpDone host={host} id={}", id.0),
+        ServiceEvent::FileOpFailed { id, host, .. } => format!("FileOpFailed host={host} id={}", id.0),
     }
 }
 
@@ -192,5 +280,57 @@ mod tests {
                 "Log host=prod",
             ]
         );
+    }
+
+    #[test]
+    fn file_op_trace_lines_name_the_kind_host_and_id_only() {
+        let host = HostId("prod".into());
+        let events = [
+            ServiceEvent::FileOpProgress { id: OpId(3), host: host.clone(), done: 12, total: Some(40) },
+            ServiceEvent::FileOpDone { id: OpId(3), host: host.clone() },
+            ServiceEvent::FileOpFailed { id: OpId(4), host, error: Error::PermissionDenied(RemotePath::new("/secret/dir")) },
+        ];
+        let lines: Vec<String> = events.iter().map(trace_line).collect();
+        assert_eq!(lines, ["FileOpProgress host=prod id=3", "FileOpDone host=prod id=3", "FileOpFailed host=prod id=4"]);
+    }
+
+    fn p(s: &str) -> RemotePath {
+        RemotePath::new(s)
+    }
+
+    #[test]
+    fn file_ops_name_what_they_change() {
+        let mk = FileOp::Mkdir { path: p("/a/new") };
+        assert_eq!((mk.kind(), mk.affected(), mk.removed()), (FileOpKind::Mkdir, vec![&p("/a/new")], vec![]));
+        let mv = FileOp::Rename { from: p("/a/x"), to: p("/a/y") };
+        assert_eq!((mv.kind(), mv.affected(), mv.removed()), (FileOpKind::Rename, vec![&p("/a/x"), &p("/a/y")], vec![&p("/a/x")]));
+        assert!(FileOp::Rename { from: p("/a/x"), to: p("/a/x") }.removed().is_empty());
+        let rm = FileOp::Delete { paths: vec![p("/a/x"), p("/b")] };
+        assert_eq!((rm.kind(), rm.removed()), (FileOpKind::Delete, vec![&p("/a/x"), &p("/b")]));
+        assert_eq!(FileOpKind::Delete.name(), "Delete");
+    }
+
+    #[test]
+    fn the_folder_on_screen_is_listed_again_when_it_changed_and_still_exists() {
+        let rm = FileOp::Delete { paths: vec![p("/srv/www/old"), p("/srv/logs")] };
+        // The parent of a deleted item: listed again, whether or not the delete got through.
+        assert!(rm.relists(&p("/srv/www"), true) && rm.relists(&p("/srv/www"), false));
+        assert!(rm.relists(&p("/srv"), true));
+        // Unrelated folders aren't.
+        assert!(!rm.relists(&p("/srv/www/new"), true) && !rm.relists(&p("/"), true));
+        // The deleted folder itself, or one inside it: gone after a success, so not listed;
+        // after a failure it may still be there, and is.
+        assert!(!rm.relists(&p("/srv/www/old"), true) && !rm.relists(&p("/srv/www/old/a/b"), true));
+        assert!(rm.relists(&p("/srv/www/old"), false) && rm.relists(&p("/srv/logs/x"), false));
+
+        let mk = FileOp::Mkdir { path: p("/home/u/new") };
+        assert!(mk.relists(&p("/home/u"), true) && mk.relists(&p("/home/u"), false));
+        assert!(!mk.relists(&p("/home"), true));
+
+        let mv = FileOp::Rename { from: p("/home/u/a"), to: p("/home/u/b") };
+        assert!(mv.relists(&p("/home/u"), true));
+        // Renaming the folder on screen: its old path is gone.
+        assert!(!mv.relists(&p("/home/u/a"), true) && mv.relists(&p("/home/u/a"), false));
+        assert!(!mv.relists(&p("/home/u/c"), true));
     }
 }

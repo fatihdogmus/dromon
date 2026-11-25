@@ -259,6 +259,94 @@ async fn mkdir_rename_remove() {
     rm_rf(s, &dir).await;
 }
 
+/// Runs `script` on the server as root (`sh -c`).
+fn root_sh(c: &Conn, script: &str) {
+    c.fixture.exec(&["sh", "-c", script]).unwrap_or_else(|e| panic!("{script}: {e}"));
+}
+
+async fn put(s: &Sftp, path: &RemotePath, data: &[u8]) {
+    write_pipelined(s, path, WriteMode::Truncate, 0, data).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn remove_all_deletes_nested_folders_but_never_follows_links() {
+    let Some(c) = connect("remove_all_deletes_nested_folders_but_never_follows_links").await else { return };
+    let s = &c.sftp;
+    let dir = scratch(&c, "rmall").await;
+    let target = dir.join("target");
+    s.mkdir(&target).await.unwrap();
+    put(s, &target.join("keep.txt"), b"keep").await;
+    let tree = dir.join("tree");
+    for d in ["", "sub", "sub/deeper", "empty"] {
+        s.mkdir(&tree.join(d)).await.unwrap();
+    }
+    for f in ["a.txt", "sub/b.txt", "sub/deeper/c.txt"] {
+        put(s, &tree.join(f), b"x").await;
+    }
+    // Links (made as root; removing one only needs the folder to be writable): to a folder
+    // outside the tree, to a file inside it, and to nothing.
+    let t = tree.as_str();
+    root_sh(&c, &format!("ln -s ../target '{t}/link-dir' && ln -s a.txt '{t}/link-file' && ln -s nowhere '{t}/dangling'"));
+
+    let mut calls = Vec::new();
+    let removed = s.remove_all(&tree, |done, total| calls.push((done, total))).await.unwrap();
+    // tree, a.txt, sub, empty, 3 links, b.txt, deeper, c.txt.
+    assert_eq!(removed, 10);
+    assert!(!s.exists(&tree).await.unwrap());
+    assert_eq!(s.list(&target).await.unwrap().len(), 1, "the link's target stays");
+    assert_eq!(s.stat(&target.join("keep.txt")).await.unwrap().size, 4);
+
+    // Counting first (found so far, no total), then one call per removal up to the total.
+    let split = calls.iter().position(|(_, t)| t.is_some()).expect("removal progress");
+    let (counting, removing) = calls.split_at(split);
+    assert!(!counting.is_empty() && counting.iter().all(|(_, t)| t.is_none()));
+    assert!(counting.windows(2).all(|w| w[0].0 <= w[1].0), "{counting:?}");
+    assert_eq!(counting.last(), Some(&(10, None)));
+    let want: Vec<_> = (1..=10).map(|n| (n, Some(10))).collect();
+    assert_eq!(removing, &want[..]);
+
+    // Several paths at once: a file, a link to a folder, and one listed twice (inside another).
+    let other = dir.join("other");
+    s.mkdir(&other).await.unwrap();
+    put(s, &other.join("f.txt"), b"f").await;
+    let lone = dir.join("lone.txt");
+    put(s, &lone, b"lone").await;
+    root_sh(&c, &format!("ln -s target '{}/link-again'", dir.as_str()));
+    let paths = [other.join("f.txt"), lone, dir.join("link-again"), other];
+    assert_eq!(s.remove_all_of(&paths, |_, _| {}).await, Ok(4));
+    assert_eq!(s.list(&dir).await.unwrap().iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["target"]);
+    assert_eq!(s.list(&target).await.unwrap().len(), 1);
+
+    let missing = dir.join("missing");
+    assert_eq!(s.remove_all(&missing, |_, _| {}).await, Err(Error::NotFound(missing)));
+    rm_rf(s, &dir).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn remove_all_stops_at_an_unreadable_folder_before_removing_anything() {
+    let Some(c) = connect("remove_all_stops_at_an_unreadable_folder_before_removing_anything").await else { return };
+    let s = &c.sftp;
+    let dir = scratch(&c, "rmlocked").await;
+    let tree = dir.join("tree");
+    let locked = tree.join("locked");
+    s.mkdir(&tree).await.unwrap();
+    s.mkdir(&locked).await.unwrap();
+    put(s, &tree.join("f.txt"), b"f").await;
+    put(s, &locked.join("inner.txt"), b"inner").await;
+    root_sh(&c, &format!("chmod 000 '{}'", locked.as_str()));
+
+    let mut removals = 0;
+    let res = s.remove_all(&tree, |_, total| removals += u32::from(total.is_some())).await;
+    assert_eq!(res, Err(Error::PermissionDenied(locked.clone())));
+    assert_eq!(removals, 0, "the count stops first");
+    assert_eq!(s.list(&tree).await.unwrap().len(), 2, "nothing was removed");
+
+    root_sh(&c, &format!("chmod 755 '{}'", locked.as_str()));
+    assert_eq!(s.remove_all(&tree, |_, _| {}).await, Ok(4));
+    assert!(!s.exists(&tree).await.unwrap());
+    rm_rf(s, &dir).await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn write_read_round_trip_and_mtime() {
     let Some(c) = connect("write_read_round_trip_and_mtime").await else { return };

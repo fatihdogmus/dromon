@@ -7,9 +7,11 @@ mod diff;
 mod error;
 mod file;
 mod poll;
+mod remove;
 mod session;
 
 pub use copy_data::COPY_DATA_CHUNK;
+pub use remove::REMOVES_IN_FLIGHT;
 pub use diff::{ListingDiff, diff};
 pub use file::{PendingRead, RemoteFile, WriteAck, WriteMode};
 pub use poll::{PollSchedule, Visibility, base_interval};

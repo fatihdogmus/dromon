@@ -12,7 +12,8 @@
 //! Answers are compared with the fixture's and wiped; nothing logs them.
 //!
 //! Transfer commands go to [`Engine`] (`fixture/transfers.rs`), whose listings (the tree plus
-//! finished uploads) are the ones this backend sends.
+//! finished uploads) are the ones this backend sends, with what file operations changed in them
+//! on top ([`Changes`]).
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
@@ -23,9 +24,9 @@ use secrecy::ExposeSecret;
 use zeroize::Zeroize;
 
 use super::transfers::Engine;
-use super::{Fixture, Step};
+use super::{Changes, Fixture, Step};
 use crate::service::lifecycle::{self, Event, Lifecycle, Phase};
-use crate::state::{Backend, Command, ServiceEvent, TransferCommand};
+use crate::state::{Backend, Command, FileOp, OpId, ServiceEvent, TransferCommand};
 
 /// Entries per listing page, as the service pages them (§4.4).
 pub const PAGE: usize = 512;
@@ -42,6 +43,8 @@ pub struct FixtureBackend {
     last_prompt: u64,
     /// Downloads and uploads (`fixture::transfers`); it also owns what uploads add to listings.
     transfers: Engine,
+    /// What new folders, renames and deletes changed, over the engine's listings.
+    changes: Changes,
 }
 
 #[derive(Default)]
@@ -102,14 +105,49 @@ fn first_line(text: &str) -> &str {
 impl FixtureBackend {
     pub fn new(fixture: Arc<Fixture>) -> Self {
         let transfers = Engine::new(fixture.clone());
-        FixtureBackend { fixture, conns: BTreeMap::new(), store: PasswordStore::new(), last_prompt: 0, transfers }
+        FixtureBackend { fixture, conns: BTreeMap::new(), store: PasswordStore::new(), last_prompt: 0, transfers, changes: Changes::default() }
+    }
+
+    /// Whether `host`'s session is up (ready, its "ssh" running).
+    fn up(&self, host: &HostId) -> bool {
+        self.conns.get(host).is_some_and(|c| c.life.phase == Phase::Ready && c.attempt.is_some())
+    }
+
+    /// A file operation, carried out at once against the trees: a delete's one progress event,
+    /// then Done or Failed, then the folder on screen again if the operation changed it (as
+    /// the service does). Not connected: `ConnectionLost` at once. A folder in the way whose
+    /// listing loses the connection fails it with `ConnectionLost` and drops the connection.
+    fn file_op(&mut self, id: OpId, host: HostId, op: FileOp, out: &mut Vec<ServiceEvent>) {
+        if !self.up(&host) {
+            out.push(ServiceEvent::FileOpFailed { id, host, error: Error::ConnectionLost });
+            return;
+        }
+        let (engine, changes) = (&self.transfers, &mut self.changes);
+        let result = match &op {
+            FileOp::Mkdir { path } => changes.mkdir(engine, &host, path, self.fixture.now),
+            FileOp::Rename { from, to } => changes.rename(engine, &host, from, to),
+            FileOp::Delete { paths } => changes.delete(engine, &host, paths).map(|n| {
+                out.push(ServiceEvent::FileOpProgress { id, host: host.clone(), done: n, total: Some(n) });
+            }),
+        };
+        let ok = result.is_ok();
+        match result {
+            Ok(()) => out.push(ServiceEvent::FileOpDone { id, host: host.clone() }),
+            Err(Error::ConnectionLost) => {
+                out.push(ServiceEvent::FileOpFailed { id, host: host.clone(), error: Error::ConnectionLost });
+                return self.drive(&host, Work::Life(Event::Lost), out);
+            }
+            Err(error) => out.push(ServiceEvent::FileOpFailed { id, host: host.clone(), error }),
+        }
+        if let Some(path) = self.conns.get(&host).and_then(|c| c.path.clone()).filter(|p| op.relists(p, ok)) {
+            self.list_now(&host, path, out);
+        }
     }
 
     /// A transfer command: the engine runs it to rest, and a folder on screen that a finished
     /// upload changed is listed again (as the service's poll would notice).
     fn transfer(&mut self, cmd: TransferCommand, out: &mut Vec<ServiceEvent>) {
-        let up: BTreeSet<HostId> =
-            self.conns.iter().filter(|(_, c)| c.life.phase == Phase::Ready && c.attempt.is_some()).map(|(h, _)| h.clone()).collect();
+        let up: BTreeSet<HostId> = self.conns.keys().filter(|h| self.up(h)).cloned().collect();
         let (snapshot, touched) = self.transfers.command(cmd, &up);
         out.push(snapshot);
         for (host, folder) in touched {
@@ -392,7 +430,7 @@ impl FixtureBackend {
     }
 
     fn list_now(&mut self, host: &HostId, path: RemotePath, out: &mut Vec<ServiceEvent>) {
-        match self.transfers.list(host, &path) {
+        match self.changes.list(&self.transfers, host, &path) {
             Ok(entries) => out.extend(pages(host, &path, entries)),
             Err(Error::ConnectionLost) => self.drive(host, Work::Life(Event::Lost), out),
             Err(error) => out.push(ServiceEvent::ListFailed { host: host.clone(), path, error }),
@@ -450,6 +488,7 @@ impl Backend for FixtureBackend {
                 None => wipe(answer),
             },
             Command::Transfer(cmd) => self.transfer(cmd, &mut out),
+            Command::FileOp { id, host, op } => self.file_op(id, host, op, &mut out),
         }
         out
     }
