@@ -537,7 +537,9 @@ fn keyboard_interactive_password_then_code() {
 #[test]
 fn encrypted_key_passphrase() {
     let Some(mut h) = Harness::new("encrypted_key_passphrase") else { return };
-    let key = std::fs::canonicalize(h.dir.path().join("id_ed25519_enc")).unwrap().to_str().unwrap().to_owned();
+    // The path as the ssh config names it (`write_ssh_config`): ssh prints it as given. Not
+    // canonicalized: on macOS the temp folder is under /var, a link to /private/var.
+    let key = h.dir.path().join("id_ed25519_enc").to_str().unwrap().to_owned();
     h.connect("fx-enc");
     h.trust_host_key("fx-enc");
     let (kind, text, _) = h.wait_for_sheet("Sign in to fx-enc", |k| matches!(k, PromptKind::Passphrase { .. }));
