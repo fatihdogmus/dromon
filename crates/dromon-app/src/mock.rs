@@ -76,6 +76,8 @@ impl Backend for MockService {
                 Err(error) => vec![ServiceEvent::ListFailed { host, path, error }],
             },
             Command::Disconnect { host } => vec![ServiceEvent::Status { host, status: ConnStatus::Disconnected }],
+            // The mock never asks anything, so there is nothing to answer.
+            Command::AnswerPrompt { .. } => Vec::new(),
         }
     }
 }

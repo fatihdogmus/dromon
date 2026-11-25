@@ -102,6 +102,33 @@ pub fn denied(p: Paint, c: &ConnView) -> El {
         .child(sub)
 }
 
+/// The connection failed (§3.4): why, in ssh's words or ours, with Try again and Show log.
+pub fn failed(s: &App, c: &ConnView, msg: &str, p: Paint) -> El {
+    let host = s.hosts.get(&c.host).map_or(c.host.as_str(), |h| h.display_name()).to_owned();
+    let actions = row()
+        .gap(space::S2)
+        .child(button(p, "state-retry", &icons::SERVER, "Try again", Action::SelectHost(c.host.clone())))
+        .child(button(p, "state-show-log", &icons::FILE_TEXT, "Show log", Action::OpenLog));
+    let sub = col()
+        .center()
+        .gap(space::S2)
+        .max_w(520.0)
+        .child(text(msg.to_owned()).key("state-reason").font(type_::BODY).color(p.t.text_2).wrap())
+        .child(actions);
+    centred("failed", p, &format!("Couldn't connect to {host}"), Some(sub))
+}
+
+/// The user disconnected: offer to connect again.
+pub fn disconnected(s: &App, c: &ConnView, p: Paint) -> El {
+    let host = s.hosts.get(&c.host).map_or(c.host.as_str(), |h| h.display_name()).to_owned();
+    let sub = col()
+        .center()
+        .gap(space::S2)
+        .child(text("Passwords for it were forgotten.").font(type_::BODY).color(p.t.text_2))
+        .child(button(p, "state-connect", &icons::SERVER, "Connect", Action::SelectHost(c.host.clone())));
+    centred("disconnected", p, &format!("Disconnected from {host}"), Some(sub))
+}
+
 /// Twelve rows of placeholder bars, pulsing gently in opacity (no shimmer sweep).
 pub fn skeleton(p: Paint) -> El {
     const NAMES: [f32; 12] = [128.0, 184.0, 96.0, 152.0, 220.0, 112.0, 168.0, 140.0, 204.0, 88.0, 176.0, 120.0];
@@ -143,7 +170,8 @@ pub fn banner(s: &App, p: Paint) -> Option<El> {
     let host = s.hosts.get(&c.host).map_or(c.host.as_str(), |h| h.display_name()).to_owned();
     let (headline, detail, sign_in) = match c.status {
         ConnStatus::Reconnecting { attempt } => (format!("Reconnecting to {host}…"), format!("Attempt {attempt}"), false),
-        ConnStatus::NeedsInput => (format!("Reconnecting to {host} needs you to sign in"), String::new(), true),
+        // Signing in the first time is the sheet's business; the banner is for reconnects.
+        ConnStatus::NeedsInput if c.opened => (format!("Reconnecting to {host} needs you to sign in"), String::new(), true),
         _ => return None,
     };
     let mut b = row()

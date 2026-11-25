@@ -2,6 +2,7 @@
 //! `&App` and a [`Paint`]; handlers turn input into `state::Action`s and run them with [`run`].
 
 mod list;
+mod sheets;
 mod sidebar;
 mod states;
 mod status;
@@ -58,15 +59,27 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         .child(toolbar::view(s, p))
         .children(states::banner(s, p))
         .child(content(s, p))
-        .child(status::view(s, p));
-    row().key("window").w_full().h_full().fill(t.canvas).child(sidebar::view(s, p)).child(main)
+        .child(status::view(s, p))
+        .children(sheets::notices(s, p));
+    row()
+        .key("window")
+        .w_full()
+        .h_full()
+        .fill(t.canvas)
+        .child(sidebar::view(s, p))
+        .child(main)
+        .children(sheets::layer(s, p))
 }
 
 /// The list area: whichever state the active connection is in.
 fn content(s: &App, p: Paint) -> El {
     let body = match s.conn() {
         None => states::welcome(p),
-        Some(c) => list::view(s, c, p),
+        Some(c) => match &c.status {
+            dromon_core::ConnStatus::Failed(msg) => states::failed(s, c, msg, p),
+            dromon_core::ConnStatus::Disconnected => states::disconnected(s, c, p),
+            _ => list::view(s, c, p),
+        },
     };
     col().key("content").w_full().grow(1.0).min_h(0.0).fill(p.t.canvas).child(body)
 }

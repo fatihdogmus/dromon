@@ -1082,7 +1082,10 @@ dependencies = [
  "dromon-ssh",
  "dromon-transfer",
  "rune",
+ "secrecy",
+ "tempfile",
  "tokio",
+ "zeroize",
 ]
 
 [[package]]

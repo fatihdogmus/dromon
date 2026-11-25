@@ -7,22 +7,27 @@ pub mod conn;
 pub mod history;
 pub mod hosts;
 pub mod keys;
+pub mod log;
 pub mod selection;
 pub mod service;
+pub mod sheets;
 
 #[cfg(test)]
 mod tests;
 
 use std::collections::{BTreeMap, VecDeque};
 
-use dromon_core::{ConnStatus, HostId, RemotePath, SortKey};
+use dromon_core::{ConnStatus, HostId, HostSource, RemotePath, SortKey};
 use rune::TextEdit;
 
 pub use conn::{ConnView, Filter, ListError, Listing, Nav, Sort};
 pub use hosts::{HostDirectory, Section};
 pub use keys::Shortcut;
 pub use selection::{Selection, TypeSelect};
+#[cfg(test)]
+pub use service::Recorder;
 pub use service::{Backend, Command, ServiceEvent, Silent};
+pub use sheets::{Sheet, Sheets};
 
 use crate::theme::{Appearance, size};
 
@@ -35,6 +40,8 @@ pub struct UiState {
     pub type_select: TypeSelect,
     /// A row to bring to the middle of the list once it mounts (a scene's scroll position).
     pub center_on_mount: Option<String>,
+    /// The open sheet, the prompts queued behind it, and notices.
+    pub sheets: Sheets,
 }
 
 impl Default for UiState {
@@ -45,8 +52,14 @@ impl Default for UiState {
             filter_edit: TextEdit::new(""),
             type_select: TypeSelect::default(),
             center_on_mount: None,
+            sheets: Sheets::default(),
         }
     }
+}
+
+/// Milliseconds since the epoch, from the system clock: when log lines arrived.
+pub fn system_ms() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
 }
 
 pub struct App {
@@ -62,6 +75,8 @@ pub struct App {
     /// Sort remembered globally (§12).
     pub sort: Sort,
     pub backend: Box<dyn Backend>,
+    /// The clock that stamps log lines (fixed in scenes and tests).
+    pub wall_ms: fn() -> i64,
     inbox: VecDeque<ServiceEvent>,
 }
 
@@ -92,6 +107,16 @@ pub enum Action {
     Escape,
     /// The quick-connect popover (M4); nothing yet.
     QuickConnect,
+    /// The open sheet's primary button: Connect, Trust and connect, Yes.
+    SubmitPrompt,
+    /// A yes/no sheet's No.
+    DeclinePrompt,
+    /// Cancel or Escape on the open sheet (a prompt is cancelled; the log closes).
+    DismissSheet,
+    /// Show the connection log of the host on screen.
+    OpenLog,
+    /// Close a connection and forget its remembered secrets.
+    Disconnect(HostId),
 }
 
 /// What an action asks the view layer to do afterwards.
@@ -116,6 +141,7 @@ impl App {
             show_hidden_default: true,
             sort: Sort::default(),
             backend,
+            wall_ms: system_ms,
             inbox: VecDeque::new(),
         }
     }
@@ -150,16 +176,28 @@ impl App {
 
     fn apply_one(&mut self, ev: ServiceEvent) {
         match ev {
+            ServiceEvent::Hosts(specs) => {
+                // Discovery owns the SSH Config section; saved and recent hosts stay.
+                let mut hosts: Vec<_> = specs.into_iter().filter(|h| h.source == HostSource::SshConfig).collect();
+                hosts.extend(self.hosts.hosts.drain(..).filter(|h| h.source != HostSource::SshConfig));
+                self.hosts.hosts = hosts;
+            }
             ServiceEvent::Status { host, status } => {
+                if matches!(status, ConnStatus::Ready | ConnStatus::Failed(_) | ConnStatus::Disconnected) {
+                    self.ui.sheets.on_settled(&host);
+                }
                 if let Some(c) = self.conns.get_mut(&host) {
                     c.status = status;
                 }
             }
             ServiceEvent::Opened { host, start } => {
+                self.ui.sheets.on_settled(&host);
                 let Some(c) = self.conns.get_mut(&host) else { return };
                 c.status = ConnStatus::Ready;
+                c.opened = true;
                 c.cwd = start.clone();
                 c.listing = Listing::Loading;
+                c.paging = conn::Paging::Idle;
                 self.send(Command::List { host, path: start });
             }
             ServiceEvent::Listing { host, path, entries } => {
@@ -170,9 +208,25 @@ impl App {
                     }
                 }
             }
+            ServiceEvent::ListingPage { host, path, entries, first, done } => {
+                if let Some(c) = self.conns.get_mut(&host)
+                    && c.apply_page(&path, entries, first, done)
+                    && c.filter.is_on()
+                    && self.active.as_ref() == Some(&host)
+                {
+                    c.set_filter(Filter::On(self.ui.filter_edit.text.clone()));
+                }
+            }
             ServiceEvent::ListFailed { host, path, error } => {
                 if let Some(c) = self.conns.get_mut(&host) {
                     c.set_failed(&path, error.into());
+                }
+            }
+            ServiceEvent::Prompt(prompt) => self.ui.sheets.on_prompt(prompt),
+            ServiceEvent::PromptClosed(id) => self.ui.sheets.on_closed(id),
+            ServiceEvent::Log { host, line } => {
+                if let Some(c) = self.conns.get_mut(&host) {
+                    c.log.push((self.wall_ms)(), line);
                 }
             }
         }
@@ -276,6 +330,32 @@ impl App {
                 }
             }
             Action::QuickConnect => {}
+            Action::SubmitPrompt => {
+                if let Some((id, answer)) = self.ui.sheets.submit() {
+                    self.send(Command::AnswerPrompt { id, answer });
+                }
+            }
+            Action::DeclinePrompt => {
+                if let Some((id, answer)) = self.ui.sheets.decline() {
+                    self.send(Command::AnswerPrompt { id, answer });
+                }
+            }
+            Action::DismissSheet => {
+                if let Some((id, answer)) = self.ui.sheets.cancel() {
+                    self.send(Command::AnswerPrompt { id, answer });
+                }
+            }
+            Action::OpenLog => {
+                if let Some(host) = self.active.clone() {
+                    self.ui.sheets.open_log(host);
+                }
+            }
+            Action::Disconnect(host) => {
+                if self.conns.contains_key(&host) {
+                    self.ui.sheets.forget_host(&host);
+                    self.send(Command::Disconnect { host });
+                }
+            }
         }
         fx
     }
@@ -307,7 +387,11 @@ impl App {
         self.active = Some(host.clone());
         let live = self.conns.get(&host).is_some_and(|c| hosts::is_live(&c.status));
         if !live {
-            let view = ConnView::connecting(host.clone(), self.show_hidden_default, self.sort);
+            let mut view = ConnView::connecting(host.clone(), self.show_hidden_default, self.sort);
+            // The log outlives a failed or closed connection, so "Show log" still explains it.
+            if let Some(old) = self.conns.remove(&host) {
+                view.log = old.log;
+            }
             self.conns.insert(host.clone(), view);
             self.send(Command::Connect { host });
         }

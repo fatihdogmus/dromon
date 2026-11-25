@@ -212,6 +212,59 @@ fn nothing_navigates_while_reconnecting() {
 }
 
 #[test]
+fn discovered_hosts_replace_the_ssh_config_section_only() {
+    let mut s = app();
+    let mut spec = dromon_core::HostSpec::from_config_alias("lab");
+    spec.hostname = Some("10.1.1.1".into());
+    s.apply(ServiceEvent::Hosts(vec![spec]));
+    let config: Vec<&str> =
+        s.hosts.hosts.iter().filter(|h| h.source == dromon_core::HostSource::SshConfig).map(|h| h.alias.as_str()).collect();
+    assert_eq!(config, ["lab"]);
+    assert!(s.hosts.get(&HostId("box".into())).is_some(), "saved hosts stay");
+    assert!(s.hosts.get(&prod()).is_none());
+}
+
+#[test]
+fn the_log_is_stamped_and_outlives_a_failed_connection() {
+    let mut s = app();
+    s.backend = Box::new(Silent::default());
+    s.wall_ms = || 1_000;
+    s.act(Action::SelectHost(prod()));
+    s.apply(ServiceEvent::Log { host: prod(), line: "Permission denied (password).".into() });
+    s.apply(ServiceEvent::Status { host: prod(), status: ConnStatus::Failed("Permission denied (password).".into()) });
+    assert_eq!(s.conn().unwrap().log.to_text(), "00:00:01.000  Permission denied (password).");
+    // Trying again keeps the log.
+    s.act(Action::SelectHost(prod()));
+    assert_eq!(s.conn().unwrap().status, ConnStatus::Connecting);
+    assert_eq!(s.conn().unwrap().log.len(), 1);
+}
+
+#[test]
+fn answering_and_disconnecting_send_commands() {
+    let rec = Recorder::default();
+    let mut s = app();
+    s.backend = Box::new(rec.clone());
+    s.act(Action::SelectHost(prod()));
+    let prompt = dromon_core::Prompt {
+        id: dromon_core::PromptId(9),
+        host: prod(),
+        kind: dromon_core::PromptKind::Password,
+        text: "pw: ".into(),
+        error: None,
+    };
+    s.apply(ServiceEvent::Prompt(prompt));
+    s.ui.sheets.edit_mut().replace_text("hunter2");
+    s.act(Action::SubmitPrompt);
+    s.act(Action::Disconnect(prod()));
+    assert!(!s.ui.sheets.is_open(), "disconnecting closes the host's sheet");
+    let answer = dromon_core::PromptAnswer::Text("hunter2".into());
+    assert_eq!(
+        rec.sent()[1..],
+        [Command::AnswerPrompt { id: dromon_core::PromptId(9), answer }, Command::Disconnect { host: prod() }]
+    );
+}
+
+#[test]
 fn every_mock_host_opens() {
     for h in mock::hosts().hosts {
         let mut s = app();

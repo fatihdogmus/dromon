@@ -2,12 +2,12 @@
 //! tabular figures so nothing jiggles as numbers change.
 
 use dromon_core::ConnStatus;
-use rune::{Color, El, row, text};
+use rune::{Color, El, Tx, row, text};
 
-use super::Paint;
 use super::widgets::dot;
+use super::{Paint, run};
 use crate::fmt;
-use crate::state::{App, ConnView, Listing};
+use crate::state::{Action, App, ConnView, Listing};
 use crate::theme::{size, space, type_};
 
 /// "42 items · 3 selected, 18.2 MB", or what the folder is doing instead.
@@ -22,6 +22,9 @@ pub fn summary(c: &ConnView) -> String {
             } else {
                 fmt::items(total)
             };
+            if c.loading_more() {
+                s.push('…');
+            }
             if !c.selection.is_empty() {
                 let n = c.selection.len();
                 s.push_str(&format!(" · {} selected", fmt::thousands(n as u64)));
@@ -53,10 +56,20 @@ pub fn view(s: &App, p: Paint) -> El {
     let (label, color): (&str, Color) = match &c.status {
         ConnStatus::Ready => ("Connected", t.accent),
         ConnStatus::Connecting => ("Connecting…", t.text_3),
+        ConnStatus::NeedsInput if !c.opened => ("Signing in…", t.text_3),
         ConnStatus::Reconnecting { .. } | ConnStatus::NeedsInput => ("Reconnecting…", t.warning),
         ConnStatus::Failed(_) => ("Couldn't connect", t.danger),
         ConnStatus::Disconnected => ("Disconnected", t.text_3),
     };
-    bar.child(text(summary(c)).key("status-summary").font(type_::META).color(t.text_2).grow(1.0).truncate())
-        .child(row().key("status-conn").gap(6.0).center_y().child(dot(color, 6.0)).child(text(label).font(type_::META).color(t.text_2)))
+    // The connection's status opens its log.
+    let conn = row()
+        .key("status-conn")
+        .role("button")
+        .label(format!("{label} · Show connection log"))
+        .gap(6.0)
+        .center_y()
+        .on_press_tx(|s: &mut App, tx: &mut Tx| run(s, Action::OpenLog, tx))
+        .child(dot(color, 6.0))
+        .child(text(label).font(type_::META).color(t.text_2));
+    bar.child(text(summary(c)).key("status-summary").font(type_::META).color(t.text_2).grow(1.0).truncate()).child(conn)
 }

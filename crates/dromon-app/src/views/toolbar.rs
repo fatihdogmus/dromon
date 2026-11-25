@@ -57,7 +57,8 @@ fn path_bar(s: &App, p: Paint) -> El {
         return bar;
     };
     let host = s.hosts.get(&c.host).map_or(c.host.as_str(), |h| h.display_name()).to_owned();
-    if c.status == ConnStatus::Connecting {
+    let signing_in = !c.opened && matches!(c.status, ConnStatus::NeedsInput);
+    if c.status == ConnStatus::Connecting || signing_in {
         let spinner = icon(icons::SPINNER.at(p.scale), size::ICON).color(t.text_3).looping(LoopSpec::rotation(0.9));
         return bar
             .gap(space::S2)

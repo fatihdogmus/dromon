@@ -27,10 +27,18 @@ Tracks where implementation stands against `dromon-plan.md`. Newest first.
 - Icons are pixel-crisp: each has a 1× body (1 pt strokes on half-pixels) and a 2× body (1.5 pt on quarter-pixels), checked by a pixel test (`crates/dromon-app/src/icons/tests.rs`).
 - The Docker fixture runs through testcontainers (`dromon-testkit`) with a PAM image; see the "Done" entry above.
 
+- Service thread (§4.1): `dromon-service` thread with a tokio runtime, started from `on_ready`; `ChannelBackend` → per-host tasks → `AppHandle::update_if`. Hosts discovered from ssh config (+ `ssh -G`), askpass server with per-attempt tokens, `AuthAttempt` routing, paged listings, explicit connection state machine (`service/lifecycle.rs`) with silent reconnect and backoff. `main()` runs the askpass helper before any UI. `DROMON_MOCK=1` runs on mock data.
+- Sheets (§6.8): password/passphrase/other, host key, confirm, notice toasts, connection log (2,000 lines per host). Scenes `auth-password`, `auth-password-error`, `host-key`, `confirm`, `connection-log`.
+
 **Next**
-1. Service thread (§4.1): real `Backend` for `state::service::{Command, ServiceEvent}`, askpass server + auth sheets, host discovery feeding the sidebar, `main()` helper-mode switch. (In progress.)
-2. Host-key and password sheets (§6.8), connection log.
-3. Persistence (last host/folder, sort, sidebar width).
+1. App-level end-to-end tests against the testkit fixture (service + real askpass helper binary), and a first run in a real window on macOS/Linux desktop.
+2. Persistence (last host/folder, sort, sidebar width).
+3. M2: transfer engine, downloads, uploads, transfers popover.
+
+**Service-thread caveats**
+- Never run in a real window yet (this dev box has no display): `on_ready`, `update_if`, sheet focus and motion are only tested headless.
+- Quit is best-effort: Rune may exit before the service thread clears the password store (process memory goes away regardless).
+- A second prompt queues silently behind an answered sheet; the reconnect banner's "Sign in" button does nothing yet.
 
 **Known issues / decisions to revisit**
 - Linux: Rune's `Titlebar` keeps the native frame, so a real window shows a system header above the toolbar. (Accepted.)

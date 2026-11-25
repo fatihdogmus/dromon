@@ -91,6 +91,12 @@ pub struct Tokens {
     /// The sidebar row of the host on screen (neutral, so the accent stays rare).
     pub active: Color,
     pub shadow: Color,
+    /// Sheets sit deeper than popovers (§6.5: `0 16 48`).
+    pub sheet_shadow: Color,
+    /// The veil over the window behind a sheet.
+    pub scrim: Color,
+    /// Text and glyphs on an accent fill (primary buttons).
+    pub on_accent: Color,
 }
 
 fn c(s: &str) -> Color {
@@ -125,6 +131,9 @@ fn build(dark: bool, accent: Accent) -> Tokens {
             skeleton: white.alpha(0.06),
             active: white.alpha(0.06),
             shadow: Color::BLACK.alpha(0.45),
+            sheet_shadow: Color::BLACK.alpha(0.55),
+            scrim: Color::BLACK.alpha(0.32),
+            on_accent: c("#0C0E0E"),
         }
     } else {
         let a = c(accent.light);
@@ -153,6 +162,9 @@ fn build(dark: bool, accent: Accent) -> Tokens {
             skeleton: black.alpha(0.06),
             active: black.alpha(0.055),
             shadow: black.alpha(0.12),
+            sheet_shadow: black.alpha(0.18),
+            scrim: black.alpha(0.12),
+            on_accent: c("#FFFFFF"),
         }
     }
 }

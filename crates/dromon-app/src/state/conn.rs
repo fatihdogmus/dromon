@@ -7,6 +7,7 @@ use std::collections::HashSet;
 use dromon_core::{ConnStatus, Entry, Error, HostId, RemotePath, SortDir, SortKey, sort_entries};
 
 use super::history::NavHistory;
+use super::log::LogBuffer;
 use super::selection::Selection;
 
 /// The listing of the current folder.
@@ -97,11 +98,28 @@ pub enum Nav {
     Forward,
 }
 
+/// Where a paged listing of the current folder stands (`ServiceEvent::ListingPage`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Paging {
+    /// Nothing streaming: the listing on screen is whole.
+    #[default]
+    Idle,
+    /// A new folder streaming in: pages are added to the rows on screen as they come.
+    Streaming,
+    /// A refresh of the folder on screen: pages collect here and replace the listing at once
+    /// when the last arrives, so rows and the selection don't flicker through partial lists.
+    Refreshing(Vec<Entry>),
+}
+
 /// One connection's view.
 #[derive(Clone, Debug)]
 pub struct ConnView {
     pub host: HostId,
     pub status: ConnStatus,
+    /// The session has opened at least once (so a prompt now is a reconnect's).
+    pub opened: bool,
+    pub log: LogBuffer,
+    pub paging: Paging,
     pub cwd: RemotePath,
     pub listing: Listing,
     pub selection: Selection,
@@ -124,6 +142,9 @@ impl ConnView {
         ConnView {
             host,
             status: ConnStatus::Connecting,
+            opened: false,
+            log: LogBuffer::default(),
+            paging: Paging::Idle,
             cwd: RemotePath::root(),
             listing: Listing::Loading,
             selection: Selection::default(),
@@ -194,6 +215,7 @@ impl ConnView {
             None
         };
         self.listing = Listing::Loading;
+        self.paging = Paging::Idle;
         self.selection.clear();
         self.filter = Filter::Off;
         self.refresh_rows();
@@ -217,25 +239,84 @@ impl ConnView {
 
     /// A listing for `path` arrived. Ignored unless it's the folder on screen (a late answer
     /// for a folder already left). The selection survives a refresh where its names remain.
-    pub fn set_listing(&mut self, path: &RemotePath, mut entries: Vec<Entry>) -> bool {
+    pub fn set_listing(&mut self, path: &RemotePath, entries: Vec<Entry>) -> bool {
         if *path != self.cwd {
             return false;
         }
+        self.paging = Paging::Idle;
+        self.show(entries, true);
+        true
+    }
+
+    /// One page of a streamed listing of `path` arrived (see [`Paging`]). A first page of a
+    /// new folder shows at once and later pages join it; a refresh of the folder on screen
+    /// collects its pages and swaps them in with the last. Ignored unless `path` is on screen.
+    /// Returns whether the rows changed.
+    pub fn apply_page(&mut self, path: &RemotePath, entries: Vec<Entry>, first: bool, done: bool) -> bool {
+        if *path != self.cwd {
+            return false;
+        }
+        let refresh = matches!(self.listing, Listing::Ready(_));
+        match (std::mem::take(&mut self.paging), first) {
+            (_, true) if refresh && !done => {
+                self.paging = Paging::Refreshing(entries);
+                false
+            }
+            (_, true) => {
+                self.paging = if done { Paging::Idle } else { Paging::Streaming };
+                self.show(entries, done);
+                true
+            }
+            (Paging::Streaming, false) => {
+                let mut all = std::mem::replace(&mut self.listing, Listing::Loading);
+                if let Listing::Ready(have) = &mut all {
+                    have.extend(entries);
+                }
+                let Listing::Ready(all) = all else { return false };
+                self.paging = if done { Paging::Idle } else { Paging::Streaming };
+                self.show(all, done);
+                true
+            }
+            (Paging::Refreshing(mut have), false) => {
+                have.extend(entries);
+                if done {
+                    self.show(have, true);
+                    true
+                } else {
+                    self.paging = Paging::Refreshing(have);
+                    false
+                }
+            }
+            // A later page with no listing under way (its first was for a folder since left).
+            (Paging::Idle, false) => false,
+        }
+    }
+
+    /// Shows `entries` as the listing; `whole` when nothing more is coming, which is when a
+    /// folder to reveal that isn't there gives up.
+    fn show(&mut self, mut entries: Vec<Entry>, whole: bool) {
         sort_entries(&mut entries, self.sort.key, self.sort.dir);
         self.listing = Listing::Ready(entries);
         self.refresh_rows();
-        if let Some(name) = self.reveal.take()
-            && self.rows().any(|e| e.name == name)
-        {
-            self.selection.only(&name);
+        if let Some(name) = self.reveal.take() {
+            if self.rows().any(|e| e.name == name) {
+                self.selection.only(&name);
+            } else if !whole {
+                self.reveal = Some(name);
+            }
         }
-        true
+    }
+
+    /// Whether more of the folder on screen is still streaming in.
+    pub fn loading_more(&self) -> bool {
+        self.paging == Paging::Streaming
     }
 
     pub fn set_failed(&mut self, path: &RemotePath, error: ListError) -> bool {
         if *path != self.cwd {
             return false;
         }
+        self.paging = Paging::Idle;
         self.listing = Listing::Failed(error);
         self.reveal = None;
         self.refresh_rows();
@@ -395,6 +476,50 @@ mod tests {
         c.selection.only("src");
         c.selection.extend_to(&rows, "b.txt", false);
         assert_eq!(c.selected_bytes(), 2300);
+    }
+
+    #[test]
+    fn pages_of_a_new_folder_show_as_they_arrive() {
+        let mut c = ready("/w");
+        assert!(c.go(RemotePath::new("/w/src"), Nav::Visit));
+        let src = RemotePath::new("/w/src");
+        assert!(c.apply_page(&src, vec![e("m", EntryKind::File, 1), e("z", EntryKind::File, 2)], true, false));
+        assert!(c.loading_more());
+        c.selection.only("z");
+        assert!(c.apply_page(&src, vec![e("a", EntryKind::File, 3), e("lib", EntryKind::Dir, 0)], false, false));
+        assert_eq!(c.row_names(), ["lib", "a", "m", "z"]);
+        assert!(c.selection.contains("z"), "the selection survives a page");
+        assert!(c.apply_page(&src, vec![], false, true));
+        assert!(!c.loading_more());
+        assert_eq!(c.row_count(), 4);
+        // Late pages, and pages for other folders, change nothing.
+        assert!(!c.apply_page(&src, vec![e("late", EntryKind::File, 1)], false, true));
+        assert!(!c.apply_page(&RemotePath::new("/w"), vec![], true, true));
+        assert_eq!(c.row_count(), 4);
+    }
+
+    #[test]
+    fn a_refresh_swaps_in_whole() {
+        let mut c = ready("/w");
+        c.selection.only("b.txt");
+        let w = RemotePath::new("/w");
+        assert!(!c.apply_page(&w, vec![e("a.txt", EntryKind::File, 1)], true, false));
+        assert_eq!(c.row_count(), 5, "the old listing stays until the refresh is whole");
+        assert!(c.selection.contains("b.txt"));
+        assert!(c.apply_page(&w, vec![e("b.txt", EntryKind::File, 2), e("new", EntryKind::File, 3)], false, true));
+        assert_eq!(c.row_names(), ["a.txt", "b.txt", "new"]);
+        assert!(c.selection.contains("b.txt"));
+    }
+
+    #[test]
+    fn a_folder_to_reveal_may_come_in_a_later_page() {
+        let mut c = ready("/w/src/deep");
+        let w = RemotePath::new("/w");
+        assert!(c.go(w.clone(), Nav::Visit));
+        c.apply_page(&w, vec![e("x", EntryKind::File, 1)], true, false);
+        assert!(c.selection.is_empty());
+        c.apply_page(&w, vec![e("src", EntryKind::Dir, 0)], false, true);
+        assert_eq!(c.selection.in_order(&c.row_names()), ["src"]);
     }
 
     #[test]

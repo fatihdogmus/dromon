@@ -18,14 +18,16 @@ cargo build -p dromon-app --quiet
 bin="$root/target/debug/dromon"
 mkdir -p "$out"
 
-scenes=(welcome connecting listing listing-sorted-size big-folder empty-folder permission-denied reconnecting filter light)
+scenes=(welcome connecting listing listing-sorted-size big-folder empty-folder permission-denied reconnecting filter light
+  auth-password auth-password-error host-key confirm connection-log)
 
 for scene in "${scenes[@]}"; do
   theme=dark
   [[ "$scene" == light ]] && theme=light
   file="$out/$scene-$theme@${scale}x.png"
-  # Rune prints frame timings on stderr; show them only when a render fails.
-  if ! log="$("$bin" --snap "$file" --scene "$scene" --size "$size" --scale "$scale" --theme dark 2>&1)"; then
+  # Rune prints frame timings on stderr; show them only when a render fails. DROMON_MOCK keeps
+  # the binary off the network side and the user's ssh config (scenes are mock-built anyway).
+  if ! log="$(DROMON_MOCK=1 "$bin" --snap "$file" --scene "$scene" --size "$size" --scale "$scale" --theme dark 2>&1)"; then
     echo "$log" >&2
     echo "failed: $scene" >&2
     exit 1

@@ -99,10 +99,24 @@ pub fn modified_in(mtime: Option<i64>, now: i64, offset_secs: i64) -> String {
     }
 }
 
+/// A log timestamp: `14:00:01.234` (UTC, like the dates, until the local zone is read).
+pub fn clock_ms(ms: i64) -> String {
+    let day_ms = ms.rem_euclid(86_400_000);
+    let (h, m, s, milli) = (day_ms / 3_600_000, day_ms / 60_000 % 60, day_ms / 1000 % 60, day_ms % 1000);
+    format!("{h:02}:{m:02}:{s:02}.{milli:03}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use dromon_core::EntryKind;
+
+    #[test]
+    fn clock_times_are_padded() {
+        assert_eq!(clock_ms(0), "00:00:00.000");
+        assert_eq!(clock_ms(NOW * 1000 + 61_005), "14:01:01.005");
+        assert_eq!(clock_ms(-1), "23:59:59.999");
+    }
 
     #[test]
     fn sizes_read_like_finder() {
