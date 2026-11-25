@@ -37,6 +37,8 @@ runs and the files ship unsigned (Windows), ad-hoc signed (macOS) or without GPG
    comment marks the spot). Optionally download a file and check it as a user would
    ([checking a download](#checking-a-download)).
 5. **Publish** the draft. Tags with `-rc.N` are marked as pre-releases.
+6. Publishing starts **Homebrew** ([`homebrew.yml`](#homebrew)), which updates the cask in the
+   tap a few minutes later. Nothing to approve.
 
 A failed tag run can be re-run from the Actions page (same commit); a re-run only updates the
 draft, and the workflow never touches a published release. To release a fixed commit, bump to the
@@ -399,6 +401,37 @@ All are in the `release` environment unless marked *repository*.
 | `APPLE_DEVELOPER_ID_P12_PASSWORD` | secret | sign-macos |
 | `APPLE_TEAM_ID`, `APPLE_NOTARY_KEY_ID`, `APPLE_NOTARY_ISSUER_ID` | variables | credentials, sign-macos |
 | `DROMON_REQUIRE_SIGNED_WINDOWS`, `DROMON_REQUIRE_SIGNED_MACOS` | *repository* variables | credentials |
+| `HOMEBREW_TAP_DEPLOY_KEY` | secret, *`homebrew` environment* | homebrew.yml (pushes the cask) |
+
+## Homebrew
+
+`brew install --cask fatihdogmus/tap/dromon` installs from the tap
+[fatihdogmus/homebrew-tap](https://github.com/fatihdogmus/homebrew-tap). Its `Casks/dromon.rb`
+is written by `.github/workflows/homebrew.yml`, which runs when a release is published (and by
+hand: Actions → Homebrew → *Run workflow* with the tag). On a macOS runner it:
+
+1. skips the release unless it is GitHub's latest one and not a prerelease;
+2. downloads `Dromon-<v>-macos-arm64.dmg` and `SHA256SUMS`, and checks the DMG's SHA-256 against
+   its line and against the Sigstore attestation `release.yml` made for that tag;
+3. asks Gatekeeper (`spctl --assess`) whether `Dromon.app` is notarized;
+4. writes the cask (`.github/release/homebrew-cask.sh`) and pushes it to the tap.
+
+While the app is not notarized, the cask's `postflight` removes the quarantine flag from
+`Dromon.app` (Homebrew no longer has `--no-quarantine`, and only third-party taps may do this),
+and its caveats say so. A notarized release drops both, with no change here.
+
+The `homebrew` environment (deployments from `v*` tags and `main`, no reviewer: publishing the
+release was the approval) holds `HOMEBREW_TAP_DEPLOY_KEY`, the private half of a deploy key with
+write access to the tap only. To replace it:
+
+```sh
+ssh-keygen -t ed25519 -N "" -C "dromon homebrew.yml" -f tapkey
+gh repo deploy-key add tapkey.pub --repo fatihdogmus/homebrew-tap --allow-write --title "dromon homebrew.yml"
+gh secret set HOMEBREW_TAP_DEPLOY_KEY --env homebrew --repo fatihdogmus/dromon < tapkey
+shred -u tapkey tapkey.pub   # then delete the old key in the tap's Settings → Deploy keys
+```
+
+Without the secret the job writes the cask to its summary page instead of pushing it.
 
 ## Code signing policy (for the README)
 

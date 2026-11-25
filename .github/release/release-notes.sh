@@ -111,6 +111,8 @@ echo "Installs per machine to \`C:\\Program Files\\Dromon\`; uninstall from Sett
 echo
 echo "### macOS"
 echo
+echo "With Homebrew (the cask follows each published release): \`brew install --cask ${repo%%/*}/tap/dromon\`"
+echo
 if [ "$macos" = true ]; then
   cat <<EOF
 Open the DMG and drag Dromon to Applications. To check it:
