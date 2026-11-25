@@ -104,9 +104,18 @@ impl Harness {
         }
     }
 
+    /// Waits until the jobs satisfy `done`, checking the latest snapshot first: the engine sends
+    /// a snapshot only when something changed, so a state that already arrived (a small job
+    /// done while the test still waited for it to appear) never comes again.
+    fn wait_jobs(&mut self, what: &str, done: impl Fn(&[JobView]) -> bool) {
+        if !done(&self.jobs) {
+            self.wait_for(what, |_, jobs| done(jobs));
+        }
+    }
+
     /// Waits until job `id` has finished, and returns it.
     fn finished(&mut self, id: JobId) -> JobView {
-        self.wait_for(&format!("job {} to finish", id.0), |_, jobs| jobs.iter().any(|j| j.id == id && j.state.is_finished()));
+        self.wait_jobs(&format!("job {} to finish", id.0), |jobs| jobs.iter().any(|j| j.id == id && j.state.is_finished()));
         self.job(id)
     }
 
@@ -116,7 +125,7 @@ impl Harness {
 
     /// The newest job's id once it shows up (jobs are newest first).
     fn newest(&mut self, after: Option<JobId>) -> JobId {
-        self.wait_for("a new job", |_, jobs| jobs.first().is_some_and(|j| Some(j.id) != after));
+        self.wait_jobs("a new job", |jobs| jobs.first().is_some_and(|j| Some(j.id) != after));
         self.jobs[0].id
     }
 
@@ -199,7 +208,7 @@ fn uploads_land_on_the_server_and_a_clash_can_keep_both() {
     let items = vec![local.join("hello.txt")];
     h.transfer(TransferCommand::Start(JobRequest::Upload { host: host(), items, into: into.clone() }));
     let again = h.newest(Some(id));
-    h.wait_for("the name clash", |_, jobs| jobs.iter().any(|j| j.id == again && j.conflict.is_some()));
+    h.wait_jobs("the name clash", |jobs| jobs.iter().any(|j| j.id == again && j.conflict.is_some()));
     let clash = h.job(again).conflict.unwrap();
     assert_eq!((clash.name.as_str(), clash.existing_is_dir, clash.more), ("hello.txt", false, 0));
     h.transfer(TransferCommand::Resolve { job: again, choice: ConflictChoice::KeepBoth, apply_all: false });
@@ -220,11 +229,11 @@ fn a_dropped_connection_resumes_the_download_where_it_stopped() {
     let id = h.newest(None);
     // Some bytes in, the server drops every session of the user; the connection comes back by
     // itself (key auth needs nobody) and the file carries on from its part file.
-    h.wait_for("the first bytes", |_, jobs| jobs.iter().any(|j| j.id == id && j.progress.done > 0));
+    h.wait_jobs("the first bytes", |jobs| jobs.iter().any(|j| j.id == id && j.progress.done > 0));
     let before = h.job(id).progress.done;
     assert!(h.fx.kill_sessions(USER_KEY).unwrap() > 0);
-    h.wait_for("the job to wait for the connection", |_, jobs| jobs.iter().any(|j| j.id == id && j.waiting_for_connection));
-    h.wait_for("the job to move again", |_, jobs| jobs.iter().any(|j| j.id == id && !j.waiting_for_connection));
+    h.wait_jobs("the job to wait for the connection", |jobs| jobs.iter().any(|j| j.id == id && j.waiting_for_connection));
+    h.wait_jobs("the job to move again", |jobs| jobs.iter().any(|j| j.id == id && !j.waiting_for_connection));
     let job = h.finished(id);
     assert_eq!(job.state, TaskState::Done, "{job:#?}");
     assert!(before < 64 << 20, "the drop came before the end");

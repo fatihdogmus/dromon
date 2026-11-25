@@ -1136,6 +1136,7 @@ dependencies = [
 name = "dromon-testkit"
 version = "0.0.1"
 dependencies = [
+ "futures-util",
  "hmac",
  "sha1",
  "tempfile",

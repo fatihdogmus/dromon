@@ -196,19 +196,20 @@ impl Fixture {
         args
     }
 
-    /// Runs `command` inside the container as root (`docker exec`); its stdout, or why it failed.
+    /// Runs `command` inside the container as root; its stdout, or why it failed. Through the
+    /// Docker API (the client testcontainers uses), not the `docker` CLI: on Windows, the CLI
+    /// talking to WSL's Docker over TCP ran commands but returned none of their output.
+    ///
+    /// Blocking; callable from async tests too (it runs on a thread of its own).
     pub fn exec(&self, command: &[&str]) -> Result<String, String> {
-        let out = std::process::Command::new("docker")
-            .arg("exec")
-            .arg(&self.container_id)
-            .args(command)
-            .stdin(std::process::Stdio::null())
-            .output()
-            .map_err(|e| format!("spawn docker exec: {e}"))?;
-        if !out.status.success() {
-            return Err(format!("docker exec {command:?}: {}: {}", out.status, String::from_utf8_lossy(&out.stderr).trim()));
-        }
-        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+        let id = self.container_id.clone();
+        let cmd: Vec<String> = command.iter().map(|s| (*s).to_owned()).collect();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| format!("runtime: {e}"))?;
+            rt.block_on(exec_in(&id, cmd))
+        })
+        .join()
+        .map_err(|_| "the exec thread panicked".to_owned())?
     }
 
     /// Ends every ssh session of `user` from the server's side, as a server restart does:
@@ -252,6 +253,37 @@ impl Fixture {
         }
         BIG_FILE
     }
+}
+
+/// `docker exec` through the API: create the exec, collect its attached stdout and stderr, then
+/// read its exit code.
+async fn exec_in(container: &str, cmd: Vec<String>) -> Result<String, String> {
+    use futures_util::StreamExt as _;
+    use testcontainers::bollard::container::LogOutput;
+    use testcontainers::bollard::exec::StartExecResults;
+    use testcontainers::bollard::models::ExecConfig;
+
+    let docker = docker_client_instance().await.map_err(|e| format!("docker client: {e}"))?;
+    let config = ExecConfig { cmd: Some(cmd.clone()), attach_stdout: Some(true), attach_stderr: Some(true), ..Default::default() };
+    let created = docker.create_exec(container, config).await.map_err(|e| format!("docker exec {cmd:?}: {e}"))?;
+    let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
+    match docker.start_exec(&created.id, None).await.map_err(|e| format!("docker exec {cmd:?}: {e}"))? {
+        StartExecResults::Attached { mut output, .. } => {
+            while let Some(chunk) = output.next().await {
+                match chunk.map_err(|e| format!("docker exec {cmd:?}: {e}"))? {
+                    LogOutput::StdOut { message } | LogOutput::Console { message } => stdout.extend_from_slice(&message),
+                    LogOutput::StdErr { message } => stderr.extend_from_slice(&message),
+                    LogOutput::StdIn { .. } => {}
+                }
+            }
+        }
+        StartExecResults::Detached => return Err(format!("docker exec {cmd:?}: started detached")),
+    }
+    let code = docker.inspect_exec(&created.id).await.map_err(|e| format!("docker exec {cmd:?}: {e}"))?.exit_code;
+    if code != Some(0) {
+        return Err(format!("docker exec {cmd:?}: exit {code:?}: {}", String::from_utf8_lossy(&stderr).trim()));
+    }
+    Ok(String::from_utf8_lossy(&stdout).into_owned())
 }
 
 /// An OpenSSH client tool (`ssh`, `ssh-keygen`, `ssh-keyscan`, `scp`): on Windows the inbox
