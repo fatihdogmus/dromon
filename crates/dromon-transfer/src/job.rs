@@ -1,0 +1,183 @@
+//! The types every part of the transfer engine shares: what the user asks for
+//! ([`JobRequest`]), one file's copy ([`FilePlan`]), what a scan finds ([`Scan`]), the answer to
+//! an upload name clash ([`ConflictChoice`]) and what the UI shows of a job ([`JobView`]).
+//!
+//! The engine (`.plans/dromon-plan.md` §4.6) is three parts:
+//! - `queue`: the pure model of every job and file, with the per-host scheduler;
+//! - `io`: scans and file copies over SFTP and the local disk (part files, resume, mtime);
+//! - the engine task that feeds the queue's decisions to `io` and `io`'s results back.
+
+use std::path::PathBuf;
+use std::time::Duration;
+
+use dromon_core::{EntryKind, HostId, RemotePath};
+
+use crate::{JobKind, Progress, TaskState};
+
+/// A job: one user action ("download these 3 items"). Ids are never reused in a session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct JobId(pub u64);
+
+/// One file of a job. Unique within its job.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct FileId(pub u32);
+
+/// A remote item the user picked, as the listing showed it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RemoteItem {
+    pub path: RemotePath,
+    pub kind: EntryKind,
+    pub size: u64,
+}
+
+/// What the user asked for. Only downloads and uploads in M2; copies and moves come with M3.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum JobRequest {
+    /// Download remote files and folders (recursively) into a local folder.
+    Download { host: HostId, items: Vec<RemoteItem>, into: PathBuf },
+    /// Upload local files and folders (recursively) into a remote folder.
+    Upload { host: HostId, items: Vec<PathBuf>, into: RemotePath },
+}
+
+impl JobRequest {
+    pub fn kind(&self) -> JobKind {
+        match self {
+            JobRequest::Download { .. } => JobKind::Download,
+            JobRequest::Upload { .. } => JobKind::Upload,
+        }
+    }
+
+    pub fn host(&self) -> &HostId {
+        match self {
+            JobRequest::Download { host, .. } | JobRequest::Upload { host, .. } => host,
+        }
+    }
+
+    /// How many top-level items the user picked.
+    pub fn item_count(&self) -> usize {
+        match self {
+            JobRequest::Download { items, .. } => items.len(),
+            JobRequest::Upload { items, .. } => items.len(),
+        }
+    }
+}
+
+/// One file to copy, decided by a scan. `src` and `dst` are final paths: conflicts have been
+/// settled before the plan exists (download: a Chrome-style free name; upload: the user's
+/// [`ConflictChoice`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FilePlan {
+    Download {
+        src: RemotePath,
+        /// Where the file ends up; the part file is next to it ([`crate::download_part_name`]).
+        dst: PathBuf,
+        /// Size and mtime when scanned: a resume only continues a part file if the source still
+        /// has them.
+        size: u64,
+        mtime: Option<i64>,
+    },
+    Upload {
+        src: PathBuf,
+        /// Where the file ends up; the part file is next to it ([`crate::upload_part_name`]).
+        dst: RemotePath,
+        size: u64,
+        mtime: Option<i64>,
+        /// The user chose Replace: an existing `dst` is overwritten. Otherwise a file that
+        /// appeared at `dst` since the scan gets a free name instead.
+        overwrite: bool,
+    },
+}
+
+impl FilePlan {
+    pub fn size(&self) -> u64 {
+        match self {
+            FilePlan::Download { size, .. } | FilePlan::Upload { size, .. } => *size,
+        }
+    }
+
+    /// The file's name, for the UI and error messages.
+    pub fn name(&self) -> String {
+        match self {
+            FilePlan::Download { src, .. } => src.file_name().unwrap_or("/").to_owned(),
+            FilePlan::Upload { src, .. } => src.file_name().map_or_else(|| src.display().to_string(), |n| n.to_string_lossy().into_owned()),
+        }
+    }
+}
+
+/// A folder a job creates (empty folders too), parents before children.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DirPlan {
+    Local(PathBuf),
+    Remote(RemotePath),
+}
+
+/// What scanning one top-level item found.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Scan {
+    /// Folders to create first, parents before children (the item itself when it is a folder).
+    pub dirs: Vec<DirPlan>,
+    /// Files in a stable order (depth first, names in natural order).
+    pub files: Vec<FilePlan>,
+    /// What was left out and why ("logs/current: a link to a folder"), for the job's details.
+    pub skipped: Vec<String>,
+}
+
+/// The user's answer to "`name` already exists in `folder`" for an upload.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConflictChoice {
+    /// Overwrite (a folder is merged: same-named files inside are overwritten).
+    Replace,
+    /// Upload under a free name: `name (1).ext`.
+    KeepBoth,
+    /// Leave this item out.
+    Skip,
+}
+
+/// A question a job is waiting on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConflictView {
+    /// The clashing item's name.
+    pub name: String,
+    /// The folder it clashes in.
+    pub folder: RemotePath,
+    /// Whether the existing item is a folder.
+    pub existing_is_dir: bool,
+    /// How many more clashes this job has after this one (for "Apply to all").
+    pub more: usize,
+}
+
+/// What the UI shows of a job: one row of the transfers popover.
+#[derive(Clone, Debug, PartialEq)]
+pub struct JobView {
+    pub id: JobId,
+    pub kind: JobKind,
+    pub host: HostId,
+    /// "report.pdf", "photos", or "3 items".
+    pub title: String,
+    pub state: TaskState,
+    /// Bytes over every file found so far.
+    pub progress: Progress,
+    pub files_done: u64,
+    pub files_total: u64,
+    /// Bytes per second, once known.
+    pub speed: Option<f64>,
+    /// Time left, shown only after 2 s of data (`crate::eta`).
+    pub eta: Option<Duration>,
+    /// Paused because the connection dropped (not by the user): resumes by itself.
+    pub waiting_for_connection: bool,
+    /// Set while the job waits for the user to settle a name clash.
+    pub conflict: Option<ConflictView>,
+    /// Where the result is, for "Show in Finder" (download) or the folder (upload): the
+    /// first top-level item's final path.
+    pub reveal: Option<Reveal>,
+    /// Files that failed, with their errors (the job is `Failed` once nothing else is left).
+    pub errors: Vec<String>,
+    pub skipped: Vec<String>,
+}
+
+/// Something to show when a finished row is clicked.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Reveal {
+    Local(PathBuf),
+    Remote(HostId, RemotePath),
+}

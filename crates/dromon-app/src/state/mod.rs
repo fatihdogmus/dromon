@@ -8,6 +8,7 @@ pub mod history;
 pub mod hosts;
 pub mod keys;
 pub mod log;
+pub mod prefs;
 pub mod selection;
 pub mod service;
 pub mod sheets;
@@ -23,6 +24,7 @@ use rune::TextEdit;
 pub use conn::{ConnView, Filter, ListError, Listing, Nav, Sort};
 pub use hosts::{HostDirectory, Section};
 pub use keys::Shortcut;
+pub use prefs::{NoStore, Saved, Store};
 pub use selection::{Selection, TypeSelect};
 #[cfg(test)]
 pub use service::Recorder;
@@ -77,6 +79,9 @@ pub struct App {
     pub backend: Box<dyn Backend>,
     /// The clock that stamps log lines (fixed in scenes and tests).
     pub wall_ms: fn() -> i64,
+    /// What's remembered between launches, and where changes go ([`App::remember`]).
+    pub saved: Saved,
+    store: Box<dyn Store>,
     inbox: VecDeque<ServiceEvent>,
 }
 
@@ -142,8 +147,50 @@ impl App {
             sort: Sort::default(),
             backend,
             wall_ms: system_ms,
+            saved: Saved::default(),
+            store: Box::new(NoStore),
             inbox: VecDeque::new(),
         }
+    }
+
+    /// Starts from settings remembered last time and saves later changes to `store`.
+    pub fn remember(&mut self, saved: Saved, store: Box<dyn Store>) {
+        if let Some(sort) = saved.sort {
+            self.sort = sort;
+        }
+        if let Some(show) = saved.show_hidden {
+            self.show_hidden_default = show;
+        }
+        if let Some(w) = saved.sidebar_width.filter(|w| w.is_finite()) {
+            self.ui.sidebar_width = w.clamp(size::SIDEBAR_MIN, size::SIDEBAR_MAX);
+        }
+        self.saved = saved;
+        self.store = store;
+    }
+
+    /// Hands the remembered settings to the store, after a change.
+    fn save(&mut self) {
+        self.store.save(&self.saved);
+    }
+
+    /// The sidebar's resize grip was let go.
+    pub fn sidebar_resized(&mut self) {
+        self.saved.sidebar_width = Some(self.ui.sidebar_width);
+        self.save();
+    }
+
+    /// Remembers the folder on screen for `host`.
+    fn remember_folder(&mut self, host: &HostId, path: &RemotePath) {
+        if self.saved.folder(host.as_str()) != Some(path.as_str()) {
+            self.saved.set_folder(host.as_str(), path.as_str());
+            self.save();
+        }
+    }
+
+    /// Replaces the store, returning the old one (quitting drops the real store, which writes
+    /// what it still holds).
+    pub fn take_store(&mut self) -> Box<dyn Store> {
+        std::mem::replace(&mut self.store, Box::new(NoStore))
     }
 
     pub fn conn(&self) -> Option<&ConnView> {
@@ -204,16 +251,24 @@ impl App {
             }
             ServiceEvent::Opened { host, start } => {
                 self.ui.sheets.on_settled(&host);
+                // The folder used last time on this host, with home to fall back on.
+                let remembered = self.saved.folder(host.as_str()).map(RemotePath::new).filter(|p| *p != start);
                 let Some(c) = self.conns.get_mut(&host) else { return };
                 c.status = ConnStatus::Ready;
                 c.opened = true;
-                c.cwd = start.clone();
+                c.fallback = remembered.is_some().then(|| start.clone());
+                let path = remembered.unwrap_or(start);
+                c.cwd = path.clone();
                 c.listing = Listing::Loading;
                 c.paging = conn::Paging::Idle;
-                self.send(Command::List { host, path: start });
+                self.remember_folder(&host, &path);
+                self.send(Command::List { host, path });
             }
             ServiceEvent::Listing { host, path, entries } => {
                 if let Some(c) = self.conns.get_mut(&host) {
+                    if path == c.cwd {
+                        c.fallback = None;
+                    }
                     c.set_listing(&path, entries);
                     if c.filter.is_on() && self.active.as_ref() == Some(&host) {
                         c.set_filter(Filter::On(self.ui.filter_edit.text.clone()));
@@ -221,18 +276,27 @@ impl App {
                 }
             }
             ServiceEvent::ListingPage { host, path, entries, first, done } => {
-                if let Some(c) = self.conns.get_mut(&host)
-                    && c.apply_page(&path, entries, first, done)
-                    && c.filter.is_on()
-                    && self.active.as_ref() == Some(&host)
-                {
-                    c.set_filter(Filter::On(self.ui.filter_edit.text.clone()));
+                if let Some(c) = self.conns.get_mut(&host) {
+                    if path == c.cwd {
+                        c.fallback = None;
+                    }
+                    if c.apply_page(&path, entries, first, done) && c.filter.is_on() && self.active.as_ref() == Some(&host) {
+                        c.set_filter(Filter::On(self.ui.filter_edit.text.clone()));
+                    }
                 }
             }
             ServiceEvent::ListFailed { host, path, error } => {
-                if let Some(c) = self.conns.get_mut(&host) {
-                    c.set_failed(&path, error.into());
+                let Some(c) = self.conns.get_mut(&host) else { return };
+                // The folder remembered from last time is gone or closed now: go home instead.
+                if path == c.cwd
+                    && let Some(home) = c.fallback.take()
+                    && c.go(home.clone(), Nav::Replace)
+                {
+                    self.remember_folder(&host, &home);
+                    self.send(Command::List { host, path: home });
+                    return;
                 }
+                c.set_failed(&path, error.into());
             }
             ServiceEvent::Prompt(prompt) => self.ui.sheets.on_prompt(prompt),
             ServiceEvent::PromptClosed(id) => self.ui.sheets.on_closed(id),
@@ -294,6 +358,8 @@ impl App {
             Action::Sort(key) => {
                 self.sort = self.sort.toggled(key);
                 let sort = self.sort;
+                self.saved.sort = Some(sort);
+                self.save();
                 if let Some(c) = self.conn_mut() {
                     c.set_sort(sort);
                     if let Some(cur) = c.selection.cursor() {
@@ -304,6 +370,8 @@ impl App {
             Action::ToggleHidden => {
                 self.show_hidden_default = !self.show_hidden_default;
                 let show = self.show_hidden_default;
+                self.saved.show_hidden = Some(show);
+                self.save();
                 for c in self.conns.values_mut() {
                     if c.show_hidden != show {
                         c.toggle_hidden();
@@ -423,11 +491,13 @@ impl App {
         if !c.interactive() || !c.go(path, how) {
             return;
         }
+        c.fallback = None;
         let (host, path) = (c.host.clone(), c.cwd.clone());
         self.ui.filter_edit = TextEdit::new("");
         self.ui.type_select.reset();
         fx.push(Effect::ScrollTop);
         fx.push(Effect::Blur);
+        self.remember_folder(&host, &path);
         self.send(Command::List { host, path });
         if let Some(cur) = self.conn().and_then(|c| c.selection.cursor().map(str::to_owned)) {
             fx.push(Effect::Reveal(cur));
@@ -442,13 +512,15 @@ impl App {
         let moved = match how {
             Nav::Back => c.back(),
             Nav::Forward => c.forward(),
-            Nav::Visit => false,
+            Nav::Visit | Nav::Replace => false,
         };
         if moved {
+            c.fallback = None;
             let (host, path) = (c.host.clone(), c.cwd.clone());
             self.ui.filter_edit = TextEdit::new("");
             fx.push(Effect::ScrollTop);
             fx.push(Effect::Blur);
+            self.remember_folder(&host, &path);
             self.send(Command::List { host, path });
             if let Some(cur) = self.conn().and_then(|c| c.selection.cursor().map(str::to_owned)) {
                 fx.push(Effect::Reveal(cur));

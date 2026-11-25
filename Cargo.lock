@@ -1084,6 +1084,7 @@ dependencies = [
  "dromon-transfer",
  "rune",
  "secrecy",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",
@@ -1146,8 +1147,11 @@ name = "dromon-transfer"
 version = "0.0.1"
 dependencies = [
  "dromon-core",
+ "dromon-sftp",
+ "dromon-testkit",
  "tempfile",
  "thiserror 2.0.21",
+ "tokio",
 ]
 
 [[package]]

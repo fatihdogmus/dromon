@@ -37,7 +37,7 @@ impl From<Error> for ListError {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Sort {
     pub key: SortKey,
     pub dir: SortDir,
@@ -96,6 +96,8 @@ pub enum Nav {
     Visit,
     Back,
     Forward,
+    /// Move without touching history: the remembered folder failed and home replaces it.
+    Replace,
 }
 
 /// Where a paged listing of the current folder stands (`ServiceEvent::ListingPage`).
@@ -134,6 +136,9 @@ pub struct ConnView {
     pub rows_version: u64,
     /// A child to select once the listing arrives (the folder you came up out of).
     reveal: Option<String>,
+    /// Where to go if the folder on screen fails to list: home, while the folder is the one
+    /// remembered from last time and hasn't listed yet.
+    pub fallback: Option<RemotePath>,
 }
 
 impl ConnView {
@@ -155,6 +160,7 @@ impl ConnView {
             rows: Vec::new(),
             rows_version: 0,
             reveal: None,
+            fallback: None,
         }
     }
 
@@ -209,7 +215,7 @@ impl ConnView {
             self.history.visit(from.clone());
         }
         // Coming up out of a folder selects it, as Finder does.
-        self.reveal = if from.starts_with(&self.cwd) && from != self.cwd {
+        self.reveal = if how != Nav::Replace && from.starts_with(&self.cwd) && from != self.cwd {
             from.components().nth(self.cwd.components().count()).map(str::to_owned)
         } else {
             None

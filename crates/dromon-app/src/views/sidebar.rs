@@ -120,5 +120,8 @@ fn resize_grip() -> El {
                 d.data = s.ui.sidebar_width;
             }
             s.ui.sidebar_width = (d.data + d.dx).clamp(size::SIDEBAR_MIN, size::SIDEBAR_MAX);
+            if d.phase == Phase::Up {
+                s.sidebar_resized();
+            }
         })
 }

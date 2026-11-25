@@ -21,6 +21,7 @@ mod fmt;
 // transfers use the rest in later milestones.
 #[allow(dead_code)]
 mod icons;
+mod persist;
 mod scenes;
 pub mod service;
 pub mod state;
@@ -143,9 +144,15 @@ pub fn run() {
     }
 
     let (backend, commands) = service::channel();
+    // Remembered settings, read before the UI starts. A headless run (`--snap`, `--tree`)
+    // neither reads nor writes them, so its output doesn't depend on them.
+    let remembered = rune::tooling::headless_run().is_none().then(|| {
+        let prefs = rune::prefs::Prefs::open(persist::APP_ID);
+        (persist::load(&prefs), prefs)
+    });
     let app = app().init(move || {
-        // A headless run (`--snap`, `--tree`) never reaches `on_ready`, so it reads the
-        // config here; no window waits on it. A window gets its hosts from the service.
+        // A headless run never reaches `on_ready`, so it reads the config here; no window
+        // waits on it. A window gets its hosts from the service.
         let hosts = match rune::tooling::headless_run() {
             Some(_) => {
                 let src = dromon_ssh::ConfigSources::default_for_platform();
@@ -153,7 +160,11 @@ pub fn run() {
             }
             None => HostDirectory::default(),
         };
-        App::new(hosts, now_secs(), Box::new(backend))
+        let mut app = App::new(hosts, now_secs(), Box::new(backend));
+        if let Some((saved, prefs)) = remembered {
+            app.remember(saved, Box::new(persist::PrefsWriter::spawn(prefs)));
+        }
+        app
     });
     let handle = app.handle();
     let mut pending = Some((commands, handle));
@@ -168,6 +179,8 @@ pub fn run() {
     .on_quit(|s, _tx| {
         // Dropping the channel stops the service: connections close and secrets are wiped.
         s.backend = Box::new(state::Silent::default());
+        // Dropping the settings writer waits for its last write.
+        drop(s.take_store());
     })
     .run();
 }

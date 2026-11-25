@@ -34,10 +34,13 @@ Tracks where implementation stands against `dromon-plan.md`. Newest first.
 - Service thread (§4.1): `dromon-service` thread with a tokio runtime, started from `on_ready`; `ChannelBackend` → per-host tasks → `AppHandle::update_if`. Hosts discovered from ssh config (+ `ssh -G`), askpass server with per-attempt tokens, `AuthAttempt` routing, paged listings, explicit connection state machine (`service/lifecycle.rs`) with silent reconnect and backoff. `main()` runs the askpass helper before any UI. `DROMON_MOCK=1` runs on the built-in demo fixture.
 - Sheets (§6.8): password/passphrase/other, host key, confirm, notice toasts, connection log (2,000 lines per host). Scenes `auth-password`, `auth-password-error`, `host-key`, `confirm`, `connection-log`.
 
+- Persistence (`state/prefs.rs`, `persist.rs`): sort, dotfiles shown, sidebar width and the last folder per host (200 hosts, least recently used dropped) in Rune's `prefs.json` (`~/.config/dromon`, `~/Library/Application Support/dromon`, `%APPDATA%\dromon`). Read before the UI starts; written by a `dromon-prefs` thread (newest snapshot only), flushed on quit. A host opens in its remembered folder; if that fails to list, home replaces it once, without a history entry. Headless runs, scenes, fixtures and tests neither read nor write it. Window frames aren't remembered yet (Rune keeps them only within a session). Nothing reconnects at launch (§3.1), so the last host isn't stored.
+- M2 started: `dromon-transfer`'s shared types (`job.rs`: `JobRequest`, `FilePlan`, `Scan`, `ConflictChoice`, `JobView`); the queue model and the SFTP/disk I/O are in progress.
+
 **Next**
 1. A first run in a real window on a macOS and a Linux desktop (real GPU, real input, Wayland).
-2. Persistence (last host/folder, sort, sidebar width).
-3. M2: transfer engine, downloads, uploads, transfers popover.
+2. M2: transfer engine (queue + io + engine task on the service thread), downloads, uploads, transfers popover.
+3. Window frames across launches.
 
 **Service-thread caveats**
 - Verified end to end (`crates/dromon-app/tests/e2e.rs`, Docker fixture): the real `App` in a headless `Runtime` + the real service thread + system `ssh` + the `dromon` binary as askpass helper + SFTP, driven by clicks, typing and Return: host-key sheet with the server's real fingerprint, listings incl. dir symlinks, dangling links, dotfiles and permission denied; wrong then right password; keyboard-interactive password + TOTP (code not rememberable); key passphrase; a server-side session kill reconnects silently (password from memory, no sheet, folder relisted); Disconnect forgets the password. No typed secret reaches any event or log line. `dromon-app` is now lib + bin for this (`app()`, `run()`, `pub mod state`, `pub mod service`).

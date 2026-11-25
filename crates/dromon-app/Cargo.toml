@@ -26,7 +26,8 @@ dromon-transfer.workspace = true
 # the release smoke check and issue repros run on the binaries users get.
 rune = { workspace = true, features = ["tooling"] }
 secrecy.workspace = true
-# Fixtures (`--fixture`, the built-in demo).
+# Fixtures (`--fixture`, the built-in demo) and remembered settings (`state::prefs`).
+serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 zeroize.workspace = true

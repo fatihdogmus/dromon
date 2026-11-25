@@ -9,9 +9,12 @@ publish.workspace = true
 
 [dependencies]
 dromon-core.workspace = true
+dromon-sftp.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
+dromon-testkit.workspace = true
 tempfile.workspace = true
 
 [lints]
