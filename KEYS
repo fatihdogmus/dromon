@@ -1,0 +1,24 @@
+Dromon release signing key
+
+Linux packages (.deb, Arch .pkg.tar.zst) and every release's SHA256SUMS are signed with this key.
+
+  Dromon Releases <fdogmus06@gmail.com>
+  ed25519, signing only, expires 2028-11-24 (extended before then)
+  Fingerprint: 61AA 2003 0B81 70BE 3527  E4BA 1E54 8E51 E3AD 8C38
+
+Verify a release:
+
+  gpg --import KEYS
+  gpg --verify SHA256SUMS.asc SHA256SUMS
+  sha256sum --check --ignore-missing SHA256SUMS
+
+-----BEGIN PGP PUBLIC KEY BLOCK-----
+
+mDMEawbnZxYJKwYBBAHaRw8BAQdAeMJYjRFqFFXPcKy9PbRHmdw1ijEZnFcPslgh
+K9f/9QW0JURyb21vbiBSZWxlYXNlcyA8ZmRvZ211czA2QGdtYWlsLmNvbT6IlgQT
+FgoAPhYhBGGqIAMLgXC+NSfkuh5UjlHjrYw4BQJrBudnAhsDBQkDwmcABQsJCAcC
+BhUKCQgLAgQWAgMBAh4BAheAAAoJEB5UjlHjrYw4v0IBAMA7N7qd/ztu3oAKDS7r
+kD5BiTv8rPTwwChvVKTgeriYAP0WPQeLCcrKGS2d9jIAQow5lxOMYde2fgQY0jKS
+dAFnBA==
+=NpMI
+-----END PGP PUBLIC KEY BLOCK-----
