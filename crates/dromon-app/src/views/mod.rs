@@ -19,6 +19,8 @@ pub struct Paint {
     pub t: &'static Tokens,
     /// One device pixel, for hairlines.
     pub hair: f32,
+    /// The device scale, for picking each icon's 1× or 2× body (`IconPair::at`).
+    pub scale: f32,
     pub insets: ChromeInsets,
 }
 
@@ -46,7 +48,8 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let t = theme::tokens(dark);
     cx.caption_color(t.text_2);
     cx.foreground(t.text);
-    let p = Paint { t, hair: 1.0 / cx.env().scale, insets: cx.chrome_insets() };
+    let scale = cx.env().scale;
+    let p = Paint { t, hair: 1.0 / scale, scale, insets: cx.chrome_insets() };
     let main = col()
         .key("main")
         .grow(1.0)

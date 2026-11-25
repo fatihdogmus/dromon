@@ -58,7 +58,7 @@ fn path_bar(s: &App, p: Paint) -> El {
     };
     let host = s.hosts.get(&c.host).map_or(c.host.as_str(), |h| h.display_name()).to_owned();
     if c.status == ConnStatus::Connecting {
-        let spinner = icon(&icons::SPINNER, size::ICON).color(t.text_3).looping(LoopSpec::rotation(0.9));
+        let spinner = icon(icons::SPINNER.at(p.scale), size::ICON).color(t.text_3).looping(LoopSpec::rotation(0.9));
         return bar
             .gap(space::S2)
             .px(space::S1)
@@ -71,7 +71,7 @@ fn path_bar(s: &App, p: Paint) -> El {
     for (i, path) in crumbs.into_iter().enumerate() {
         let label = if i == 0 { host.clone() } else { path.file_name().unwrap_or_default().to_owned() };
         if i > 0 {
-            bar = bar.child(icon(&icons::CRUMB, size::ICON).color(t.text_3));
+            bar = bar.child(icon(icons::CRUMB.at(p.scale), size::ICON).color(t.text_3));
         }
         bar = bar.child(crumb(p, i, label, path, i == last, c.interactive()));
     }
@@ -119,7 +119,7 @@ fn filter(s: &App, c: &ConnView, p: Paint) -> El {
         .center_y()
         .fill(t.hover)
         .border(p.hair, if on { t.border_strong } else { t.border_subtle })
-        .child(icon(&icons::SEARCH, size::ICON).color(if on { t.text_2 } else { t.text_3 }));
+        .child(icon(icons::SEARCH.at(p.scale), size::ICON).color(if on { t.text_2 } else { t.text_3 }));
     if !on {
         return field
             .role("button")
@@ -153,7 +153,7 @@ fn filter(s: &App, c: &ConnView, p: Paint) -> El {
         .hover(t.hover)
         .press(t.press)
         .on_press_tx(|s: &mut App, tx: &mut Tx| run(s, Action::CloseFilter, tx))
-        .child(icon(&icons::CLOSE, size::ICON).color(t.text_3));
+        .child(icon(icons::CLOSE.at(p.scale), size::ICON).color(t.text_3));
     field.child(input).child(clear)
 }
 

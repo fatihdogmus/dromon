@@ -81,7 +81,7 @@ fn host_row(s: &App, p: Paint, h: &HostSpec) -> El {
         .press(t.press)
         .motion(motion::SNAP)
         .on_press_tx(move |s: &mut App, tx: &mut Tx| super::run(s, Action::SelectHost(id.clone()), tx))
-        .child(icon(&icons::SERVER, size::ICON).color(if active { t.text_2 } else { t.text_3 }))
+        .child(icon(icons::SERVER.at(p.scale), size::ICON).color(if active { t.text_2 } else { t.text_3 }))
         .child(name);
     if let Some(c) = dot_color {
         r = r.child(dot(c, 6.0).mr(space::S1));
@@ -103,7 +103,7 @@ fn footer(p: Paint) -> El {
         .center_y()
         .hover(t.hover)
         .press(t.press)
-        .child(icon(&icons::PLUS, size::ICON).color(t.text_3))
+        .child(icon(icons::PLUS.at(p.scale), size::ICON).color(t.text_3))
         .on_press_tx(|s: &mut App, tx: &mut Tx| super::run(s, Action::QuickConnect, tx))
         .child(text("Quick connect").font(type_::BODY).color(t.text_2).grow(1.0));
     row().w_full().h(44.0).px(space::S2).center_y().border_sides([p.hair, 0.0, 0.0, 0.0], t.border_subtle).child(button)

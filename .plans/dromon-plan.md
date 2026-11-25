@@ -453,7 +453,7 @@ Rules:
 - Reduce motion: every slide and scale becomes a 150 ms opacity cross-fade; `settle` loses its bounce; the poll highlight stays (it's colour, not motion).
 
 ### 6.7 Icons
-- Our own set, drawn on a 16px grid with 1.5px strokes centred on half-pixels so they render crisp at 1× and 2×. Verified by goldens at both scales.
+- Our own set, drawn on a 16px grid, each icon in two bodies (`IconPair`, picked by device scale). 1× bodies: 1 pt strokes on half-pixels; 2× bodies: 1.5 pt strokes on quarter-pixels; straight edges pixel-exact at both scales, verified by a pixel test.
 - Set: folder, folder-open, file, code, text, image, archive, audio, video, PDF, binary/executable, symlink badge, lock badge (no permission), server, connected dot, download, upload, pause, resume, cancel, retry, check, chevrons, search, plus, more, gear, log.
 - **Tint**: icons use `text-2`. Folders use the accent at 70%. File categories get a very desaturated hue (about 35% chroma) to add texture without noise. Selected rows lift icons to `text`.
 - App icon (later): a stylised dromon bow or oar bank inside a rounded square, in mint on near-black.

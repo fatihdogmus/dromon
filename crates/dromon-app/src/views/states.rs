@@ -6,7 +6,7 @@ use rune::{El, LoopSpec, Transition, Tx, col, el, icon, row, text};
 
 use super::widgets::{chord, dot};
 use super::{Paint, run};
-use crate::icons;
+use crate::icons::{self, IconPair};
 use crate::state::{Action, App, ConnView};
 use crate::theme::{motion, radius, size, space, type_};
 
@@ -25,7 +25,7 @@ fn centred(key: &'static str, p: Paint, headline: &str, sub: Option<El>) -> El {
         .children(sub)
 }
 
-fn button(p: Paint, key: &'static str, glyph: &'static rune::Icon, label: &'static str, action: Action) -> El {
+fn button(p: Paint, key: &'static str, glyph: &'static IconPair, label: &'static str, action: Action) -> El {
     let t = p.t;
     row()
         .key(key)
@@ -44,7 +44,7 @@ fn button(p: Paint, key: &'static str, glyph: &'static rune::Icon, label: &'stat
         .press(t.press)
         .press_scale(0.97)
         .on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, action.clone(), tx))
-        .child(icon(glyph, size::ICON).color(t.text_2))
+        .child(icon(glyph.at(p.scale), size::ICON).color(t.text_2))
         .child(text(label).font(type_::BODY_STRONG).color(t.text))
 }
 
@@ -84,7 +84,7 @@ pub fn denied(p: Paint, c: &ConnView) -> El {
         .mb(space::S2)
         .fill(t.hover)
         .border(p.hair, t.border_subtle)
-        .child(icon(&icons::LOCK, 32.0).color(t.text_2));
+        .child(icon(icons::LOCK.at(p.scale), 32.0).color(t.text_2));
     let sub = col()
         .center()
         .gap(space::S2)

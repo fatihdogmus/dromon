@@ -65,13 +65,13 @@ fn header(c: &ConnView, p: Paint) -> El {
         if end {
             r = r.justify_end().pl(space::S1);
             if active {
-                r = r.child(icon(caret, size::ICON).color(t.text_3));
+                r = r.child(icon(caret.at(p.scale), size::ICON).color(t.text_3));
             }
             r.child(txt).pr(space::S1)
         } else {
             r = r.pl(space::S1).child(txt);
             if active {
-                r = r.child(icon(caret, size::ICON).color(t.text_3));
+                r = r.child(icon(caret.at(p.scale), size::ICON).color(t.text_3));
             }
             r.pr(space::S1)
         }
@@ -184,7 +184,7 @@ fn file_icon(p: Paint, e: &Entry, selected: bool) -> El {
         (glyph, color)
     };
     let color = if e.hidden() { color.alpha(color.a * 0.6) } else { color };
-    let mut cell = el().size(size::ICON, size::ICON).child(icon(glyph, size::ICON).color(color));
+    let mut cell = el().size(size::ICON, size::ICON).child(icon(glyph.at(p.scale), size::ICON).color(color));
     if e.kind.is_symlink() {
         let badge = el()
             .absolute(-3.0, 7.0)
@@ -192,7 +192,7 @@ fn file_icon(p: Paint, e: &Entry, selected: bool) -> El {
             .radius(5.0)
             .fill(t.canvas)
             .center()
-            .child(icon(&icons::LINK_BADGE, 10.0).color(t.text_2));
+            .child(icon(icons::LINK_BADGE.at(p.scale), 10.0).color(t.text_2));
         cell = cell.child(badge);
     }
     cell
