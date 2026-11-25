@@ -68,6 +68,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
       - name: Smoke (headless, window under Xvfb, real connect)
+        timeout-minutes: 20
         run: |
           bash scripts/smoke-app.sh
           bash scripts/smoke-app.sh --window
@@ -120,7 +121,9 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Tests
         run: cargo test --workspace --locked
-      # Headless rendering on Windows runners (WARP) is unproven; non-blocking until it is.
+      # Headless rendering on Windows runners (WARP) is unproven, and so far it hangs at the
+      # first render: non-blocking and bounded until it works.
       - name: Smoke (headless)
         continue-on-error: true
+        timeout-minutes: 5
         run: bash scripts/smoke-app.sh

@@ -197,7 +197,9 @@ async fn openssh_asks_for_a_passphrase_through_the_helper() {
         .stdin(Stdio::null())
         .output();
     let made = match made {
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+        // On CI the runners ship OpenSSH: a missing ssh-keygen there is a failure, not a skip,
+        // so a green Windows run means Windows' own OpenSSH really asked our helper.
+        Err(e) if e.kind() == io::ErrorKind::NotFound && std::env::var_os("CI").is_none() => {
             eprintln!("skipped: no {}", keygen.display());
             return;
         }

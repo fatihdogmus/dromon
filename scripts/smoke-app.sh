@@ -179,9 +179,10 @@ connect() {
   [[ "$os" == Linux ]] || fail "[connect] needs Linux (Xvfb and the Docker fixture)"
   docker info >/dev/null 2>&1 || fail "[connect] Docker is not reachable"
   note "[connect] starting the sshd fixture (DROMON_FIXTURE_KEEP=1)"
+  # Bounded: a hang here (CI saw one) fails with the test's own log instead of stalling.
   DROMON_FIXTURE_KEEP=1 DROMON_REQUIRE_DOCKER=1 \
-    cargo test -p dromon-sftp --quiet --test fixture -- --exact list_mixed_folder >"$work/fixture.log" 2>&1 \
-    || { cat "$work/fixture.log" >&2; fail "[connect] the fixture test failed"; }
+    timeout 300 cargo test -p dromon-sftp --quiet --test fixture -- --exact list_mixed_folder --nocapture >"$work/fixture.log" 2>&1 \
+    || { cat "$work/fixture.log" >&2; fail "[connect] the fixture test failed or took over 5 min"; }
   # dromon-testkit: sshd fixture on 127.0.0.1:<port>, container <id>, …
   # dromon-testkit: …; clean up with `docker rm -f <id>; rm -r <key folder>`
   local port
