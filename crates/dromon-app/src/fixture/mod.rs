@@ -9,6 +9,8 @@
 //!   lifecycle machine, prompts with the real retry errors, log lines, 512-entry pages).
 //! - [`demo`] is the built-in demo (`assets/fixtures/demo.json`): what scenes, the in-crate tests
 //!   and `DROMON_MOCK=1` run on.
+//! - [`transfers::Engine`] runs transfers on it: the real queue (`dromon_transfer::queue`) with
+//!   fake, instant I/O against the folder trees; finished uploads show in later listings.
 //!
 //! `dromon --fixture <file.json>` runs the app on a fixture: no service thread, no ssh, no ssh
 //! config; the fixture file is the only thing it reads.
@@ -16,21 +18,29 @@
 mod backend;
 mod generate;
 mod parse;
+pub mod transfers;
 
 #[cfg(test)]
 mod backend_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod transfers_tests;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use dromon_core::{Entry, EntryKind, Error, HostSpec, RemotePath};
+use dromon_transfer::JobView;
 
 pub use backend::FixtureBackend;
 pub use generate::Generator;
 pub use parse::parse;
+
+/// Ids of the fixture's own job snapshots start above this, clear of the ids a session's jobs get
+/// (which count from 1).
+pub const FIXTURE_JOBS: u64 = 1 << 32;
 
 use crate::state::{App, HostDirectory};
 
@@ -52,6 +62,9 @@ pub struct Fixture {
     pub hosts: Vec<HostSpec>,
     /// By host alias. A host without a server can't be resolved.
     pub servers: BTreeMap<String, Server>,
+    /// Transfer jobs already in the popover when the app starts, newest first: pictures of
+    /// mid-progress states, which never move by themselves.
+    pub transfers: Vec<JobView>,
 }
 
 /// One server: where sessions start, how sign-in goes, and its folders.
@@ -228,7 +241,11 @@ fn fixed_wall_ms() -> i64 {
 pub fn app(fx: Arc<Fixture>) -> App {
     let now = fx.now.unwrap_or_else(crate::now_secs);
     let fixed = fx.now;
+    let jobs = fx.transfers.clone();
     let mut app = App::new(fx.host_directory(), now, Box::new(FixtureBackend::new(fx)));
+    if !jobs.is_empty() {
+        app.transfers.set(jobs);
+    }
     if let Some(now) = fixed {
         WALL_MS.store(now * 1000, Ordering::Relaxed);
         app.wall_ms = fixed_wall_ms;

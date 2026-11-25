@@ -6,7 +6,7 @@ use dromon_core::{ConnStatus, RemotePath};
 use rune::{El, Key, KeyEvent, LoopSpec, Tx, el, icon, row, text, text_input};
 
 use super::widgets::{chord, icon_button, kbd};
-use super::{Paint, run};
+use super::{Paint, run, transfers};
 use crate::icons;
 use crate::state::{Action, App, ConnView, Filter};
 use crate::theme::{radius, size, space, type_};
@@ -44,8 +44,7 @@ pub fn view(s: &App, p: Paint) -> El {
     if let Some(c) = c {
         bar = bar.child(filter(s, c, p));
     }
-    bar.child(icon_button(p, "tb-transfers", "Transfers", &icons::DOWNLOAD, None))
-        .child(kbd(p, &chord("mod+k")).ml(space::S1))
+    bar.child(transfers::button(s, p)).child(kbd(p, &chord("mod+k")).ml(space::S1))
 }
 
 /// Breadcrumbs for the folder on screen, or what's happening instead.

@@ -1,12 +1,15 @@
 //! The single window (§6.2): sidebar | toolbar, content, status bar. Each part is a function of
 //! `&App` and a [`Paint`]; handlers turn input into `state::Action`s and run them with [`run`].
 
+mod conflict;
+mod drop;
 mod list;
 mod sheets;
 mod sidebar;
 mod states;
 mod status;
 mod toolbar;
+mod transfers;
 mod widgets;
 
 use rune::{ChromeInsets, Cx, El, Tx, col, row};
@@ -72,8 +75,16 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         .w_full()
         .h_full()
         .fill(t.canvas)
+        // Files copied in Finder or Explorer, pasted with ⌘V: uploaded to the folder on screen.
+        // Text alone pastes nothing here (a focused field takes its own pastes).
+        .on_paste_content(|s: &mut App, content: &rune::ClipboardContent, tx: &mut Tx| {
+            if !content.files().is_empty() {
+                run(s, Action::Upload { paths: content.files().to_vec(), folder: None }, tx);
+            }
+        })
         .child(sidebar::view(s, p))
         .child(main)
+        .children(transfers::popover(s, p))
         .children(sheets::layer(s, p))
 }
 
@@ -84,7 +95,7 @@ fn content(s: &App, p: Paint) -> El {
         Some(c) => match &c.status {
             dromon_core::ConnStatus::Failed(msg) => states::failed(s, c, msg, p),
             dromon_core::ConnStatus::Disconnected => states::disconnected(s, c, p),
-            _ => list::view(s, c, p),
+            _ => drop::area(s, c, list::view(s, c, p), p),
         },
     };
     col().key("content").w_full().grow(1.0).min_h(0.0).fill(p.t.canvas).child(body)

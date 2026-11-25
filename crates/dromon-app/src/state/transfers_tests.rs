@@ -207,6 +207,70 @@ fn revealing_an_upload_lists_its_folder_and_selects_it() {
 }
 
 #[test]
+fn a_file_drag_shows_where_it_would_upload_and_moving_on_doesnt_lose_it() {
+    let (mut s, rec) = connected();
+    let hover = |s: &mut App, target: DropTarget, over: bool| s.act(Action::DropHover { target, over, count: 3 });
+    hover(&mut s, DropTarget::List, true);
+    assert_eq!(s.transfers.drop, Some(DropHover { target: DropTarget::List, count: 3 }));
+    // Onto a folder row: the list hears its hover end first, then the row its start.
+    hover(&mut s, DropTarget::List, false);
+    hover(&mut s, DropTarget::Folder("uploads".into()), true);
+    assert_eq!(s.transfers.drop.as_ref().map(|d| &d.target), Some(&DropTarget::Folder("uploads".into())));
+    // A late end from a target the drag already left changes nothing.
+    hover(&mut s, DropTarget::List, false);
+    assert!(s.transfers.drop.is_some());
+    // The drop ends it, and uploads.
+    s.act(Action::Upload { paths: vec![PathBuf::from("/a")], folder: Some("uploads".into()) });
+    assert_eq!(s.transfers.drop, None);
+    assert_eq!(started(&rec).len(), 1);
+
+    // A file row isn't a folder, and an empty drag shows nothing.
+    hover(&mut s, DropTarget::Folder("index.html".into()), true);
+    assert_eq!(s.transfers.drop, None);
+    s.act(Action::DropHover { target: DropTarget::List, over: true, count: 0 });
+    assert_eq!(s.transfers.drop, None);
+    // Nor while the connection is away.
+    s.conn_mut().unwrap().status = dromon_core::ConnStatus::Reconnecting { attempt: 1 };
+    hover(&mut s, DropTarget::List, true);
+    assert_eq!(s.transfers.drop, None);
+}
+
+#[test]
+fn the_conflict_sheet_waits_behind_prompts_and_holds_the_keyboard() {
+    let (mut s, rec) = connected();
+    let mut j = job(1, JobKind::Upload, TaskState::Preparing { files_found: 0 }, 0, 0);
+    j.conflict = Some(ConflictView { name: "index.html".into(), folder: RemotePath::new(SITE), existing_is_dir: false, more: 0 });
+    s.apply(ServiceEvent::Transfers(vec![j]));
+    assert_eq!(s.conflict_on_screen().map(|(id, _)| id), Some(JobId(1)));
+
+    // The list's shortcuts don't reach behind it.
+    s.act(Action::Click { name: "robots.txt".into(), extend: false, toggle: false });
+    s.shortcut(crate::state::Shortcut::Move { delta: 1, extend: false }, 0.0);
+    s.shortcut(crate::state::Shortcut::Download, 0.0);
+    assert_eq!(s.conn().unwrap().selection.cursor(), Some("robots.txt"));
+    assert!(started(&rec).is_empty());
+
+    // A prompt comes first.
+    let prompt = dromon_core::Prompt {
+        id: dromon_core::PromptId(1),
+        host: prod(),
+        kind: dromon_core::PromptKind::Password,
+        text: "pw: ".into(),
+        error: None,
+    };
+    s.apply(ServiceEvent::Prompt(prompt));
+    assert!(s.conflict_on_screen().is_none());
+}
+
+#[test]
+fn cmd_d_downloads_the_selection() {
+    let (mut s, rec) = connected();
+    s.act(Action::Click { name: "robots.txt".into(), extend: false, toggle: false });
+    s.shortcut(crate::state::Shortcut::Download, 0.0);
+    assert_eq!(started(&rec).len(), 1);
+}
+
+#[test]
 fn revealing_never_connects_a_host() {
     let mut s = fixture::app(fixture::demo());
     let mut j = job(1, JobKind::Upload, TaskState::Done, 1, 1);

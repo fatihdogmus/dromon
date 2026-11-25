@@ -40,6 +40,25 @@ pub struct Transfers {
     pub tab: Tab,
     /// The conflict sheet's "Apply to all" checkbox.
     pub apply_all: bool,
+    /// Files from another app are being dragged over a place that takes them (§3.6).
+    pub drop: Option<DropHover>,
+}
+
+/// Where a file drag would upload to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DropTarget {
+    /// The list area: the folder on screen.
+    List,
+    /// A folder row: that subfolder.
+    Folder(String),
+}
+
+/// A file drag over a drop target: the outline, the row lift and the pill.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DropHover {
+    pub target: DropTarget,
+    /// How many items the drag carries.
+    pub count: usize,
 }
 
 impl Transfers {
@@ -97,7 +116,11 @@ impl App {
                 let names = self.picked_rows();
                 self.download(&names);
             }
-            Action::Upload { paths, folder } => self.upload(paths, folder),
+            Action::Upload { paths, folder } => {
+                self.transfers.drop = None;
+                self.upload(paths, folder);
+            }
+            Action::DropHover { target, over, count } => self.drop_hover(target, over, count),
             Action::Transfer(cmd) => self.send(Command::Transfer(cmd)),
             Action::ResolveConflict(choice) => {
                 if let Some((job, _)) = self.transfers.conflict() {
@@ -114,6 +137,29 @@ impl App {
                 None => {}
             },
             _ => {}
+        }
+    }
+
+    /// The name clash the conflict sheet asks about: [`Transfers::conflict`] while no prompt
+    /// sheet is open (prompts come first) and the transfers popover is closed (its row says the
+    /// job waits, and offers to answer: that closes the popover and the sheet comes up).
+    pub fn conflict_on_screen(&self) -> Option<(JobId, &ConflictView)> {
+        if self.ui.sheets.is_open() || self.transfers.open { None } else { self.transfers.conflict() }
+    }
+
+    /// A file drag came onto `target` (`over`) or left it. A drag only shows where it would
+    /// upload while the connection takes uploads; leaving a target that isn't the current one
+    /// (the drag already moved on to another) changes nothing.
+    fn drop_hover(&mut self, target: DropTarget, over: bool, count: usize) {
+        if over {
+            let live = self.conn().is_some_and(|c| c.interactive());
+            let folder_ok = match &target {
+                DropTarget::List => true,
+                DropTarget::Folder(name) => self.conn().and_then(|c| c.find(name)).is_some_and(|e| e.kind.is_dir_like()),
+            };
+            self.transfers.drop = (live && folder_ok && count > 0).then_some(DropHover { target, count });
+        } else if self.transfers.drop.as_ref().is_some_and(|d| d.target == target) {
+            self.transfers.drop = None;
         }
     }
 

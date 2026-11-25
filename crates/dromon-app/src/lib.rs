@@ -34,6 +34,8 @@ mod views;
 mod ui_sheet_tests;
 #[cfg(test)]
 mod ui_tests;
+#[cfg(test)]
+mod ui_transfer_tests;
 
 use rune::{App as RuneApp, AppSpec, KeyEvent, KeyPlatform, Titlebar, Tx};
 

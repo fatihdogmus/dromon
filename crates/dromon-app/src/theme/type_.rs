@@ -23,3 +23,5 @@ pub const DISPLAY: TextStyle = TextStyle::new(20.0, 600.0).lh(24.0).tracking(-0.
 pub const MONO: TextStyle = TextStyle::new(12.0, 400.0).lh(16.0).mono();
 /// Keyboard hints (`⌘K`), 11/14.
 pub const KBD: TextStyle = TextStyle::new(11.0, 500.0).lh(14.0).features(TNUM);
+/// The count badge on the toolbar's transfers button: 10/12, 600, tabular figures.
+pub const BADGE: TextStyle = TextStyle::new(10.0, 600.0).lh(12.0).features(TNUM);

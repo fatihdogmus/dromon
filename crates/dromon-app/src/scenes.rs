@@ -2,12 +2,15 @@
 //! events a user and the service would produce. They start from the demo fixture (on its clock),
 //! or from `--fixture`'s when one is given; the goldens are the demo's.
 
+use std::time::Duration;
+
 use dromon_core::{ConnStatus, HostId, Prompt, PromptId, PromptKind, RemotePath};
+use dromon_transfer::{ConflictView, JobId, JobKind, JobView, Progress, Reveal, TaskState};
 use rune::TextEdit;
 
 use crate::fixture;
 use crate::state::log::LogBuffer;
-use crate::state::{Action, App, Effect, ServiceEvent, Silent};
+use crate::state::{Action, App, DropTarget, Effect, ServiceEvent, Silent, Tab};
 use crate::theme::Appearance;
 
 /// The demo's big folder: 10,000 photos.
@@ -154,6 +157,100 @@ pub fn connection_log(s: &mut App) {
     act(s, Action::OpenLog);
 }
 
+/// A transfer job as the engine would report it, at `done` of `total` bytes.
+fn job(id: u64, kind: JobKind, host: &str, title: &str, state: TaskState, done: u64, total: u64) -> JobView {
+    JobView {
+        id: JobId(id),
+        kind,
+        host: HostId(host.into()),
+        title: title.into(),
+        state,
+        progress: Progress { done, total },
+        files_done: 0,
+        files_total: 1,
+        speed: None,
+        eta: None,
+        waiting_for_connection: false,
+        conflict: None,
+        reveal: None,
+        errors: Vec::new(),
+        skipped: Vec::new(),
+    }
+}
+
+/// The session's transfers: every state a download can be in, and three uploads (one waits on a
+/// name clash in /var/www/site when `clash`).
+fn transfer_jobs(clash: bool) -> Vec<JobView> {
+    use JobKind::{Download, Upload};
+    let mut releases = job(9, Download, "prod", "releases", TaskState::Running, 12_400_000, 80_000_000);
+    (releases.speed, releases.eta, releases.files_done, releases.files_total) = (Some(8_100_000.0), Some(Duration::from_secs(9)), 14, 128);
+    let mut hero = job(8, Upload, "prod", "hero.png", TaskState::Running, 3_100_000, 4_600_000);
+    (hero.speed, hero.eta) = (Some(640_000.0), Some(Duration::from_secs(3)));
+    let mut site = job(7, Upload, "prod", "2 items", TaskState::Preparing { files_found: 1 }, 0, 0);
+    if clash {
+        site.conflict = Some(ConflictView { name: "index.html".into(), folder: RemotePath::new("/var/www/site"), existing_is_dir: false, more: 0 });
+    }
+    let node = job(6, Download, "prod", "node_modules", TaskState::Preparing { files_found: 1204 }, 0, 0);
+    let backup = job(5, Download, "prod", "backup-2026-11-01.tar.gz", TaskState::Paused, 7_300_000, 18_204_116);
+    let mut photos = job(4, Download, "nas", "photos", TaskState::Running, 410_000_000, 1_020_000_000);
+    photos.waiting_for_connection = true;
+    let mut syslog = job(3, Download, "prod", "syslog", TaskState::Failed { error: "1 file failed".into() }, 0, 2_210_000);
+    syslog.errors = vec!["syslog: You don't have access to /var/log/syslog".into()];
+    let mut robots = job(2, Upload, "prod", "robots.txt", TaskState::Done, 68, 68);
+    robots.reveal = Some(Reveal::Remote(HostId("prod".into()), RemotePath::new("/var/www/site/robots.txt")));
+    let mut index = job(1, Download, "prod", "index.html", TaskState::Done, 14_812, 14_812);
+    index.reveal = Some(Reveal::Local("/Users/me/Downloads/index.html".into()));
+    vec![releases, hero, site, node, backup, photos, syslog, robots, index]
+}
+
+/// The transfers popover open on Downloads: running with speed and time left, preparing,
+/// paused, waiting for the connection, failed and done.
+pub fn transfers(s: &mut App) {
+    listing(s);
+    s.apply(ServiceEvent::Transfers(transfer_jobs(false)));
+    act(s, Action::ToggleTransfers);
+    act(s, Action::TransfersTab(Tab::Downloads));
+}
+
+/// The Uploads tab: running, waiting on a name clash (its sheet waits until the popover
+/// closes), and done.
+pub fn transfers_uploads(s: &mut App) {
+    listing(s);
+    s.apply(ServiceEvent::Transfers(transfer_jobs(true)));
+    act(s, Action::ToggleTransfers);
+    act(s, Action::TransfersTab(Tab::Uploads));
+}
+
+/// An upload of four items clashes with index.html, and three more after it.
+pub fn transfer_conflict(s: &mut App) {
+    listing(s);
+    let mut j = job(1, JobKind::Upload, "prod", "4 items", TaskState::Preparing { files_found: 0 }, 0, 0);
+    j.conflict = Some(ConflictView { name: "index.html".into(), folder: RemotePath::new("/var/www/site"), existing_is_dir: false, more: 2 });
+    s.apply(ServiceEvent::Transfers(vec![j]));
+}
+
+/// Three files dragged from Finder over the list.
+pub fn drop_list(s: &mut App) {
+    listing(s);
+    act(s, Action::DropHover { target: DropTarget::List, over: true, count: 3 });
+}
+
+/// Two files dragged over the uploads folder's row.
+pub fn drop_folder(s: &mut App) {
+    listing(s);
+    act(s, Action::DropHover { target: DropTarget::Folder("uploads".into()), over: true, count: 2 });
+}
+
+/// Two jobs running, 40% of their bytes done, the popover closed: the ring and its badge.
+pub fn toolbar_ring(s: &mut App) {
+    listing(s);
+    let mut site = job(3, JobKind::Download, "prod", "site", TaskState::Running, 24_000_000, 50_000_000);
+    site.speed = Some(4_000_000.0);
+    let logs = job(2, JobKind::Upload, "prod", "logs", TaskState::Preparing { files_found: 12 }, 0, 10_000_000);
+    let done = job(1, JobKind::Download, "prod", "index.html", TaskState::Done, 14_812, 14_812);
+    s.apply(ServiceEvent::Transfers(vec![site, logs, done]));
+}
+
 /// A named state: what `AppSpec::scenes` takes.
 pub type Scene = (&'static str, fn(&mut App));
 
@@ -174,4 +271,10 @@ pub const SCENES: &[Scene] = &[
     ("host-key", host_key),
     ("confirm", confirm),
     ("connection-log", connection_log),
+    ("transfers", transfers),
+    ("transfers-uploads", transfers_uploads),
+    ("transfer-conflict", transfer_conflict),
+    ("drop-list", drop_list),
+    ("drop-folder", drop_folder),
+    ("toolbar-ring", toolbar_ring),
 ];

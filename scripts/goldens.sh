@@ -37,7 +37,8 @@ bin="$root/target/debug/dromon"
 mkdir -p "$out"
 
 scenes=(welcome connecting listing listing-sorted-size big-folder empty-folder permission-denied reconnecting filter light
-  auth-password auth-password-error host-key confirm connection-log)
+  auth-password auth-password-error host-key confirm connection-log
+  transfers transfers-uploads transfer-conflict drop-list drop-folder toolbar-ring)
 
 for scene in "${scenes[@]}"; do
   theme=dark

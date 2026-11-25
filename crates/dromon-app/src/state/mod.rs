@@ -32,7 +32,7 @@ pub use selection::{Selection, TypeSelect};
 pub use service::Recorder;
 pub use service::{Backend, Command, ServiceEvent, Silent, TransferCommand};
 pub use sheets::{Sheet, Sheets};
-pub use transfers::{Tab, Transfers};
+pub use transfers::{DropHover, DropTarget, Tab, Transfers};
 
 use dromon_transfer::{ConflictChoice, JobId};
 
@@ -148,6 +148,9 @@ pub enum Action {
     /// A click on a finished row: show the file in Finder/Explorer, or the folder it was
     /// uploaded to.
     RevealTransfer(JobId),
+    /// A file drag from another app came onto a drop target (`over`) or left it; `count` is
+    /// how many items it carries.
+    DropHover { target: DropTarget, over: bool, count: usize },
 }
 
 /// What an action asks the view layer to do afterwards.
@@ -479,14 +482,20 @@ impl App {
             | Action::ToggleApplyAll
             | Action::ToggleTransfers
             | Action::TransfersTab(_)
-            | Action::RevealTransfer(_) => self.transfer_action(action, &mut fx),
+            | Action::RevealTransfer(_)
+            | Action::DropHover { .. } => self.transfer_action(action, &mut fx),
         }
         fx
     }
 
-    /// Maps a shortcut to its action (`now` is for type-to-select).
+    /// Maps a shortcut to its action (`now` is for type-to-select). The conflict sheet is
+    /// modal like the prompt sheets: while it's up, the list's shortcuts do nothing.
     pub fn shortcut(&mut self, sc: Shortcut, now: f64) -> Vec<Effect> {
+        if self.conflict_on_screen().is_some() {
+            return Vec::new();
+        }
         let action = match sc {
+            Shortcut::Download => Action::Download,
             Shortcut::Back => Action::Back,
             Shortcut::Forward => Action::Forward,
             Shortcut::Up => Action::GoUp,

@@ -13,6 +13,8 @@ pub enum Shortcut {
     SelectAll,
     ToggleHidden,
     Filter,
+    /// ⌘D (Ctrl+D elsewhere): download the selection.
+    Download,
     /// Escape: close the filter, else clear the selection.
     Escape,
     Move { delta: isize, extend: bool },
@@ -33,6 +35,7 @@ pub fn shortcut(ev: &KeyEvent, platform: KeyPlatform) -> Option<Shortcut> {
         Key::Command(']') => Shortcut::Forward,
         Key::Command('a') => Shortcut::SelectAll,
         Key::Command('f') => Shortcut::Filter,
+        Key::Command('d') if !m.shift && !m.alt => Shortcut::Download,
         // ⌘⇧. arrives as '.' or, with Shift applied by the layout, '>'.
         Key::Command('.') if m.shift => Shortcut::ToggleHidden,
         Key::Command('>') => Shortcut::ToggleHidden,
@@ -97,6 +100,16 @@ mod tests {
         let ctrl = Mods { ctrl: true, logo: false, ..CMD };
         assert_eq!(on(Key::Command('h'), ctrl, KeyPlatform::Linux), Some(Shortcut::ToggleHidden));
         assert_eq!(k(Key::Command('f'), CMD), Some(Shortcut::Filter));
+    }
+
+    #[test]
+    fn download_is_cmd_d_everywhere() {
+        assert_eq!(k(Key::Command('d'), CMD), Some(Shortcut::Download));
+        let ctrl = Mods { ctrl: true, logo: false, ..CMD };
+        assert_eq!(on(Key::Command('d'), ctrl, KeyPlatform::Windows), Some(Shortcut::Download));
+        assert_eq!(on(Key::Command('d'), ctrl, KeyPlatform::Linux), Some(Shortcut::Download));
+        assert_eq!(k(Key::Command('d'), Mods { shift: true, ..CMD }), None, "⌘⇧D is left alone");
+        assert_eq!(k(Key::Text("d".into()), NONE), Some(Shortcut::Type("d".into())), "plain d still types");
     }
 
     #[test]

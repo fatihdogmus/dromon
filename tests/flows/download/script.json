@@ -1,0 +1,11 @@
+{
+  "description": "On the built-in demo: open prod, select README.md and robots.txt (click, then Shift+↓), press ⌘D (Ctrl+D elsewhere); the fixture's engine downloads both at once, so the toolbar glyph lights up without a ring. Open the transfers popover: one job, “2 items”, done.",
+  "events": [
+    {"t": 0.5, "type": "tap", "key": "host-prod"},
+    {"t": 1.5, "type": "tap", "key": "rows/README.md"},
+    {"t": 2.0, "type": "key", "name": "Down", "shift": true},
+    {"t": 2.5, "type": "key", "name": "d", "cmd": true},
+    {"t": 3.5, "type": "tap", "key": "tb-transfers"},
+    {"t": 4.5, "type": "mark", "name": "end"}
+  ]
+}

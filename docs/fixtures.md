@@ -93,6 +93,7 @@ hostname 192.0.2.1").
 | `now` | optional | The clock: RFC 3339 (`"2026-11-25T14:00:00Z"`, any offset) or epoch seconds. Relative dates ("2 min ago") are measured from it, and the connection log stamps lines with it. Without it, the system clock. Set it, so runs are the same every time. |
 | `hosts` | optional | The sidebar's hosts, in order (below). |
 | `servers` | optional | By host alias: what each host's server does (below). A server for an alias that isn't in `hosts` is an error. |
+| `transfers` | optional | Transfer jobs already in the transfers popover when the app starts, newest first (below, "Transfers"). |
 
 ## Hosts
 
@@ -201,6 +202,63 @@ Many similar entries from one line, the same on every run:
 | `mtime` | optional | A date, or `{"end", "every", "jitter"?}`: entry `i` (from 0) of `count` is `every × (count − i)` seconds before `end`, and up to `jitter` seconds earlier, in whole minutes. |
 | `mode` | optional | As for entries. |
 | `seed` | optional | Random draws come from this string; default: the folder's path (`<path>#<n>` for its n-th generator after the first). |
+
+## Transfers
+
+Downloads (⌘D, double-click a file) and uploads (files dropped on the list or a folder row, ⌘V
+with files copied in Finder or Explorer) run on the fixture through the real transfer queue
+(`dromon_transfer::queue`) with fake, instant I/O, the same on every run:
+
+- A job starts when its host is connected; until then it says "Waiting for connection".
+- A download takes a free Chrome-style name (`index (1).html`) when it would land on a name an
+  earlier download of the session took. A folder download walks the folder tree as listed here;
+  links to folders inside it and special files are left out (the job lists them as skipped).
+- An upload asks the server's tree whether its name exists. If it does, the conflict sheet asks:
+  Replace, Keep both (a free name like `index (1).html`) or Skip, with "Apply to all". Each
+  uploaded path counts as one file of 1,200,000 bytes (nothing on your disk is read; a folder is
+  one file too). An upload into a folder that doesn't exist fails with why.
+- Files are done the moment they start: jobs finish at once, so the ring never shows on its own.
+- A finished upload is added to its folder: the folder on screen lists again at once (as the
+  real app's polling would notice), and later listings show it.
+
+`transfers` adds jobs the session starts with, for pictures of states the instant engine never
+holds still in (a transfer half done, paused, failed). They stay listed after the session's own
+jobs; their buttons move them along the task state machine (pause, resume, cancel, retry,
+answering a clash) and Clear finished removes the finished ones, but they never progress.
+
+```json
+"transfers": [
+  {"kind": "download", "host": "prod", "title": "releases", "state": "running", "done": 12400000, "total": 80000000,
+   "files": [14, 128], "speed": 8100000, "eta": 9},
+  {"kind": "download", "host": "prod", "title": "node_modules", "state": "preparing", "found": 1204},
+  {"kind": "download", "host": "nas", "title": "photos", "state": "running", "done": 410000000, "total": 1020000000, "waiting": true},
+  {"kind": "upload", "host": "prod", "title": "2 items", "state": "preparing",
+   "conflict": {"name": "index.html", "folder": "/var/www/site", "more": 1}},
+  {"kind": "download", "host": "prod", "title": "syslog", "state": "failed", "error": "1 file failed",
+   "errors": ["syslog: You don't have access to /var/log/syslog"]},
+  {"kind": "upload", "host": "prod", "title": "robots.txt", "state": "done", "done": 68, "total": 68,
+   "reveal": "/var/www/site/robots.txt"}
+]
+```
+
+| Field | | |
+|---|---|---|
+| `kind` | required | `"download"` (the Downloads tab) or `"upload"` (Uploads). |
+| `host` | required | A host alias from `hosts`. |
+| `title` | required | The row's name: `"report.pdf"`, `"photos"`, `"3 items"`. |
+| `state` | required | `"queued"`, `"preparing"`, `"running"`, `"paused"`, `"done"`, `"failed"` or `"cancelled"`. |
+| `found` | preparing | Files found so far ("Preparing… 1,204 files"). Default 0. |
+| `error` | failed, required | Why it failed ("Failed: …"). |
+| `done`, `total` | optional | Bytes copied and in all (`done` at most `total`). Default 0: the ring and bars sum them. |
+| `files` | optional | `[done, total]` files. |
+| `speed` | optional | Bytes per second, shown while running ("8.1 MB/s"). |
+| `eta` | optional | Seconds left, shown while running ("about 9 s"). |
+| `waiting` | optional | `true`: paused because the connection is away ("Waiting for connection"). |
+| `conflict` | optional | `{"name", "folder", "dir"?, "more"?}`: the job waits on a name clash (`dir`: the existing item is a folder; `more`: how many clashes follow, for "Apply to all N conflicts"). The conflict sheet asks about the oldest job with one. |
+| `reveal` | optional | Where a click on the finished row goes: a local path (downloads; the file manager is never opened from headless runs) or an absolute server path (uploads). |
+| `errors`, `skipped` | optional | Lines for the row's tooltip ("a.txt: Permission denied", "cache: a link to a folder"). |
+
+Ids are given in order, newest first, above any id the session's own jobs get.
 
 ## The built-in demo
 

@@ -1,0 +1,11 @@
+{
+  "description": "On the built-in demo: open prod, drag index.html (already in the folder) and notes.txt from Finder over the list (outline and pill), drop them, answer the name clash with Keep both; both upload at once (the fixture's engine) and the folder lists again with “index (1).html” and notes.txt. Then open the transfers popover: the upload is done.",
+  "events": [
+    {"t": 0.5, "type": "tap", "key": "host-prod"},
+    {"t": 1.5, "drag_files": {"paths": ["/Users/me/index.html", "/Users/me/notes.txt"], "at": [760, 600]}},
+    {"t": 2.5, "drop_files": {"paths": ["/Users/me/index.html", "/Users/me/notes.txt"], "at": [760, 600]}},
+    {"t": 3.5, "type": "tap", "key": "conflict-keep-both"},
+    {"t": 4.5, "type": "tap", "key": "tb-transfers"},
+    {"t": 5.5, "type": "mark", "name": "end"}
+  ]
+}

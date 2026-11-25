@@ -5,12 +5,15 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::path::PathBuf;
+use std::time::Duration;
 
 use dromon_core::{Entry, EntryKind, HostId, HostSource, HostSpec, LinkTarget, RemotePath};
+use dromon_transfer::{ConflictView, JobId, JobKind, JobView, Progress, Reveal, TaskState};
 use serde_json::{Map, Value};
 
 use super::generate::{Generator, MAX_COUNT, Mtime, Pattern, Size};
-use super::{Fixture, Item, Node, Server, Step, TreeError, VERSION, default_mode, default_size};
+use super::{FIXTURE_JOBS, Fixture, Item, Node, Server, Step, TreeError, VERSION, default_mode, default_size};
 
 /// A fixture that can't be used, and where.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -185,7 +188,7 @@ pub fn parse(src: &str) -> Result<Fixture, ParseError> {
     let Some(top) = doc.as_object() else {
         return root.err(format!("a fixture is a JSON object, found {}", what(&doc)));
     };
-    known(top, &["version", "description", "now", "hosts", "servers"], &root)?;
+    known(top, &["version", "description", "now", "hosts", "servers", "transfers"], &root)?;
     let at = root.key("version");
     match top.get("version") {
         None => return at.err(format!("missing (this Dromon reads version {VERSION})")),
@@ -211,7 +214,160 @@ pub fn parse(src: &str) -> Result<Fixture, ParseError> {
             servers.insert(alias.clone(), server(v, &at)?);
         }
     }
-    Ok(Fixture { now, hosts, servers })
+    let transfers = match optional(top, "transfers") {
+        Some(v) => transfers(v, &root.key("transfers"), &hosts)?,
+        None => Vec::new(),
+    };
+    Ok(Fixture { now, hosts, servers, transfers })
+}
+
+/// The `transfers` list: job snapshots, newest first (see `docs/fixtures.md`, "Transfers").
+fn transfers(v: &Value, at: &At, hosts: &[HostSpec]) -> R<Vec<JobView>> {
+    let items = list(v, at)?;
+    let mut out = Vec::with_capacity(items.len());
+    for (i, v) in items.iter().enumerate() {
+        let at = at.item("job", i);
+        let m = object(v, &at)?;
+        known(
+            m,
+            &[
+                "kind", "host", "title", "state", "found", "error", "done", "total", "files", "speed", "eta", "waiting", "conflict",
+                "reveal", "errors", "skipped",
+            ],
+            &at,
+        )?;
+        let kind = match string(required(m, "kind", &at)?, &at.key("kind"))?.as_str() {
+            "download" => JobKind::Download,
+            "upload" => JobKind::Upload,
+            other => return at.key("kind").err(format!("unknown kind {other:?} (expected download or upload)")),
+        };
+        let host = text(required(m, "host", &at)?, &at.key("host"))?;
+        if !hosts.iter().any(|h| h.alias == host) {
+            return at.key("host").err(format!("{host:?} is not a host (add it to hosts)"));
+        }
+        let title = text(required(m, "title", &at)?, &at.key("title"))?;
+        let only = |k: &str, state: &str| -> R<()> {
+            match m.get(k) {
+                Some(_) => at.key(k).err(format!("only a {state} job has {k}")),
+                None => Ok(()),
+            }
+        };
+        let state = match string(required(m, "state", &at)?, &at.key("state"))?.as_str() {
+            "preparing" => {
+                only("error", "failed")?;
+                let found = optional(m, "found").map(|v| uint(v, &at.key("found"))).transpose()?.unwrap_or(0);
+                TaskState::Preparing { files_found: found }
+            }
+            "failed" => {
+                only("found", "preparing")?;
+                TaskState::Failed { error: text(required(m, "error", &at)?, &at.key("error"))? }
+            }
+            other => {
+                only("found", "preparing")?;
+                only("error", "failed")?;
+                match other {
+                    "queued" => TaskState::Queued,
+                    "running" => TaskState::Running,
+                    "paused" => TaskState::Paused,
+                    "done" => TaskState::Done,
+                    "cancelled" => TaskState::Cancelled,
+                    _ => {
+                        return at.key("state").err(format!(
+                            "unknown state {other:?} (expected queued, preparing, running, paused, done, failed or cancelled)"
+                        ));
+                    }
+                }
+            }
+        };
+        let bytes = |k: &str| optional(m, k).map(|v| uint(v, &at.key(k))).transpose().map(Option::unwrap_or_default);
+        let (done, total) = (bytes("done")?, bytes("total")?);
+        if total > 0 && done > total {
+            return at.key("done").err(format!("{done} is more than total ({total})"));
+        }
+        let (files_done, files_total) = match optional(m, "files") {
+            None => (0, 0),
+            Some(v) => {
+                let at = at.key("files");
+                let r = list(v, &at)?;
+                let (Some(d), Some(t), 2) = (r.first().and_then(Value::as_u64), r.get(1).and_then(Value::as_u64), r.len()) else {
+                    return at.err("files is [done, total], whole numbers");
+                };
+                if d > t {
+                    return at.err(format!("[{d}, {t}]: done is above total"));
+                }
+                (d, t)
+            }
+        };
+        let seconds = |k: &str| -> R<Option<f64>> {
+            match optional(m, k) {
+                None => Ok(None),
+                Some(v) => match v.as_f64().filter(|x| x.is_finite() && *x >= 0.0) {
+                    Some(x) => Ok(Some(x)),
+                    None => at.key(k).err(format!("expected a number of at least 0, found {v}")),
+                },
+            }
+        };
+        let speed = seconds("speed")?;
+        let eta = seconds("eta")?.map(Duration::from_secs_f64);
+        let waiting = match optional(m, "waiting") {
+            None => false,
+            Some(v) => v.as_bool().map_or_else(|| at.key("waiting").err(format!("expected true or false, found {}", what(v))), Ok)?,
+        };
+        let conflict = optional(m, "conflict").map(|v| conflict(v, &at.key("conflict"))).transpose()?;
+        let host = HostId(host);
+        let reveal = match optional(m, "reveal") {
+            None => None,
+            Some(v) => {
+                let at = at.key("reveal");
+                let path = text(v, &at)?;
+                Some(match kind {
+                    JobKind::Download => Reveal::Local(PathBuf::from(path)),
+                    _ => Reveal::Remote(host.clone(), absolute(&path, &at)?),
+                })
+            }
+        };
+        let lines = |k: &str| -> R<Vec<String>> {
+            match optional(m, k) {
+                None => Ok(Vec::new()),
+                Some(v) => {
+                    let at = at.key(k);
+                    list(v, &at)?.iter().enumerate().map(|(i, v)| text(v, &at.item("line", i))).collect()
+                }
+            }
+        };
+        out.push(JobView {
+            // Newest first, so the first gets the highest id; above any id a session starts.
+            id: JobId(FIXTURE_JOBS + (items.len() - i) as u64),
+            kind,
+            host,
+            title,
+            state,
+            progress: Progress { done, total },
+            files_done,
+            files_total,
+            speed,
+            eta,
+            waiting_for_connection: waiting,
+            conflict,
+            reveal,
+            errors: lines("errors")?,
+            skipped: lines("skipped")?,
+        });
+    }
+    Ok(out)
+}
+
+fn conflict(v: &Value, at: &At) -> R<ConflictView> {
+    let m = object(v, at)?;
+    known(m, &["name", "folder", "dir", "more"], at)?;
+    let name = text(required(m, "name", at)?, &at.key("name"))?;
+    let folder = absolute(&text(required(m, "folder", at)?, &at.key("folder"))?, &at.key("folder"))?;
+    let existing_is_dir = match optional(m, "dir") {
+        None => false,
+        Some(v) => v.as_bool().map_or_else(|| at.key("dir").err(format!("expected true or false, found {}", what(v))), Ok)?,
+    };
+    let more = optional(m, "more").map(|v| uint(v, &at.key("more"))).transpose()?.unwrap_or(0) as usize;
+    Ok(ConflictView { name, folder, existing_is_dir, more })
 }
 
 fn hosts(v: &Value, at: &At) -> R<Vec<HostSpec>> {

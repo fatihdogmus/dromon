@@ -167,6 +167,19 @@ pub static MORE: IconPair = pair!(
     r#"<path d="M3.5 8H3.51M8 8H8.01M12.5 8H12.51" stroke-width="2"/>"#,
     r#"<path d="M3.5 8H3.51M8 8H8.01M12.5 8H12.51" stroke-width="2"/>"#
 );
+pub static PAUSE: IconPair = pair!("dromon-pause", r#"<path d="M5.5 4V12M10.5 4V12"/>"#, r#"<path d="M5.75 4V12M10.25 4V12"/>"#);
+/// Play: a triangle whose upright edge is pixel-exact.
+pub static RESUME: IconPair = pair!(
+    "dromon-resume",
+    r#"<path d="M5.5 3.5V12.5L12.5 8L5.5 3.5Z"/>"#,
+    r#"<path d="M5.25 3.5V12.5L12.5 8L5.25 3.5Z"/>"#
+);
+/// A clockwise turn back to the top, with its arrowhead's straight edges on the grid.
+pub static RETRY: IconPair = pair!(
+    "dromon-retry",
+    r#"<path d="M13 8A5 5 0 1 1 11.54 4.46"/><path d="M11.5 1.5V4.5H8.5"/>"#,
+    r#"<path d="M13 8A5 5 0 1 1 11.54 4.46"/><path d="M11.75 1.75V4.75H8.75"/>"#
+);
 pub static CHECK: IconPair = pair!("dromon-check", r#"<path d="M3.5 8.5L6.5 11.5L12.5 4.5"/>"#, r#"<path d="M3.5 8.5L6.5 11.5L12.5 4.5"/>"#);
 /// Three quarters of a ring; spun by a rotation loop while connecting, so its curve stays as drawn.
 pub static SPINNER: IconPair = pair!(

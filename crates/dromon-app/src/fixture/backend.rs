@@ -10,8 +10,11 @@
 //!
 //! There's no clock: a lost connection says when it would retry, then stays reconnecting.
 //! Answers are compared with the fixture's and wiped; nothing logs them.
+//!
+//! Transfer commands go to [`Engine`] (`fixture/transfers.rs`), whose listings (the tree plus
+//! finished uploads) are the ones this backend sends.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
 use dromon_core::{ConnStatus, Error, HostId, HostSpec, Prompt, PromptAnswer, PromptId, PromptKind, RemotePath};
@@ -19,9 +22,10 @@ use dromon_ssh::{AskpassEnv, AuthAttempt, AuthDecision, PasswordStore, SshComman
 use secrecy::ExposeSecret;
 use zeroize::Zeroize;
 
+use super::transfers::Engine;
 use super::{Fixture, Step};
 use crate::service::lifecycle::{self, Event, Lifecycle, Phase};
-use crate::state::{Backend, Command, ServiceEvent};
+use crate::state::{Backend, Command, ServiceEvent, TransferCommand};
 
 /// Entries per listing page, as the service pages them (§4.4).
 pub const PAGE: usize = 512;
@@ -36,6 +40,8 @@ pub struct FixtureBackend {
     /// Remembered passwords and passphrases, as the service keeps them.
     store: PasswordStore,
     last_prompt: u64,
+    /// Downloads and uploads (`fixture::transfers`); it also owns what uploads add to listings.
+    transfers: Engine,
 }
 
 #[derive(Default)]
@@ -95,7 +101,22 @@ fn first_line(text: &str) -> &str {
 
 impl FixtureBackend {
     pub fn new(fixture: Arc<Fixture>) -> Self {
-        FixtureBackend { fixture, conns: BTreeMap::new(), store: PasswordStore::new(), last_prompt: 0 }
+        let transfers = Engine::new(fixture.clone());
+        FixtureBackend { fixture, conns: BTreeMap::new(), store: PasswordStore::new(), last_prompt: 0, transfers }
+    }
+
+    /// A transfer command: the engine runs it to rest, and a folder on screen that a finished
+    /// upload changed is listed again (as the service's poll would notice).
+    fn transfer(&mut self, cmd: TransferCommand, out: &mut Vec<ServiceEvent>) {
+        let up: BTreeSet<HostId> =
+            self.conns.iter().filter(|(_, c)| c.life.phase == Phase::Ready && c.attempt.is_some()).map(|(h, _)| h.clone()).collect();
+        let (snapshot, touched) = self.transfers.command(cmd, &up);
+        out.push(snapshot);
+        for (host, folder) in touched {
+            if up.contains(&host) && self.conns.get(&host).and_then(|c| c.path.as_ref()) == Some(&folder) {
+                self.list_now(&host, folder, out);
+            }
+        }
     }
 
     fn next_id(&mut self) -> PromptId {
@@ -371,11 +392,7 @@ impl FixtureBackend {
     }
 
     fn list_now(&mut self, host: &HostId, path: RemotePath, out: &mut Vec<ServiceEvent>) {
-        let listed = match self.fixture.server(host.as_str()) {
-            Some(s) => s.list(&path),
-            None => Err(Error::NotFound(path.clone())),
-        };
-        match listed {
+        match self.transfers.list(host, &path) {
             Ok(entries) => out.extend(pages(host, &path, entries)),
             Err(Error::ConnectionLost) => self.drive(host, Work::Life(Event::Lost), out),
             Err(error) => out.push(ServiceEvent::ListFailed { host: host.clone(), path, error }),
@@ -432,9 +449,7 @@ impl Backend for FixtureBackend {
                 Some(host) => self.drive(&host, Work::Answer(answer), &mut out),
                 None => wipe(answer),
             },
-            // Fixtures don't simulate transfers yet: jobs stay as the fixture's `transfers`
-            // (M2 UI) put them.
-            Command::Transfer(_) => {}
+            Command::Transfer(cmd) => self.transfer(cmd, &mut out),
         }
         out
     }

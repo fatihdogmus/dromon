@@ -46,6 +46,9 @@ const ALL: &[&IconPair] = &[
     &CHECK,
     &SPINNER,
     &WARNING,
+    &PAUSE,
+    &RESUME,
+    &RETRY,
 ];
 
 #[test]
@@ -150,6 +153,11 @@ fn straight_edges_are_pixel_exact_at_both_scales() {
         scan(&UPLOAD, Line::Col(3.0), (10.0, 16.0), 1),
         scan(&GEAR, Line::Row(1.5), (5.0, 10.0), 1),
         scan(&WARNING, Line::Row(7.0), (6.0, 9.0), 1),
+        // The transfer row's buttons: both bars, the play triangle's upright edge, the retry
+        // arrowhead's upright leg.
+        scan(&PAUSE, Line::Row(8.0), full, 2),
+        scan(&RESUME, Line::Row(8.0), (0.0, 8.0), 1),
+        scan(&RETRY, Line::Row(2.5), (11.0, 16.0), 1),
     ];
     let mut report = String::new();
     let mut bad = Vec::new();
@@ -177,7 +185,7 @@ fn straight_edges_are_pixel_exact_at_both_scales() {
 /// a fraction of a point. Rune rounds a resting icon's origin to the device grid when it paints
 /// (`runtime/paint/content.rs`), so these still land on whole device pixels; only a y or an x
 /// outside this list would put the grid at risk.
-const TEXT_FLOWED: [&str; 6] = ["tb-path", "col-", "welcome-quick-connect", "state-go-up", "tb-transfers", "tb-filter"];
+const TEXT_FLOWED: [&str; 7] = ["tb-path", "col-", "welcome-quick-connect", "state-go-up", "tb-transfers", "tb-filter", "drop-pill"];
 
 /// The icon elements every scene builds begin on whole points (the views put them in 28 pt
 /// rows and buttons, past whole-point paddings), at both scales, except where text flows

@@ -6,7 +6,7 @@
 use dromon_core::{Prompt, PromptKind};
 use rune::{Beat, El, LoopSpec, ScrollSpec, Sequence, Transition, Tx, col, icon, row, text, text_input};
 
-use super::{Paint, run};
+use super::{Paint, conflict, run};
 use crate::icons;
 use crate::state::sheets::takes_text;
 use crate::state::{Action, App, Sheet};
@@ -36,11 +36,12 @@ fn host_name(s: &App, host: &dromon_core::HostId) -> String {
 /// The veil and the open sheet, over the whole window below the toolbar band, so the sheet
 /// drops from the toolbar's edge.
 pub fn layer(s: &App, p: Paint) -> Option<El> {
-    let sheet = s.ui.sheets.open()?;
-    let panel = match sheet {
-        Sheet::Ask { prompt, .. } => prompt_sheet(s, prompt, false, p),
-        Sheet::Sent { prompt } => prompt_sheet(s, prompt, true, p),
-        Sheet::Log { host } => log_sheet(s, host, p),
+    // A prompt sheet comes first; an upload's name clash waits behind it.
+    let panel = match s.ui.sheets.open() {
+        Some(Sheet::Ask { prompt, .. }) => prompt_sheet(s, prompt, false, p),
+        Some(Sheet::Sent { prompt }) => prompt_sheet(s, prompt, true, p),
+        Some(Sheet::Log { host }) => log_sheet(s, host, p),
+        None => conflict::sheet(s, p)?,
     };
     Some(
         col()
@@ -57,10 +58,16 @@ pub fn layer(s: &App, p: Paint) -> Option<El> {
 /// The panel every sheet shares: drops 16 pt from the toolbar's edge as it fades in.
 fn panel(p: Paint, key: &'static str, title: String, width: f32) -> El {
     let t = p.t;
+    frame(p, key, &title, width).child(text(title).key("sheet-title").font(type_::TITLE).color(t.text))
+}
+
+/// [`panel`] without its title, for a sheet that sets its own.
+pub(super) fn frame(p: Paint, key: &'static str, title: &str, width: f32) -> El {
+    let t = p.t;
     col()
         .key(key)
         .role("dialog")
-        .label(title.clone())
+        .label(title.to_owned())
         .w(width)
         .padding(space::S6)
         .gap(space::S3)
@@ -71,10 +78,9 @@ fn panel(p: Paint, key: &'static str, title: String, width: f32) -> El {
         .transition(Transition::offset(0.0, -16.0).combined(Transition::opacity()))
         .transition_motion(motion::MOVE, motion::MOVE)
         .modal_tx(false, |s: &mut App, tx: &mut Tx| run(s, Action::DismissSheet, tx))
-        .child(text(title).key("sheet-title").font(type_::TITLE).color(t.text))
 }
 
-fn button(p: Paint, key: &'static str, label: &str, primary: bool, action: Action) -> El {
+pub(super) fn button(p: Paint, key: &'static str, label: &str, primary: bool, action: Action) -> El {
     let t = p.t;
     let b = row()
         .key(key)
@@ -113,7 +119,7 @@ fn busy(p: Paint) -> El {
         .child(text("Connecting…").font(type_::BODY_STRONG).color(t.on_accent))
 }
 
-fn buttons(children: Vec<El>) -> El {
+pub(super) fn buttons(children: Vec<El>) -> El {
     row().key("sheet-buttons").w_full().pt(space::S2).gap(space::S2).justify_end().children(children)
 }
 

@@ -6,7 +6,7 @@ use std::borrow::Cow;
 use dromon_core::{ConnStatus, Entry, SortDir, SortKey};
 use rune::{Align, Color, El, GrowthSpec, ScrollSpec, Tx, col, el, icon, oklch, row, text};
 
-use super::{LIST, Paint, ROWS, run, states};
+use super::{LIST, Paint, ROWS, drop, run, states};
 use crate::fmt;
 use crate::icons;
 use crate::state::{Action, App, ConnView, ListError, Listing};
@@ -129,12 +129,14 @@ fn file_row(s: &App, c: &ConnView, i: usize, p: Paint) -> El {
     let name_color = if dim { t.text_3 } else { t.text };
     let meta_color = if dim { t.text_3 } else { t.text_2 };
     let open = e.kind.is_dir_like();
+    // A file drag over this folder row: it lifts with an accent fill.
+    let drop_here = open && drop::over_folder(s, &e.name);
     let (n1, n2) = (e.name.clone(), e.name.clone());
     let name = text(e.name.clone()).font(if selected { type_::BODY_STRONG } else { type_::BODY }).color(name_color).truncate().grow(1.0).min_w(0.0);
     let size_cell = text(fmt::entry_size(e)).font(type_::META).color(meta_color).w(size::COL_SIZE).align(Align::End);
     let modified =
         text(fmt::modified(e.mtime, s.now)).font(type_::META).color(meta_color).w(size::COL_MODIFIED).pl(space::S4).truncate();
-    let cells = row()
+    let mut cells = row()
         .w_full()
         .h_full()
         .pl(space::S2)
@@ -142,11 +144,21 @@ fn file_row(s: &App, c: &ConnView, i: usize, p: Paint) -> El {
         .gap(space::S2)
         .center_y()
         .radius(radius::ROW)
-        .fill(if selected { t.selection } else { Color::TRANSPARENT })
+        .fill(if drop_here {
+            t.accent.alpha(0.22)
+        } else if selected {
+            t.selection
+        } else {
+            Color::TRANSPARENT
+        })
         .hover(t.hover)
         .press(t.press)
-        .motion(motion::SNAP)
-        .child(file_icon(p, e, selected))
+        .motion(motion::SNAP);
+    if drop_here {
+        cells = cells.border(1.5, t.accent).shadow(2.0, 8.0, t.shadow);
+    }
+    let cells = cells
+        .child(file_icon(p, e, selected || drop_here))
         .child(name)
         .child(size_cell)
         .child(modified);
@@ -164,6 +176,7 @@ fn file_row(s: &App, c: &ConnView, i: usize, p: Paint) -> El {
         .child(cells);
     if open {
         r = r.on_double_press_tx(move |s: &mut App, tx: &mut Tx| run(s, Action::Open(n2.clone()), tx));
+        r = drop::folder_row(r, &e.name);
     }
     r
 }

@@ -34,7 +34,7 @@ fn names(entries: &[dromon_core::Entry]) -> Vec<&str> {
 #[test]
 fn a_minimal_fixture() {
     let fx = parse(r#"{"version": 1}"#).unwrap();
-    assert_eq!(fx, Fixture { now: None, hosts: vec![], servers: Default::default() });
+    assert_eq!(fx, Fixture { now: None, hosts: vec![], servers: Default::default(), transfers: vec![] });
 }
 
 #[test]
@@ -76,7 +76,7 @@ fn errors_name_their_json_path() {
     assert!(error("{").starts_with("not valid JSON: "));
     assert_eq!(error("{}"), "version: missing (this Dromon reads version 1)");
     assert_eq!(error(r#"{"version": 2}"#), "version: 2 is not supported (this Dromon reads version 1)");
-    assert_eq!(error(r#"{"version": 1, "hostz": []}"#), r#"unknown field "hostz" (expected version, description, now, hosts, servers)"#);
+    assert_eq!(error(r#"{"version": 1, "hostz": []}"#), r#"unknown field "hostz" (expected version, description, now, hosts, servers, transfers)"#);
     assert_eq!(error(r#"{"version": 1, "now": "soon"}"#), r#"now: "soon" is not an RFC 3339 date (2026-11-25T14:00:00Z) or epoch seconds"#);
     assert_eq!(error(r#"{"version": 1, "hosts": [{"alias": "a", "source": "saved"}, {"alias": "b", "source": "config"}]}"#), r#"hosts: host 2: source: unknown source "config" (expected ssh-config, saved or recent)"#);
     assert_eq!(error(r#"{"version": 1, "hosts": [{"alias": "a", "source": "saved", "port": 70000}]}"#), "hosts: host 1: port: 70000 is not a port (1–65535)");
