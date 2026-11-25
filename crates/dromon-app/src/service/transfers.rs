@@ -42,18 +42,22 @@ pub enum EngineMsg {
     HostDown(HostId),
 }
 
+/// The sessions a naming, scanning or tidying task ran on, by host.
+type Used = Vec<(HostId, Sftp)>;
+
 /// What a task the engine started found out.
 enum Outcome {
-    /// Download: the item's free local name (or an error, e.g. the Downloads folder can't be made).
-    Named { job: JobId, item: usize, dst: Result<ItemDst, Error> },
+    /// The item's free name: local for a download (or an error, e.g. the Downloads folder
+    /// can't be made), remote for Keep both.
+    Named { job: JobId, item: usize, dst: Result<ItemDst, Error>, used: Used },
     /// Upload, copy, move: what is at `into/name` on the destination.
-    Exists { job: JobId, item: usize, existing: Result<Option<bool>, Error> },
+    Exists { job: JobId, item: usize, existing: Result<Option<bool>, Error>, used: Used },
     ScanProgress { job: JobId, item: usize, found: u64 },
-    Scanned { job: JobId, item: usize, scan: Result<Scan, Error> },
+    Scanned { job: JobId, item: usize, scan: Result<Scan, Error>, used: Used },
     Progress { job: JobId, file: FileId, done: u64 },
     Finished { job: JobId, file: FileId, result: Result<(), Error> },
     /// Cross-host move: the item's empty source folders were removed.
-    Tidied { job: JobId, item: usize, result: Result<(), Error> },
+    Tidied { job: JobId, item: usize, result: Result<(), Error>, used: Used },
 }
 
 /// Starts the engine task; send it [`EngineMsg`]s.
@@ -179,21 +183,21 @@ impl<S: Sink> Engine<S> {
     fn on_outcome(&mut self, outcome: Outcome) {
         let now = self.now();
         match outcome {
-            Outcome::Named { job, item, dst } => match dst {
+            Outcome::Named { job, item, dst, used } => match dst {
                 Ok(dst) => self.queue.named(job, item, dst),
-                Err(e) => self.item_error(job, item, e, Action::Name { job, item }),
+                Err(e) => self.item_error(job, item, e, Action::Name { job, item }, &used),
             },
-            Outcome::Exists { job, item, existing } => match existing {
+            Outcome::Exists { job, item, existing, used } => match existing {
                 Ok(existing) => self.queue.exists(job, item, existing),
-                Err(e) => self.item_error(job, item, e, Action::Name { job, item }),
+                Err(e) => self.item_error(job, item, e, Action::Name { job, item }, &used),
             },
             Outcome::ScanProgress { job, item, found } => self.queue.scan_progress(job, item, found),
-            Outcome::Scanned { job, item, scan } => {
+            Outcome::Scanned { job, item, scan, used } => {
                 let dst = self.scans.remove(&(job, item));
                 match (scan, dst) {
                     (Ok(scan), _) => self.queue.scanned(job, item, scan),
                     // A scan cut off by the connection runs again into the same destination.
-                    (Err(e), Some(dst)) => self.item_error(job, item, e, Action::Scan { job, item, dst }),
+                    (Err(e), Some(dst)) => self.item_error(job, item, e, Action::Scan { job, item, dst }, &used),
                     (Err(e), None) => self.queue.item_failed(job, item, e.to_string()),
                 }
             }
@@ -213,20 +217,34 @@ impl<S: Sink> Engine<S> {
                     Err(e) => self.queue.file_failed(job, file, e.to_string(), now),
                 }
             }
-            Outcome::Tidied { job, item, result } => match result {
-                Err(Error::ConnectionLost) if self.requests.contains_key(&job) => self.deferred.push(Action::Tidy { job, item }),
+            Outcome::Tidied { job, item, result, used } => match result {
+                Err(Error::ConnectionLost) if self.requests.contains_key(&job) => self.again(Action::Tidy { job, item }, &used),
                 // Best effort: folders that couldn't go stay.
                 _ => self.queue.tidied(job, item),
             },
         }
     }
 
-    /// A naming or scanning error: a lost connection defers the work until the hosts are back;
-    /// anything else fails the item.
-    fn item_error(&mut self, job: JobId, item: usize, error: Error, again: Action) {
+    /// A naming or scanning error: a lost connection runs the work again once the hosts are
+    /// back; anything else fails the item.
+    fn item_error(&mut self, job: JobId, item: usize, error: Error, again: Action, used: &Used) {
         match error {
-            Error::ConnectionLost if self.requests.contains_key(&job) => self.deferred.push(again),
+            Error::ConnectionLost if self.requests.contains_key(&job) => self.again(again, used),
             error => self.queue.item_failed(job, item, error.to_string()),
+        }
+    }
+
+    /// Work cut off by a lost connection. The task's outcome and the engine's [`EngineMsg`]s
+    /// come on different channels, so the reconnect may already be here: if a session the task
+    /// used has been replaced (or is gone), the work runs now, on the current sessions (or is
+    /// deferred by [`Engine::session`] if one is missing); while they're all still current,
+    /// their `HostDown` is yet to come and the next `HostUp` replays it.
+    fn again(&mut self, action: Action, used: &Used) {
+        let replaced = used.iter().any(|(host, s)| !self.sessions.get(host).is_some_and(|now| now.same_session(s)));
+        if replaced {
+            self.carry_out_one(action);
+        } else {
+            self.deferred.push(action);
         }
     }
 
@@ -256,7 +274,7 @@ impl<S: Sink> Engine<S> {
                     JobRequest::Download { items, into, .. } => {
                         let name = items.get(item).and_then(|i| i.path.file_name()).unwrap_or("download").to_owned();
                         let dst = self.free_local_name(into, &name).map(ItemDst::Local);
-                        let _ = tx.send(Outcome::Named { job, item, dst });
+                        let _ = tx.send(Outcome::Named { job, item, dst, used: Vec::new() });
                     }
                     _ => {
                         // Upload, copy, move: is the name taken at the destination?
@@ -266,9 +284,10 @@ impl<S: Sink> Engine<S> {
                         };
                         let Some(sftp) = self.session(req.host(), Action::Name { job, item }) else { return };
                         let path = into.join(&name);
+                        let host = req.host().clone();
                         tokio::spawn(async move {
                             let existing = io::remote_kind(&sftp, &path).await;
-                            let _ = tx.send(Outcome::Exists { job, item, existing });
+                            let _ = tx.send(Outcome::Exists { job, item, existing, used: vec![(host, sftp)] });
                         });
                     }
                 }
@@ -277,11 +296,12 @@ impl<S: Sink> Engine<S> {
                 let Some(req) = self.requests.get(&job).cloned() else { return };
                 let (Some(name), Some(into)) = (item_name(&req, item), req.remote_into().cloned()) else { return };
                 let Some(sftp) = self.session(req.host(), Action::FreeRemoteName { job, item }) else { return };
+                let host = req.host().clone();
                 tokio::spawn(async move {
                     let dst = io::free_remote_name(&sftp, &into, &name)
                         .await
                         .map(|free| ItemDst::Remote { path: into.join(&free), overwrite: false });
-                    let _ = tx.send(Outcome::Named { job, item, dst });
+                    let _ = tx.send(Outcome::Named { job, item, dst, used: vec![(host, sftp)] });
                 });
             }
             Action::Scan { job, item, dst } => {
@@ -293,12 +313,13 @@ impl<S: Sink> Engine<S> {
                 let Some(src) = src else { return };
                 let Some((from, to)) = self.sessions_for(&req, Action::Scan { job, item, dst: dst.clone() }) else { return };
                 self.scans.insert((job, item), dst.clone());
+                let hosts = (req.source_host().clone(), req.host().clone());
                 tokio::spawn(async move {
                     let progress = |found| {
                         let _ = tx.send(Outcome::ScanProgress { job, item, found });
                     };
                     let scan = scan(&from, &to, src, dst, progress).await;
-                    let _ = tx.send(Outcome::Scanned { job, item, scan });
+                    let _ = tx.send(Outcome::Scanned { job, item, scan, used: vec![(hosts.0, from), (hosts.1, to)] });
                 });
             }
             Action::Start { job, file, plan } => {
@@ -343,9 +364,10 @@ impl<S: Sink> Engine<S> {
                 let Some(req) = self.requests.get(&job).cloned() else { return };
                 let Some(root) = req.remote_items().and_then(|i| i.get(item)).map(|i| i.path.clone()) else { return };
                 let Some(sftp) = self.session(req.source_host(), Action::Tidy { job, item }) else { return };
+                let host = req.source_host().clone();
                 tokio::spawn(async move {
                     let result = io::remove_empty_dirs(&sftp, &root).await;
-                    let _ = tx.send(Outcome::Tidied { job, item, result });
+                    let _ = tx.send(Outcome::Tidied { job, item, result, used: vec![(host, sftp)] });
                 });
             }
         }

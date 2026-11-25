@@ -182,6 +182,11 @@ impl Sftp {
         self.caps.chunk_size()
     }
 
+    /// True when `self` and `other` are clones of one session (not just sessions to one host).
+    pub fn same_session(&self, other: &Sftp) -> bool {
+        Arc::ptr_eq(&self.raw, &other.raw)
+    }
+
     /// Seconds to wait for each reply once its request is written (russh-sftp default: 10).
     pub fn set_timeout(&self, secs: u64) {
         self.raw.set_timeout(secs);

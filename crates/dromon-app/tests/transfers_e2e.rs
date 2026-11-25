@@ -323,7 +323,7 @@ fn copies_and_moves_on_one_host_keep_bytes_and_dates_and_a_clash_can_replace() {
     h.seed(
         "mkdir -p \"$D/src/tree/sub\" \"$D/src/tree/empty\" \"$D/dst\"; \
          printf 'alpha\\n' >\"$D/src/a.txt\"; printf 'bee\\n' >\"$D/src/tree/sub/b.txt\"; \
-         touch -m -d @1600000000 \"$D/src/a.txt\" \"$D/src/tree/sub/b.txt\"",
+         TZ=UTC0 touch -m -t 202009131226.40 \"$D/src/a.txt\" \"$D/src/tree/sub/b.txt\"",
     );
     let into = h.at("dst");
 
@@ -365,7 +365,7 @@ fn copies_and_moves_between_two_hosts_stream_through_the_app() {
     h.seed(
         "mkdir -p \"$D/a/dir/inner\" \"$D/a/gone/empty\" \"$D/b\"; head -c 3145728 /dev/urandom >\"$D/a/x.bin\"; \
          printf 'one\\n' >\"$D/a/dir/inner/one.txt\"; printf 'two\\n' >\"$D/a/gone/two.txt\"; \
-         touch -m -d @1600000000 \"$D/a/x.bin\"",
+         TZ=UTC0 touch -m -t 202009131226.40 \"$D/a/x.bin\"",
     );
     let want = h.fx.sha1(h.at("a/x.bin").as_str()).unwrap();
     let into = h.at("b");

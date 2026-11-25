@@ -20,6 +20,8 @@ use tokio::sync::mpsc;
 
 const MIB: u64 = 1024 * 1024;
 const MTIME: i64 = 1_600_000_000;
+/// [`MTIME`] for `TZ=UTC0 touch -t` (GNU's `-d @…` isn't in macOS's BSD touch).
+const TOUCH_MTIME: &str = "202009131226.40";
 
 /// One SFTP session to the fixture, standing in for a host.
 struct Conn {
@@ -98,7 +100,7 @@ async fn write_remote(sftp: &Sftp, path: &RemotePath, data: &[u8]) {
 /// `len` random bytes at `path`, owned by the key user, with mtime [`MTIME`].
 fn random_remote(fixture: &Fixture, path: &RemotePath, len: u64) {
     let script =
-        format!("head -c {len} /dev/urandom >'{path}' && chown {} '{path}' && touch -m -d @{MTIME} '{path}'", fixture.owner(Role::Key));
+        format!("head -c {len} /dev/urandom >'{path}' && chown {} '{path}' && TZ=UTC0 touch -m -t {TOUCH_MTIME} '{path}'", fixture.owner(Role::Key));
     fixture.exec(&["sh", "-c", &script]).unwrap();
 }
 
