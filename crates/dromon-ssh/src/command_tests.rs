@@ -137,12 +137,13 @@ fn real_ssh_reads_the_config_file() {
     }
     let dir = tempfile::tempdir().unwrap();
     let config = dir.path().join("ssh_config");
-    std::fs::write(&config, "Host *\n  ServerAliveCountMax 7\n  Compression yes\n").unwrap();
+    // ConnectionAttempts, not Compression: macOS's ssh has no zlib and prints "compression UNKNOWN".
+    std::fs::write(&config, "Host *\n  ServerAliveCountMax 7\n  ConnectionAttempts 4\n").unwrap();
     let cmd = build(&saved("box"), false).unwrap().with_config_file(&config).unwrap();
     let out = std::process::Command::new(ssh).arg("-G").args(&cmd.args).output().unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.lines().any(|l| l == "compression yes"), "{stdout}");
+    assert!(stdout.lines().any(|l| l == "connectionattempts 4"), "{stdout}");
     // The command line still wins over the file.
     assert!(stdout.lines().any(|l| l == "serveralivecountmax 3"), "{stdout}");
 }
@@ -254,8 +255,11 @@ fn real_ssh_reads_our_options_back() {
         eprintln!("skipped: no /usr/bin/ssh");
         return;
     }
+    // ssh normalizes a literal address through getaddrinfo, which drops a zone naming an
+    // interface the machine lacks; loopback is there everywhere (lo0 on macOS).
+    let zoned = if cfg!(target_os = "macos") { "fe80::1%lo0" } else { "fe80::1%lo" };
     let host = HostSpec {
-        hostname: Some("fe80::1%eth0".into()),
+        hostname: Some(zoned.into()),
         user: Some("first last=#".into()),
         identity_file: Some("/tmp/o'k keys/id#1=x".into()),
         proxy_jump: Some("j@b:2200,c".into()),
@@ -265,7 +269,7 @@ fn real_ssh_reads_our_options_back() {
     let out = std::process::Command::new(ssh).args(["-F", "/dev/null", "-G"]).args(&cmd.args).output().unwrap();
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
     let r = crate::parse_ssh_g(&String::from_utf8_lossy(&out.stdout));
-    assert_eq!(r.hostname.as_deref(), Some("fe80::1%eth0"));
+    assert_eq!(r.hostname.as_deref(), Some(zoned));
     assert_eq!(r.user.as_deref(), Some("first last=#"));
     assert_eq!(r.port, Some(2222));
     assert_eq!(r.proxy_jump.as_deref(), Some("j@b:2200,c"));
