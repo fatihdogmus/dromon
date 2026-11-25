@@ -59,7 +59,27 @@ Early development. What works today: SSH-config hosts, the full sign-in flow (ho
 
 ## 📦 Install
 
-Releases are published on the [Releases page](https://github.com/fatihdogmus/dromon/releases):
+**Quick install**
+
+```sh
+# macOS (Apple silicon) and Linux (Debian/Ubuntu, Arch; x86_64)
+curl -fsSL https://raw.githubusercontent.com/fatihdogmus/dromon/main/install.sh | sh
+```
+
+```powershell
+# Windows
+irm https://raw.githubusercontent.com/fatihdogmus/dromon/main/install.ps1 | iex
+```
+
+Each one finds the latest release, downloads the right package, checks its SHA-256 against the release's `SHA256SUMS` and installs it silently; set `DROMON_VERSION` (for example `0.1.0`) to pin a version.
+
+On macOS, Homebrew works too, and `brew upgrade` keeps Dromon current:
+
+```sh
+brew install --cask fatihdogmus/tap/dromon
+```
+
+Or download a file yourself from the [Releases page](https://github.com/fatihdogmus/dromon/releases):
 
 | Platform | File | Notes |
 |---|---|---|
