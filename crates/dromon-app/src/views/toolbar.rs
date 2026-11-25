@@ -8,7 +8,7 @@ use rune::{El, Key, KeyEvent, LoopSpec, Tx, el, icon, row, text, text_input};
 use super::widgets::{chord, icon_button, kbd};
 use super::{Paint, run, transfers};
 use crate::icons;
-use crate::state::{Action, App, ConnView, Filter, RowTarget};
+use crate::state::{Action, App, ConnView, Filter, PaletteAction, RowTarget};
 use crate::theme::{radius, size, space, type_};
 
 pub fn view(s: &App, p: Paint) -> El {
@@ -44,7 +44,27 @@ pub fn view(s: &App, p: Paint) -> El {
     if let Some(c) = c {
         bar = bar.child(filter(s, c, p));
     }
-    bar.child(transfers::button(s, p)).child(kbd(p, &chord("mod+k")).ml(space::S1))
+    bar.child(transfers::button(s, p)).child(palette_button(p))
+}
+
+/// The ⌘K hint: a button that opens the command palette.
+fn palette_button(p: Paint) -> El {
+    let label = chord("mod+k");
+    row()
+        .key("tb-palette")
+        .role("button")
+        .label("Command palette")
+        .shortcut_hint(label.clone())
+        .h(28.0)
+        // The chip stays where it was; the padding around it takes presses too.
+        .px(space::S1)
+        .mr(-space::S1)
+        .radius(radius::ROW)
+        .center()
+        .hover(p.t.hover)
+        .press(p.t.press)
+        .on_press_tx(|s: &mut App, tx: &mut Tx| run(s, Action::Palette(PaletteAction::Toggle), tx))
+        .child(kbd(p, &label))
 }
 
 /// Breadcrumbs for the folder on screen, or what's happening instead.

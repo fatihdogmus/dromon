@@ -42,3 +42,10 @@ splits `user@host:port`. A host's menu (`secondary-click` on `host-<id>`) has `c
 `ctx-host-save`; the Add to SSH config sheet `add-config` has `add-config-block-text`,
 `add-config-target`, `add-config-backup`, `add-config-confirm`, `add-config-cancel`. A recent
 host's id is `[user@]host:port` (`host-deploy@prod.example.com:22`).
+
+The ⌘K palette: open it with `{"type": "key", "name": "k", "cmd": true}` (⌘L: `"name": "l"`)
+or the toolbar's `tb-palette`; its field is `palette-input` (type into it, ↑ ↓ Return Escape),
+rows `pal-host-<id>`, `pal-go` ("Go to <path>"), `pal-folder-<path>`, `pal-<action>`
+(`pal-new-folder`, `pal-filter`, `pal-show-transfers`, …) in groups
+`palette-group-hosts|folders|actions`; `palette-empty` when nothing matches. ⌘1 … ⌘9 are
+`"name": "1"` … with `"cmd": true`; ⌘⇧J is `"name": "j", "cmd": true, "shift": true`.

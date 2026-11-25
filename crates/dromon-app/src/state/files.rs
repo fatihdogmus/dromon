@@ -144,6 +144,7 @@ impl App {
             || self.files.edit.field().is_some_and(|f| f.edit.focused)
             || self.ui.sheets.field().focused
             || self.ui.quick.focused()
+            || self.ui.palette.focused()
     }
 
     /// The toasts on screen, oldest first: running and failed deletes, then notes.

@@ -9,6 +9,7 @@ mod drop;
 mod edit;
 mod list;
 mod menu;
+mod palette;
 mod quick;
 mod quit;
 mod sheets;
@@ -164,6 +165,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         .child(main)
         .children(transfers::popover(s, p))
         .children(quick::popover(s, p))
+        .children(palette::layer(s, p, palette::top(s, cx)))
         .children(sheets::layer(s, p))
         .children(menu::layer(s, p))
 }

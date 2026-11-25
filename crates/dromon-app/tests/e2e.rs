@@ -721,6 +721,28 @@ fn file_operations_from_the_keyboard() {
     let _ = fx.exec(&["rm", "-rf", &dir]);
 }
 
+/// h. ⌘L on the real server: the palette opens on the home folder's path, all selected; a path
+/// typed over it and Return lists that folder.
+#[test]
+fn go_to_a_typed_path() {
+    let Some(mut h) = Harness::new("go_to_a_typed_path") else { return };
+    h.connect("fx-key");
+    h.trust_host_key("fx-key");
+    let home = h.home(Role::Key);
+    h.wait_for_listing(&home);
+    h.rt.key(KeyEvent { key: Key::Command('l'), mods: primary() });
+    h.settle();
+    assert_eq!(h.rt.presented_focus_key(), Some("palette-input"), "the path field has the keyboard");
+    assert_eq!(h.rt.state.ui.palette.edit.text, home);
+    let mixed = h.fx.path(Role::Key, "fixture/mixed");
+    h.type_text(mixed.as_str());
+    h.key(Key::Enter);
+    let rows = h.wait_for_listing(mixed.as_str());
+    assert!(!h.shown("palette"));
+    assert!(rows.iter().any(|r| r == "link-dir"), "{rows:?}");
+    h.step(&format!("⌘L, typed {mixed}, Return: listed {} entries", rows.len()));
+}
+
 #[test]
 fn numbers_are_matched_whole() {
     assert!(contains_number("code 123456 sent", "123456"));

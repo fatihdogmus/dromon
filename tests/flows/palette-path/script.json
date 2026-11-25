@@ -1,0 +1,13 @@
+{
+  "description": "On the built-in demo: open prod, press ⌘L (Ctrl+L elsewhere): the palette opens on /var/www/site, all selected. Type \"releases\" (relative to the folder on screen), press Return: the releases folder lists. Then ⌘L and \"~/uploads\" (~ is the session's home, /var/www/site) goes to uploads.",
+  "events": [
+    {"t": 0.5, "type": "tap", "key": "host-prod"},
+    {"t": 1.5, "type": "key", "name": "l", "cmd": true},
+    {"t": 2.5, "type": "type", "text": "releases"},
+    {"t": 3.5, "type": "key", "name": "Enter"},
+    {"t": 4.5, "type": "key", "name": "l", "cmd": true},
+    {"t": 5.0, "type": "type", "text": "~/uploads"},
+    {"t": 6.0, "type": "key", "name": "Enter"},
+    {"t": 7.0, "type": "mark", "name": "end"}
+  ]
+}

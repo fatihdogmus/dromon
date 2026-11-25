@@ -37,6 +37,8 @@ mod ui_file_tests;
 #[cfg(test)]
 mod ui_menu_tests;
 #[cfg(test)]
+mod ui_palette_tests;
+#[cfg(test)]
 mod ui_poll_tests;
 #[cfg(test)]
 mod ui_quick_tests;

@@ -145,6 +145,8 @@ pub struct ConnView {
     /// The folder that was on screen when it turned out to be gone, while the view climbs to
     /// the nearest folder that exists (`refresh.rs`).
     pub vanished: Option<RemotePath>,
+    /// The session's home folder (where it started), once it opened: `~` in a typed path.
+    pub home: Option<RemotePath>,
 }
 
 impl ConnView {
@@ -169,6 +171,7 @@ impl ConnView {
             fallback: None,
             fresh: Fresh::default(),
             vanished: None,
+            home: None,
         }
     }
 

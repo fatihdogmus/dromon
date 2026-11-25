@@ -1,0 +1,10 @@
+{
+  "description": "On the built-in demo: press ⌘K (Ctrl+K elsewhere) on the welcome screen; the palette lists the hosts with ⌘1–⌘6, then the actions. Type \"stag\" (staging, the matched letters bold), press Return: staging connects and lists, the keyboard back on the list (↓ selects the first row).",
+  "events": [
+    {"t": 0.5, "type": "key", "name": "k", "cmd": true},
+    {"t": 1.5, "type": "type", "text": "stag"},
+    {"t": 2.5, "type": "key", "name": "Enter"},
+    {"t": 3.5, "type": "key", "name": "Down"},
+    {"t": 4.5, "type": "mark", "name": "end"}
+  ]
+}

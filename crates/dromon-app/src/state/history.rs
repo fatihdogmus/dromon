@@ -46,6 +46,19 @@ impl NavHistory {
         }
     }
 
+    /// The folders this connection has been in, most recent first, each once: where Forward
+    /// leads (the folders Back just left), then where Back leads. The ⌘K palette's "Go to
+    /// folder…" (`palette.rs`).
+    pub fn recent(&self) -> Vec<RemotePath> {
+        let mut out: Vec<RemotePath> = Vec::new();
+        for p in self.forward.iter().rev().chain(self.back.iter().rev()) {
+            if !out.contains(p) {
+                out.push(p.clone());
+            }
+        }
+        out
+    }
+
     /// Where Forward goes from `current`, which becomes the way back.
     pub fn forward(&mut self, current: RemotePath) -> Option<RemotePath> {
         let to = self.forward.pop()?;
@@ -96,6 +109,20 @@ mod tests {
         assert!(h.can_back(), "elsewhere: kept");
         h.landed(&p("/a/b"));
         assert_eq!(h.back(p("/a/b")), Some(p("/a")));
+    }
+
+    #[test]
+    fn recent_folders_come_newest_first_and_once() {
+        let mut h = NavHistory::default();
+        assert!(h.recent().is_empty());
+        h.visit(p("/a"));
+        h.visit(p("/b"));
+        h.visit(p("/a"));
+        // Now at /c: back holds /a, /b, /a.
+        assert_eq!(h.recent(), [p("/a"), p("/b")]);
+        assert_eq!(h.back(p("/c")), Some(p("/a")));
+        // At /a again: /c (just left) leads forward.
+        assert_eq!(h.recent(), [p("/c"), p("/b"), p("/a")]);
     }
 
     #[test]

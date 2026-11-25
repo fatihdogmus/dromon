@@ -8,6 +8,7 @@ pub mod conn;
 pub mod drag;
 pub mod edit;
 pub mod files;
+pub mod fuzzy;
 pub mod history;
 pub mod hostbook;
 pub mod hosts;
@@ -15,6 +16,7 @@ pub mod keys;
 pub mod log;
 pub mod menu;
 pub mod ops;
+pub mod palette;
 pub mod prefs;
 pub mod quick;
 pub mod refresh;
@@ -41,6 +43,7 @@ pub use menu::MenuKind;
 pub use hosts::{HostDirectory, Section};
 pub use keys::Shortcut;
 pub use ops::{OpView, Ops};
+pub use palette::PaletteAction;
 pub use prefs::{NoStore, Saved, Store};
 pub use selection::{Selection, TypeSelect};
 #[cfg(test)]
@@ -73,6 +76,8 @@ pub struct UiState {
     pub quit_approved: bool,
     /// The quick-connect popover (`quick.rs`).
     pub quick: quick::QuickConnect,
+    /// The ⌘K palette (`palette.rs`).
+    pub palette: palette::Palette,
 }
 
 impl Default for UiState {
@@ -88,6 +93,7 @@ impl Default for UiState {
             confirm_quit: false,
             quit_approved: false,
             quick: quick::QuickConnect::default(),
+            palette: palette::Palette::default(),
         }
     }
 }
@@ -193,6 +199,8 @@ pub enum Action {
     CancelQuit,
     /// New folder, rename, delete, copy path, the clip, row drags and context menus.
     File(FileAction),
+    /// The ⌘K palette (`palette.rs`).
+    Palette(PaletteAction),
 }
 
 /// What an action asks the view layer to do afterwards.
@@ -341,6 +349,7 @@ impl App {
                 let Some(c) = self.conns.get_mut(&host) else { return };
                 c.status = ConnStatus::Ready;
                 c.opened = true;
+                c.home = Some(start.clone());
                 c.fallback = remembered.is_some().then(|| start.clone());
                 let path = remembered.unwrap_or(start);
                 c.cwd = path.clone();
@@ -578,6 +587,7 @@ impl App {
             }
             Action::CancelQuit => self.ui.confirm_quit = false,
             Action::File(a) => self.file_action(a, &mut fx),
+            Action::Palette(a) => self.palette_action(a, &mut fx),
         }
         fx
     }
@@ -606,7 +616,13 @@ impl App {
                 _ => Vec::new(),
             };
         }
+        // So is the palette: only its own keys (`palette.rs`).
+        if self.ui.palette.is_open() {
+            return self.palette_shortcut(sc);
+        }
         let action = match sc {
+            // ⌘K opens the palette from anywhere, a focused field included.
+            Shortcut::Palette => Action::Palette(PaletteAction::Toggle),
             Shortcut::QuickConnect => Action::QuickConnect,
             Shortcut::Download => Action::Download,
             Shortcut::Back => Action::Back,
@@ -622,8 +638,14 @@ impl App {
             Shortcut::End { last, extend } => Action::End { last, extend },
             Shortcut::Type(text) => Action::Type { text, now },
             // A focused text field keeps its keys (§7): these are the list's.
-            Shortcut::File(_) if self.text_focused() => return Vec::new(),
+            Shortcut::File(_) | Shortcut::GoToPath | Shortcut::Host(_) | Shortcut::ShowTransfers if self.text_focused() => return Vec::new(),
             Shortcut::File(k) => Action::File(k.action()),
+            Shortcut::GoToPath => Action::Palette(PaletteAction::OpenPath),
+            Shortcut::Host(n) => match n.checked_sub(1).and_then(|i| self.sidebar_order().get(i).cloned()) {
+                Some(host) => Action::SelectHost(host),
+                None => return Vec::new(),
+            },
+            Shortcut::ShowTransfers => Action::ToggleTransfers,
         };
         self.act(action)
     }

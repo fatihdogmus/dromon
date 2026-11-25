@@ -26,6 +26,20 @@ pub enum Shortcut {
     File(FileKey),
     /// ⌘⇧K (Ctrl+Shift+K elsewhere): the quick-connect popover.
     QuickConnect,
+    /// ⌘K (Ctrl+K elsewhere): the command palette. Works while a text field has focus.
+    Palette,
+    /// ⌘L: the palette's "Go to folder…" on the folder on screen.
+    GoToPath,
+    /// ⌘1 … ⌘9: the sidebar's host 1 to 9, as shown (`App::sidebar_order`).
+    Host(usize),
+    /// ⌘⇧J: the transfers popover.
+    ShowTransfers,
+}
+
+/// The chord spec of ⌘1 … ⌘9 for the sidebar's host `n` (1-based), for hints.
+pub fn host_chord(n: usize) -> Option<&'static str> {
+    const CHORDS: [&str; 9] = ["mod+1", "mod+2", "mod+3", "mod+4", "mod+5", "mod+6", "mod+7", "mod+8", "mod+9"];
+    n.checked_sub(1).and_then(|i| CHORDS.get(i)).copied()
 }
 
 /// The file operations' keys. ⌘V isn't one: pasting goes through the window's paste handler,
@@ -88,6 +102,20 @@ pub fn shortcut(ev: &KeyEvent, platform: KeyPlatform) -> Option<Shortcut> {
     // Shift may arrive applied (`K`) or not (`k`).
     if (command(key, 'k') || command(key, 'K')) && m.shift && !m.alt {
         return Some(Shortcut::QuickConnect);
+    }
+    if (command(key, 'j') || command(key, 'J')) && m.shift && !m.alt {
+        return Some(Shortcut::ShowTransfers);
+    }
+    if !m.shift && !m.alt {
+        if command(key, 'k') {
+            return Some(Shortcut::Palette);
+        }
+        if command(key, 'l') {
+            return Some(Shortcut::GoToPath);
+        }
+        if let Key::Command(c @ '1'..='9') = key {
+            return Some(Shortcut::Host(*c as usize - '0' as usize));
+        }
     }
     if command(key, 'c') && m.alt && !m.shift {
         return Some(Shortcut::File(FileKey::CopyPath));
@@ -224,7 +252,41 @@ mod tests {
         assert_eq!(k(Key::Command('K'), shift(CMD)), Some(Shortcut::QuickConnect));
         assert_eq!(on(Key::Command('k'), shift(ctrl), KeyPlatform::Windows), Some(Shortcut::QuickConnect));
         assert_eq!(on(Key::Command('k'), shift(ctrl), KeyPlatform::Linux), Some(Shortcut::QuickConnect));
-        assert_eq!(k(Key::Command('k'), CMD), None, "⌘K is the palette's");
+        assert_eq!(k(Key::Command('k'), CMD), Some(Shortcut::Palette), "⌘K is the palette's");
+    }
+
+    #[test]
+    fn palette_go_to_path_hosts_and_transfers_on_each_platform() {
+        let ctrl = Mods { ctrl: true, logo: false, ..CMD };
+        let shift = |m: Mods| Mods { shift: true, ..m };
+        let alt = |m: Mods| Mods { alt: true, ..m };
+        for p in [KeyPlatform::Mac, KeyPlatform::Windows, KeyPlatform::Linux] {
+            let primary = if p == KeyPlatform::Mac { CMD } else { ctrl };
+            assert_eq!(on(Key::Command('k'), primary, p), Some(Shortcut::Palette), "{p:?}");
+            assert_eq!(on(Key::Command('l'), primary, p), Some(Shortcut::GoToPath), "{p:?}");
+            assert_eq!(on(Key::Command('L'), shift(primary), p), None, "⌘⇧L is left alone");
+            assert_eq!(on(Key::Command('l'), alt(primary), p), None);
+            for n in 1..=9 {
+                let c = char::from_digit(n as u32, 10).unwrap();
+                assert_eq!(on(Key::Command(c), primary, p), Some(Shortcut::Host(n)), "{p:?} {n}");
+            }
+            assert_eq!(on(Key::Command('0'), primary, p), None, "there's no host 0");
+            assert_eq!(on(Key::Command('1'), alt(primary), p), None);
+            assert_eq!(on(Key::Command('j'), shift(primary), p), Some(Shortcut::ShowTransfers), "{p:?}");
+            assert_eq!(on(Key::Command('J'), shift(primary), p), Some(Shortcut::ShowTransfers));
+            assert_eq!(on(Key::Command('j'), primary, p), None, "⌘J alone is nothing");
+            // Plain digits and letters still type.
+            assert_eq!(on(Key::Text("1".into()), NONE, p), Some(Shortcut::Type("1".into())));
+            assert_eq!(on(Key::Text("l".into()), NONE, p), Some(Shortcut::Type("l".into())));
+        }
+    }
+
+    #[test]
+    fn host_chords_name_one_to_nine() {
+        assert_eq!(host_chord(1), Some("mod+1"));
+        assert_eq!(host_chord(9), Some("mod+9"));
+        assert_eq!(host_chord(0), None);
+        assert_eq!(host_chord(10), None);
     }
 
     #[test]

@@ -11,7 +11,7 @@ use rune::TextEdit;
 
 use crate::fixture;
 use crate::state::log::LogBuffer;
-use crate::state::{Action, App, DropTarget, Effect, FileAction, HostAction, MenuKind, RowTarget, ServiceEvent, Silent, Tab};
+use crate::state::{Action, App, DropTarget, Effect, FileAction, HostAction, MenuKind, PaletteAction, RowTarget, ServiceEvent, Silent, Tab};
 use crate::theme::Appearance;
 
 /// The demo's big folder: 10,000 photos.
@@ -530,6 +530,33 @@ pub fn host_menu(s: &mut App) {
     file(s, FileAction::OpenMenu { kind: MenuKind::Host(HostId("box".into())), at: Some((96.0, 258.0)) });
 }
 
+/// ⌘K on prod's site: Hosts (prod and nas Connected first, each with its ⌘ number), then the
+/// actions that work now.
+pub fn palette(s: &mut App) {
+    listing(s);
+    act(s, Action::Palette(PaletteAction::Toggle));
+}
+
+/// ⌘K, "st" typed: staging among the hosts, Show transfers and others among the actions, the
+/// matched letters bold.
+pub fn palette_filtered(s: &mut App) {
+    palette(s);
+    s.ui.palette.edit = TextEdit::new("st");
+    s.ui.palette.edit.focused = true;
+    act(s, Action::Palette(PaletteAction::Edited));
+}
+
+/// ⌘L after a look into releases and uploads: the folder on screen's path, all selected, and
+/// the recent folders under it.
+pub fn palette_path(s: &mut App) {
+    listing(s);
+    act(s, Action::Open("releases".into()));
+    act(s, Action::GoUp);
+    act(s, Action::Open("uploads".into()));
+    act(s, Action::GoUp);
+    act(s, Action::Palette(PaletteAction::OpenPath));
+}
+
 /// A named state: what `AppSpec::scenes` takes.
 pub type Scene = (&'static str, fn(&mut App));
 
@@ -583,4 +610,7 @@ pub const SCENES: &[Scene] = &[
     ("contrast", contrast),
     ("contrast-light", contrast_light),
     ("solid", solid),
+    ("palette", palette),
+    ("palette-filtered", palette_filtered),
+    ("palette-path", palette_path),
 ];
