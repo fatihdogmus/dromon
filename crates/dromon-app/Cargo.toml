@@ -7,6 +7,12 @@ license.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+# The app (UI, state, service thread) is a library so the end-to-end tests (`tests/e2e.rs`) can
+# drive it with the real `dromon` binary as ssh's askpass helper (`CARGO_BIN_EXE_dromon`).
+[lib]
+name = "dromon_app"
+path = "src/lib.rs"
+
 [[bin]]
 name = "dromon"
 path = "src/main.rs"
@@ -22,6 +28,7 @@ tokio.workspace = true
 zeroize.workspace = true
 
 [dev-dependencies]
+dromon-testkit.workspace = true
 tempfile.workspace = true
 
 [lints]

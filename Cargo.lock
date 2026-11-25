@@ -1080,6 +1080,7 @@ dependencies = [
  "dromon-core",
  "dromon-sftp",
  "dromon-ssh",
+ "dromon-testkit",
  "dromon-transfer",
  "rune",
  "secrecy",

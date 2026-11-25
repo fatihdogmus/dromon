@@ -163,6 +163,9 @@ impl Session {
             }
         };
         cmd.program = cfg.ssh.clone();
+        for name in &cfg.without_env {
+            cmd = cmd.without_env(name.clone());
+        }
         let line = std::iter::once(cmd.program.to_string_lossy().into_owned())
             .chain(cmd.args.iter().map(|a| a.to_string_lossy().into_owned()))
             .collect::<Vec<_>>()

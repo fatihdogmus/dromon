@@ -1,8 +1,8 @@
 //! The real service (manager, connection tasks, askpass server, SFTP) against a fake ssh: a
 //! shell script that asks its questions through `$SSH_ASKPASS` exactly as ssh does, then
 //! serves SFTP with OpenSSH's own `sftp-server` on its stdio. The askpass helper is a small
-//! Python script speaking the helper protocol (the real helper, `dromon_ssh::run_helper`, is
-//! covered by dromon-ssh's own end-to-end tests; a unit-test binary can't be ssh's helper).
+//! Python script speaking the helper protocol (a unit-test binary can't be ssh's helper; the
+//! real system ssh, sshd and `dromon` binary as helper run in `tests/e2e.rs`).
 //!
 //! The fake picks its behaviour from the host alias (`-s <alias> sftp`):
 //!
@@ -13,8 +13,8 @@
 //!   failed."
 //! - `vanish`: asks for a code, then exits (once the test saw the prompt) before it's answered.
 //!
-//! Skipped (with a note) where `sftp-server` or `python3` is missing. Docker-based tests
-//! against a real sshd come with the fixture crate.
+//! Skipped (with a note) where `sftp-server` or `python3` is missing. The Docker-based tests
+//! against a real sshd are `tests/e2e.rs`.
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -138,6 +138,7 @@ impl Fixture {
             config_file: None,
             discover: None,
             hosts: ["pw", "hostkey", "vanish"].iter().map(|a| HostSpec::from_config_alias(a)).collect(),
+            without_env: Vec::new(),
         };
         let (commands, rx) = mpsc::unbounded_channel();
         let (sink, events) = mpsc::unbounded_channel();

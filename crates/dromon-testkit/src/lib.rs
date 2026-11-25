@@ -190,6 +190,31 @@ impl Fixture {
         args
     }
 
+    /// Runs `command` inside the container as root (`docker exec`); its stdout, or why it failed.
+    pub fn exec(&self, command: &[&str]) -> Result<String, String> {
+        let out = std::process::Command::new("docker")
+            .arg("exec")
+            .arg(&self.container_id)
+            .args(command)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .map_err(|e| format!("spawn docker exec: {e}"))?;
+        if !out.status.success() {
+            return Err(format!("docker exec {command:?}: {}: {}", out.status, String::from_utf8_lossy(&out.stderr).trim()));
+        }
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+
+    /// Ends every ssh session of `user` from the server's side, as a server restart does:
+    /// `pkill -u <user>` (SIGTERM to its `sshd-session` and `sftp-server`). Returns how many
+    /// processes were signalled. Other users' sessions are untouched; tests sharing `user`
+    /// must not run at the same time.
+    pub fn kill_sessions(&self, user: &str) -> Result<usize, String> {
+        // pgrep and pkill exit 1 when nothing matches.
+        let pids = self.exec(&["sh", "-c", "pgrep -u \"$1\"; pkill -u \"$1\"; exit 0", "sh", user])?;
+        Ok(pids.lines().filter(|l| !l.trim().is_empty()).count())
+    }
+
     /// Creates [`BIG_FILE`] (1 GiB of random data, owned by `key`) on first call; later calls
     /// return at once. Only the slow `#[ignore]` tests need it, so it is not part of the seed.
     pub async fn big_file(&self) -> &'static str {

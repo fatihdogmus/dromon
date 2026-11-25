@@ -12,15 +12,16 @@
 //! through `auth.rs`. The password store lives here only: cleared per host on Disconnect, and
 //! all of it when the UI goes away.
 
-pub mod auth;
-pub mod conn;
-pub mod hosts;
-pub mod lifecycle;
+mod auth;
+mod conn;
+pub(crate) mod hosts;
+mod lifecycle;
 
 #[cfg(test)]
 mod tests;
 
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::future::pending;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -90,12 +91,16 @@ pub struct Config {
     pub helper_exe: PathBuf,
     /// Pass `-v` to ssh (the log's "Verbose logging").
     pub verbose: bool,
-    /// Read only this ssh config file (`-F`), for tests.
+    /// Read only this ssh config file (`-F`), for tests. Discovery resolves hosts (`ssh -G`)
+    /// against it too.
     pub config_file: Option<PathBuf>,
     /// Discover hosts from these config files.
     pub discover: Option<ConfigSources>,
     /// Hosts known from the start.
     pub hosts: Vec<HostSpec>,
+    /// Inherited environment variables ssh must not see, for tests (`SSH_AUTH_SOCK`, so the
+    /// developer's agent keys stay out). The app passes everything through.
+    pub without_env: Vec<OsString>,
 }
 
 impl Config {
@@ -108,6 +113,7 @@ impl Config {
             config_file: None,
             discover: Some(ConfigSources::default_for_platform()),
             hosts: Vec::new(),
+            without_env: Vec::new(),
         }
     }
 }
@@ -147,7 +153,7 @@ pub async fn run<S: Sink>(mut commands: Commands, sink: S, cfg: Config) {
     let mut known: HashMap<HostId, HostSpec> = cfg.hosts.iter().map(|h| (h.id.clone(), h.clone())).collect();
     let (found_tx, mut found) = mpsc::unbounded_channel();
     if let Some(src) = cfg.discover.clone() {
-        tokio::spawn(hosts::discover(src, cfg.ssh.clone(), sink.clone(), found_tx));
+        tokio::spawn(hosts::discover(src, cfg.ssh.clone(), cfg.config_file.clone(), sink.clone(), found_tx));
     }
     let store = Arc::new(Mutex::new(PasswordStore::new()));
     let shared = Shared { cfg: Arc::new(cfg), askpass, store: store.clone(), ids: PromptIds::default() };

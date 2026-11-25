@@ -31,12 +31,15 @@ Tracks where implementation stands against `dromon-plan.md`. Newest first.
 - Sheets (§6.8): password/passphrase/other, host key, confirm, notice toasts, connection log (2,000 lines per host). Scenes `auth-password`, `auth-password-error`, `host-key`, `confirm`, `connection-log`.
 
 **Next**
-1. App-level end-to-end tests against the testkit fixture (service + real askpass helper binary), and a first run in a real window on macOS/Linux desktop.
+1. A first run in a real window on a macOS and a Linux desktop (real GPU, real input, Wayland).
 2. Persistence (last host/folder, sort, sidebar width).
 3. M2: transfer engine, downloads, uploads, transfers popover.
 
 **Service-thread caveats**
-- Never run in a real window yet (this dev box has no display): `on_ready`, `update_if`, sheet focus and motion are only tested headless.
+- Verified end to end (`crates/dromon-app/tests/e2e.rs`, Docker fixture): the real `App` in a headless `Runtime` + the real service thread + system `ssh` + the `dromon` binary as askpass helper + SFTP, driven by clicks, typing and Return: host-key sheet with the server's real fingerprint, listings incl. dir symlinks, dangling links, dotfiles and permission denied; wrong then right password; keyboard-interactive password + TOTP (code not rememberable); key passphrase; a server-side session kill reconnects silently (password from memory, no sheet, folder relisted); Disconnect forgets the password. No typed secret reaches any event or log line. `dromon-app` is now lib + bin for this (`app()`, `run()`, `pub mod state`, `pub mod service`).
+- Verified under Xvfb + lavapipe (`scripts/smoke-xvfb.sh`): the real windowed startup (`on_ready` → service thread → discovery → sidebar, `update_if`), and, through Rune's `--window-script`, a click that connects and lists in the real window. `DROMON_TRACE=1` names each applied event on stderr (kind + host only). Not yet on a real desktop or GPU; sheet focus and motion in a window are untested.
+- `--window-script` starts only at a GPU-drawn frame; a window resting on its CPU-drawn first frame (Rune's Linux default) never starts it, so the connect run uses `RUNE_CPU_FIRST=0`.
+- Discovery reads `$HOME/.ssh/config`, but ssh reads the password database's home: with `HOME` overridden the sidebar and ssh disagree (the smoke script wraps `ssh` with `-F`). Fixing it belongs in `dromon-ssh`'s `ConfigSources`.
 - Quit is best-effort: Rune may exit before the service thread clears the password store (process memory goes away regardless).
 - A second prompt queues silently behind an answered sheet; the reconnect banner's "Sign in" button does nothing yet.
 

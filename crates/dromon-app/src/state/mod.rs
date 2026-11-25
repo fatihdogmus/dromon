@@ -167,7 +167,13 @@ impl App {
     /// Applies one event from the service. This is the integration point for the real
     /// service thread: call it on the UI thread (from `AppHandle::update_if` or `poll`) for
     /// each event that arrives. It never blocks and may send follow-up commands.
+    ///
+    /// With `DROMON_TRACE=1` each event is named on stderr ([`service::trace_line`]: kind and
+    /// host, never what it carries), so a run without input tooling can be observed.
     pub fn apply(&mut self, ev: ServiceEvent) {
+        if service::tracing() {
+            eprintln!("dromon-trace: {}", service::trace_line(&ev));
+        }
         self.inbox.push_back(ev);
         while let Some(ev) = self.inbox.pop_front() {
             self.apply_one(ev);
