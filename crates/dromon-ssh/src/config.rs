@@ -183,13 +183,13 @@ impl Walker {
     }
 }
 
-fn is_literal_alias(alias: &str) -> bool {
+pub(crate) fn is_literal_alias(alias: &str) -> bool {
     !alias.is_empty() && !alias.contains(['*', '?', '!'])
 }
 
 /// Splits a line into its keyword and the rest, accepting `Keyword value`, `Keyword=value` and
 /// `Keyword = value`. Returns `None` for blank lines and comments.
-fn split_keyword(line: &str) -> Option<(&str, &str)> {
+pub(crate) fn split_keyword(line: &str) -> Option<(&str, &str)> {
     let line = line.trim_start_matches([' ', '\t']);
     if line.is_empty() || line.starts_with('#') {
         return None;
@@ -204,7 +204,7 @@ fn split_keyword(line: &str) -> Option<(&str, &str)> {
 /// Splits arguments the way OpenSSH's `argv_split` does: whitespace-separated, `"` and `'`
 /// quotes, `\` escaping a quote, a backslash or (outside quotes) a space, and a `#` at the start
 /// of a token ending the line. A line with an unterminated quote yields nothing (ssh rejects it).
-fn split_args(s: &str) -> Vec<String> {
+pub(crate) fn split_args(s: &str) -> Vec<String> {
     let mut args = Vec::new();
     let mut chars = s.chars().peekable();
     loop {

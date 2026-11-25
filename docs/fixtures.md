@@ -308,6 +308,23 @@ answering a clash) and Clear finished removes the finished ones, but they never 
 
 Ids are given in order, newest first, above any id the session's own jobs get.
 
+## Saved and recent hosts
+
+Quick connect, Save, the host menus and "Add to SSH config" work on a fixture in memory; no file
+is read or written and there are no new keys:
+
+- The fixture's `saved` hosts are the Saved section and its `recent` ones the Recent section.
+  Save (from the quick-connect popover, or a recent host's menu) and Remove change them for the
+  session; Connect on a host that isn't saved makes it the newest recent host.
+- A host the fixture doesn't list (a quick connect, a host saved in the session) signs in and
+  lists as the server of the fixture host with the same alias, or else of the fixture host with
+  the same `hostname`: in the demo, quick-connecting `deploy@prod.example.com` reaches `prod`'s
+  server. One with neither fails like an unknown host.
+- "Add to SSH config…" shows the host's real `Host` block, the target `~/.ssh/config` and a
+  backup named after the fixture's clock (UTC), `~/.ssh/config.dromon-backup-20261125-1400`
+  (`-2`, `-3`, … for more in the same minute). Confirming moves the host from Saved to SSH
+  Config.
+
 ## The built-in demo
 
 `crates/dromon-app/assets/fixtures/demo.json` is compiled into Dromon: nine hosts that connect at

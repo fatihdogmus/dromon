@@ -74,6 +74,7 @@ impl Harness {
             verbose: false,
             config_file: Some(config),
             discover: None,
+            hosts_file: None,
             hosts: vec![spec.clone()],
             without_env: vec!["SSH_AUTH_SOCK".into()],
         };

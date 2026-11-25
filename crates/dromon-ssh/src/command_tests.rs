@@ -92,6 +92,36 @@ fn recent_host_with_only_some_fields() {
     assert_eq!(args(&cmd), expected);
 }
 
+/// A recent host typed on Windows: its key path has spaces and backslashes, its address is IPv6.
+#[test]
+fn windows_identity_and_ipv6_options() {
+    let host = HostSpec {
+        source: HostSource::Recent,
+        hostname: Some("fe80::1%Ethernet 2".into()),
+        identity_file: Some(r"C:\Users\John Doe\.ssh\id_ed25519".into()),
+        proxy_jump: None,
+        ..saved("fe80::1-Ethernet-2")
+    };
+    let cmd = build(&host, false).unwrap();
+    let a = args(&cmd);
+    assert_eq!(
+        a[BASE.len()..],
+        [
+            "-o",
+            "HostName=\"fe80::1%%Ethernet 2\"",
+            "-o",
+            "User=deploy",
+            "-o",
+            "Port=2222",
+            "-o",
+            r#"IdentityFile="C:\Users\John Doe\.ssh\id_ed25519""#,
+            "-s",
+            "fe80::1-Ethernet-2",
+            "sftp"
+        ]
+    );
+}
+
 #[test]
 fn verbose_goes_before_the_subsystem() {
     let host = HostSpec::from_config_alias("prod");

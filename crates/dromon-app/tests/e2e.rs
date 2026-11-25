@@ -106,6 +106,7 @@ impl Harness {
             verbose: false,
             config_file: Some(config.clone()),
             discover: Some(dromon_ssh::ConfigSources { user: Some(config), system: None, user_ssh_dir: dir.path().to_path_buf() }),
+            hosts_file: None,
             hosts: Vec::new(),
             without_env: vec!["SSH_AUTH_SOCK".into()],
         };

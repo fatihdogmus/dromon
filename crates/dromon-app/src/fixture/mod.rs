@@ -22,6 +22,7 @@
 mod backend;
 mod changes;
 mod generate;
+mod hostbook;
 mod parse;
 pub mod transfers;
 mod tree;

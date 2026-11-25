@@ -40,7 +40,8 @@ scenes=(welcome connecting listing listing-sorted-size big-folder empty-folder p
   auth-password auth-password-error host-key confirm connection-log
   transfers transfers-uploads transfer-conflict drop-list drop-folder toolbar-ring quit-confirm
   new-folder rename-error delete-confirm delete-progress delete-failed cut-rows drag-folder menu-row menu-empty file-ops-light icons
-  poll-added folder-vanished)
+  poll-added folder-vanished
+  quick-connect quick-connect-more quick-connect-error add-to-config host-menu)
 
 for scene in "${scenes[@]}"; do
   theme=dark

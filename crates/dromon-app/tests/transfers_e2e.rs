@@ -82,6 +82,7 @@ impl Harness {
             verbose: false,
             config_file: Some(config),
             discover: None,
+            hosts_file: None,
             hosts: vec![
                 dromon_core::HostSpec::from_config_alias("fx-key"),
                 dromon_core::HostSpec::from_config_alias("fx-key-2"),

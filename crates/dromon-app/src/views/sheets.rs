@@ -43,6 +43,7 @@ pub fn layer(s: &App, p: Paint) -> Option<El> {
         (None, Some(Sheet::Sent { prompt })) => prompt_sheet(s, prompt, true, p),
         (None, Some(Sheet::Log { host })) => log_sheet(s, host, p),
         (None, Some(Sheet::Delete { names, .. })) => super::delete::sheet(s, names, p),
+        (None, Some(Sheet::AddToConfig(v))) => super::add_config::sheet(s, v, p),
         (None, None) => conflict::sheet(s, p)?,
     };
     Some(

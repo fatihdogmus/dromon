@@ -71,6 +71,7 @@ impl Harness {
             verbose: false,
             config_file: Some(config),
             discover: None,
+            hosts_file: None,
             hosts: vec![dromon_core::HostSpec::from_config_alias("fx-key")],
             without_env: vec!["SSH_AUTH_SOCK".into()],
         };

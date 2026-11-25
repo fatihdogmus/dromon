@@ -24,6 +24,8 @@ pub enum Shortcut {
     Type(String),
     /// File operations (§7). Never while a text field has focus.
     File(FileKey),
+    /// ⌘⇧K (Ctrl+Shift+K elsewhere): the quick-connect popover.
+    QuickConnect,
 }
 
 /// The file operations' keys. ⌘V isn't one: pasting goes through the window's paste handler,
@@ -82,6 +84,10 @@ pub fn shortcut(ev: &KeyEvent, platform: KeyPlatform) -> Option<Shortcut> {
     let key = &ev.key;
     if command(key, 'n') && m.shift && !m.alt {
         return Some(Shortcut::File(FileKey::NewFolder));
+    }
+    // Shift may arrive applied (`K`) or not (`k`).
+    if (command(key, 'k') || command(key, 'K')) && m.shift && !m.alt {
+        return Some(Shortcut::QuickConnect);
     }
     if command(key, 'c') && m.alt && !m.shift {
         return Some(Shortcut::File(FileKey::CopyPath));
@@ -208,6 +214,17 @@ mod tests {
         // macOS may name ⌥⌘C and ⌥⌘V by what ⌥ types.
         assert_eq!(k(Key::Command('ç'), alt(CMD)), f(FileKey::CopyPath));
         assert_eq!(k(Key::Command('√'), alt(CMD)), f(FileKey::MoveHere));
+    }
+
+    #[test]
+    fn quick_connect_is_cmd_shift_k() {
+        let ctrl = Mods { ctrl: true, logo: false, ..CMD };
+        let shift = |m: Mods| Mods { shift: true, ..m };
+        assert_eq!(k(Key::Command('k'), shift(CMD)), Some(Shortcut::QuickConnect));
+        assert_eq!(k(Key::Command('K'), shift(CMD)), Some(Shortcut::QuickConnect));
+        assert_eq!(on(Key::Command('k'), shift(ctrl), KeyPlatform::Windows), Some(Shortcut::QuickConnect));
+        assert_eq!(on(Key::Command('k'), shift(ctrl), KeyPlatform::Linux), Some(Shortcut::QuickConnect));
+        assert_eq!(k(Key::Command('k'), CMD), None, "⌘K is the palette's");
     }
 
     #[test]

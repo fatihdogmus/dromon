@@ -1,6 +1,6 @@
 //! What Dromon remembers between launches (§4.7 "Persisted state"): the sort, whether dotfiles
-//! show, the sidebar's width and the last folder on each host. Never secrets, never anything a
-//! server sent beyond a folder path.
+//! show, the sidebar's width, the last folder on each host and the recent quick connects. Never
+//! secrets, never anything a server sent beyond a folder path.
 //!
 //! The app keeps a [`Saved`] and hands every change to a [`Store`]. The real app's store
 //! (`crate::persist`) writes Rune's `prefs.json` on a background thread, since the UI thread
@@ -32,6 +32,22 @@ pub struct Saved {
     pub last_folder: BTreeMap<String, String>,
     /// Host ids, least recently used first: decides which folders [`MAX_FOLDERS`] drops.
     pub folder_order: Vec<String>,
+    /// The Recent section, newest first (§4.3: at most 10; addresses and options, never
+    /// secrets). Checked again like typed input when read back.
+    pub recent: Vec<RecentHost>,
+}
+
+/// One recent quick connect, as remembered.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RecentHost {
+    /// The name given under More; empty when it had none.
+    pub alias: String,
+    pub hostname: String,
+    pub user: Option<String>,
+    pub port: Option<u16>,
+    pub identity_file: Option<String>,
+    pub proxy_jump: Option<String>,
 }
 
 impl Saved {

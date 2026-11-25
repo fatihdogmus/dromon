@@ -1,6 +1,7 @@
 //! The single window (§6.2): sidebar | toolbar, content, status bar. Each part is a function of
 //! `&App` and a [`Paint`]; handlers turn input into `state::Action`s and run them with [`run`].
 
+mod add_config;
 mod conflict;
 mod delete;
 mod drag;
@@ -8,6 +9,7 @@ mod drop;
 mod edit;
 mod list;
 mod menu;
+mod quick;
 mod quit;
 mod sheets;
 mod sidebar;
@@ -135,6 +137,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         .child(sidebar::view(s, p))
         .child(main)
         .children(transfers::popover(s, p))
+        .children(quick::popover(s, p))
         .children(sheets::layer(s, p))
         .children(menu::layer(s, p))
 }

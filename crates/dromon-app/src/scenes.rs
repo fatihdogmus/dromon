@@ -5,12 +5,13 @@
 use std::time::Duration;
 
 use dromon_core::{ConnStatus, HostId, Prompt, PromptId, PromptKind, RemotePath};
+use dromon_ssh::QuickField;
 use dromon_transfer::{ConflictView, JobId, JobKind, JobView, Progress, Reveal, Side, TaskState};
 use rune::TextEdit;
 
 use crate::fixture;
 use crate::state::log::LogBuffer;
-use crate::state::{Action, App, DropTarget, Effect, FileAction, MenuKind, RowTarget, ServiceEvent, Silent, Tab};
+use crate::state::{Action, App, DropTarget, Effect, FileAction, HostAction, MenuKind, RowTarget, ServiceEvent, Silent, Tab};
 use crate::theme::Appearance;
 
 /// The demo's big folder: 10,000 photos.
@@ -439,6 +440,48 @@ pub fn folder_vanished(s: &mut App) {
     s.apply(ServiceEvent::Listing { host: prod(), path, entries });
 }
 
+/// The quick-connect popover, empty, from the sidebar's +.
+pub fn quick_connect(s: &mut App) {
+    *s = base();
+    act(s, Action::QuickConnect);
+}
+
+/// Every field filled, More open.
+pub fn quick_connect_more(s: &mut App) {
+    quick_connect(s);
+    act(s, Action::HostBook(HostAction::ToggleMore));
+    for (f, text) in [
+        (QuickField::Host, "10.0.0.7"),
+        (QuickField::User, "deploy"),
+        (QuickField::Port, "2222"),
+        (QuickField::Alias, "lab"),
+        (QuickField::IdentityFile, "~/.ssh/id_lab"),
+        (QuickField::ProxyJump, "jump@bastion.example.com"),
+    ] {
+        s.ui.quick.set_text(f, text);
+    }
+}
+
+/// Connect with a host that has a space and a port out of range: both say so.
+pub fn quick_connect_error(s: &mut App) {
+    quick_connect(s);
+    s.ui.quick.set_text(QuickField::Host, "my server");
+    s.ui.quick.set_text(QuickField::Port, "70000");
+    act(s, Action::HostBook(HostAction::Connect));
+}
+
+/// The saved host `box` on its way into the ssh config: its block, the file and the backup.
+pub fn add_to_config(s: &mut App) {
+    *s = base();
+    act(s, Action::HostBook(HostAction::AddToConfig(HostId("box".into()))));
+}
+
+/// The drawn menu of a saved host in the sidebar.
+pub fn host_menu(s: &mut App) {
+    *s = base();
+    file(s, FileAction::OpenMenu { kind: MenuKind::Host(HostId("box".into())), at: Some((96.0, 258.0)) });
+}
+
 /// A named state: what `AppSpec::scenes` takes.
 pub type Scene = (&'static str, fn(&mut App));
 
@@ -479,4 +522,9 @@ pub const SCENES: &[Scene] = &[
     ("icons", icons),
     ("poll-added", poll_added),
     ("folder-vanished", folder_vanished),
+    ("quick-connect", quick_connect),
+    ("quick-connect-more", quick_connect_more),
+    ("quick-connect-error", quick_connect_error),
+    ("add-to-config", add_to_config),
+    ("host-menu", host_menu),
 ];

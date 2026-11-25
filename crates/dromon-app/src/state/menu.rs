@@ -3,6 +3,8 @@
 //! (`views/menu.rs`). Items that would change the server are disabled while the host isn't
 //! connected; Paste also needs a clip.
 
+use dromon_core::HostId;
+
 use super::files::FileAction;
 use super::{Action, App};
 
@@ -17,6 +19,8 @@ pub enum MenuKind {
     Row(String),
     /// Right-clicked on the list where there's no row.
     Empty,
+    /// Right-clicked on a host in the sidebar (`hostbook.rs`).
+    Host(HostId),
 }
 
 /// One choice.
@@ -102,12 +106,16 @@ impl App {
                     }),
                 ]
             }
+            MenuKind::Host(id) => self.host_menu(id),
         }
     }
 
     /// What picking `id` in `kind`'s menu does; `None` for an item that isn't there or is
     /// disabled now.
     pub fn menu_action(&self, kind: &MenuKind, id: &str) -> Option<Action> {
+        if let MenuKind::Host(host) = kind {
+            return self.host_menu_action(host, id);
+        }
         let entries = self.menu(kind);
         entries.iter().filter_map(MenuEntry::item).find(|i| i.id == id && i.enabled)?;
         Some(match (kind, id) {

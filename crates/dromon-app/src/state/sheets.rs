@@ -1,5 +1,5 @@
-//! The window's sheets (§6.8): what ssh asks (sign in, a new host key, a yes/no question), and
-//! the connection log. One sheet shows at a time; prompts that arrive meanwhile wait in order.
+//! The window's sheets (§6.8): what ssh asks (sign in, a new host key, a yes/no question), the
+//! connection log, the delete confirmation and Add to SSH config. One sheet shows at a time; prompts that arrive meanwhile wait in order.
 //! Notices (ssh's "touch your security key") don't block anything: they show as toasts until
 //! the service closes them.
 //!
@@ -11,6 +11,8 @@ use std::collections::VecDeque;
 
 use dromon_core::{HostId, Prompt, PromptAnswer, PromptId, PromptKind, RemotePath};
 use rune::TextEdit;
+
+use super::hostbook::AddToConfigView;
 
 /// The sheet on screen.
 pub enum Sheet {
@@ -25,6 +27,8 @@ pub enum Sheet {
     /// "Delete 3 items permanently?": the rows `names` of `folder`. Return doesn't delete;
     /// only its Delete button does.
     Delete { host: HostId, folder: RemotePath, names: Vec<String> },
+    /// "Add to SSH config": a saved host's block, where it goes and the backup (`hostbook.rs`).
+    AddToConfig(Box<AddToConfigView>),
 }
 
 impl Sheet {
@@ -32,13 +36,14 @@ impl Sheet {
         match self {
             Sheet::Ask { prompt, .. } | Sheet::Sent { prompt } => &prompt.host,
             Sheet::Log { host } | Sheet::Delete { host, .. } => host,
+            Sheet::AddToConfig(v) => &v.host,
         }
     }
 
     pub fn prompt(&self) -> Option<&Prompt> {
         match self {
             Sheet::Ask { prompt, .. } | Sheet::Sent { prompt } => Some(prompt),
-            Sheet::Log { .. } | Sheet::Delete { .. } => None,
+            Sheet::Log { .. } | Sheet::Delete { .. } | Sheet::AddToConfig(_) => None,
         }
     }
 }
@@ -117,7 +122,7 @@ impl Sheets {
         // A question from ssh comes before the log or a delete still being asked about (whose
         // host can't take it while it signs in anyway).
         let replaces = match &self.open {
-            None | Some(Sheet::Log { .. } | Sheet::Delete { .. }) => true,
+            None | Some(Sheet::Log { .. } | Sheet::Delete { .. } | Sheet::AddToConfig(_)) => true,
             Some(Sheet::Sent { prompt }) => prompt.host == p.host,
             Some(Sheet::Ask { .. }) => false,
         };
@@ -182,7 +187,7 @@ impl Sheets {
     pub fn cancel(&mut self) -> Option<(PromptId, PromptAnswer)> {
         let id = match &self.open {
             Some(Sheet::Ask { prompt, .. }) => Some(prompt.id),
-            Some(Sheet::Sent { .. } | Sheet::Log { .. } | Sheet::Delete { .. }) => None,
+            Some(Sheet::Sent { .. } | Sheet::Log { .. } | Sheet::Delete { .. } | Sheet::AddToConfig(_)) => None,
             None => return None,
         };
         self.close_and_advance();
@@ -217,6 +222,30 @@ impl Sheets {
         let Some(Sheet::Delete { host, folder, names }) = self.open.take() else { return None };
         self.open = self.queue.pop_front().map(ask);
         Some((host, folder, names))
+    }
+
+    /// Opens the Add to SSH config sheet, unless another sheet is up.
+    pub fn open_add_to_config(&mut self, view: AddToConfigView) -> bool {
+        if self.open.is_some() {
+            return false;
+        }
+        self.open = Some(Sheet::AddToConfig(Box::new(view)));
+        true
+    }
+
+    /// The Add to SSH config sheet, while it's open.
+    pub fn add_to_config_mut(&mut self) -> Option<&mut AddToConfigView> {
+        match &mut self.open {
+            Some(Sheet::AddToConfig(v)) => Some(v),
+            _ => None,
+        }
+    }
+
+    /// `host`'s block was added: its sheet closes.
+    pub fn close_add_to_config(&mut self, host: &HostId) {
+        if matches!(&self.open, Some(Sheet::AddToConfig(v)) if &v.host == host) {
+            self.close_and_advance();
+        }
     }
 
     /// The user disconnected `host`: nothing of it stays on screen.

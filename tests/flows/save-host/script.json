@@ -1,0 +1,14 @@
+{
+  "description": "Press + and type “kbd@10.0.0.7:2222” into Host, open More and name it “lab”, then Save: the popover closes and lab appears under Saved, not connected. Its menu's Edit… opens the popover on its settings.",
+  "events": [
+    {"t": 0.5, "type": "tap", "key": "sb-quick-connect"},
+    {"t": 1.2, "type": "type", "text": "kbd@10.0.0.7:2222"},
+    {"t": 2.0, "type": "tap", "key": "quick-more"},
+    {"t": 2.6, "type": "tap", "key": "quick-alias-input"},
+    {"t": 2.9, "type": "type", "text": "lab"},
+    {"t": 3.6, "type": "tap", "key": "quick-save"},
+    {"t": 4.6, "type": "secondary-click", "key": "host-lab"},
+    {"t": 5.4, "type": "tap", "key": "ctx-host-edit"},
+    {"t": 6.5, "type": "mark", "name": "end"}
+  ]
+}

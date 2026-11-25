@@ -11,11 +11,13 @@
 //! (`conn.rs`), whose lifecycle is the pure machine in `lifecycle.rs` and whose prompts go
 //! through `auth.rs`; its file operations (new folder, rename, delete) run in `fileops.rs`
 //! on its SFTP session. The password store lives here only: cleared per host on Disconnect, and
-//! all of it when the UI goes away.
+//! all of it when the UI goes away. `hostfiles.rs` owns the files: discovery and its watcher,
+//! the saved hosts' `hosts.conf`, and "Add to SSH config".
 
 mod auth;
 mod conn;
 mod fileops;
+mod hostfiles;
 pub(crate) mod hosts;
 /// Also drives the fixture backend's connections, so both change status alike.
 pub(crate) mod lifecycle;
@@ -106,8 +108,11 @@ pub struct Config {
     /// Read only this ssh config file (`-F`), for tests. Discovery resolves hosts (`ssh -G`)
     /// against it too.
     pub config_file: Option<PathBuf>,
-    /// Discover hosts from these config files.
+    /// Discover hosts from these config files, and watch them for changes; "Add to SSH config"
+    /// appends to its user config.
     pub discover: Option<ConfigSources>,
+    /// The saved hosts' `hosts.conf` (in the app's config folder); `None`: no saved hosts.
+    pub hosts_file: Option<PathBuf>,
     /// Hosts known from the start.
     pub hosts: Vec<HostSpec>,
     /// Inherited environment variables ssh must not see, for tests (`SSH_AUTH_SOCK`, so the
@@ -124,6 +129,7 @@ impl Config {
             verbose: false,
             config_file: None,
             discover: Some(ConfigSources::default_for_platform()),
+            hosts_file: rune::dirs::AppDirs::new(crate::persist::APP_ID).map(|d| d.config().join(dromon_ssh::HOSTS_CONF)),
             hosts: Vec::new(),
             without_env: Vec::new(),
         }
@@ -163,10 +169,8 @@ pub async fn run<S: Sink>(mut commands: Commands, sink: S, cfg: Config) {
         }
     };
     let mut known: HashMap<HostId, HostSpec> = cfg.hosts.iter().map(|h| (h.id.clone(), h.clone())).collect();
-    let (found_tx, mut found) = mpsc::unbounded_channel();
-    if let Some(src) = cfg.discover.clone() {
-        tokio::spawn(hosts::discover(src, cfg.ssh.clone(), cfg.config_file.clone(), sink.clone(), found_tx));
-    }
+    // Discovery, its watcher and the saved hosts (`hostfiles.rs`).
+    let (mut book, mut book_updates) = hostfiles::Book::start(&cfg);
     let store = Arc::new(Mutex::new(PasswordStore::new()));
     let engine = transfers::start(sink.clone());
     let shared = Shared { cfg: Arc::new(cfg), askpass, store: store.clone(), ids: PromptIds::default(), engine };
@@ -176,14 +180,12 @@ pub async fn run<S: Sink>(mut commands: Commands, sink: S, cfg: Config) {
     loop {
         tokio::select! {
             cmd = commands.recv() => match cmd {
+                Some(Command::HostBook(cmd)) => book.command(cmd, &mut known),
                 Some(cmd) => dispatch(cmd, &known, &mut conns, &shared, &sink, &mut window),
                 None => break,
             },
             Some(req) = recv_opt(&mut requests) => route(req, &conns),
-            Some(specs) = found.recv() => {
-                known.retain(|_, h| h.source != dromon_core::HostSource::SshConfig);
-                known.extend(specs.into_iter().map(|h| (h.id.clone(), h)));
-            }
+            Some(update) = book_updates.recv() => book.update(update, &mut known, &sink),
         }
     }
     // The UI is gone: stop every connection and forget every secret.
@@ -270,6 +272,8 @@ fn dispatch<S: Sink>(
                 let _ = c.cmds.send(ConnCmd::PollNow);
             }
         }
+        // The manager's loop takes these first.
+        Command::HostBook(_) => {}
     }
 }
 

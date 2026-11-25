@@ -24,7 +24,9 @@ dromon-ssh.workspace = true
 dromon-transfer.workspace = true
 # `tooling`: release builds take Rune's `--snap`, `--script`, `--tree` (debug builds always do), so
 # the release smoke check and issue repros run on the binaries users get.
-rune = { workspace = true, features = ["tooling"] }
+# native-file-dialog: the identity file picker in quick connect (rfd on macOS and Windows, the
+# XDG portal on Linux).
+rune = { workspace = true, features = ["tooling", "native-file-dialog"] }
 secrecy.workspace = true
 # Fixtures (`--fixture`, the built-in demo) and remembered settings (`state::prefs`).
 serde.workspace = true

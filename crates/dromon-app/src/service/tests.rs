@@ -137,6 +137,7 @@ impl Fixture {
             verbose: false,
             config_file: None,
             discover: None,
+            hosts_file: None,
             hosts: ["pw", "hostkey", "vanish"].iter().map(|a| HostSpec::from_config_alias(a)).collect(),
             without_env: Vec::new(),
         };

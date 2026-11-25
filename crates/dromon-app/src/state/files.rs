@@ -140,7 +140,10 @@ impl App {
 
     /// Whether a text field has the keyboard: the list's shortcuts leave it alone.
     pub fn text_focused(&self) -> bool {
-        self.ui.filter_edit.focused || self.files.edit.field().is_some_and(|f| f.edit.focused) || self.ui.sheets.field().focused
+        self.ui.filter_edit.focused
+            || self.files.edit.field().is_some_and(|f| f.edit.focused)
+            || self.ui.sheets.field().focused
+            || self.ui.quick.focused()
     }
 
     /// The toasts on screen, oldest first: running and failed deletes, then notes.

@@ -32,6 +32,8 @@ pub struct Tree {
     folders: BTreeMap<Key, Result<Vec<Entry>, TreeError>>,
     /// Folders whose listing changed since [`Tree::take_touched`].
     touched: BTreeSet<Key>,
+    /// Hosts whose server is another host's (quick connects, `fixture/hostbook.rs`).
+    routes: BTreeMap<HostId, String>,
 }
 
 /// `e` from looking `path` up through its folder: about `path` itself.
@@ -61,7 +63,14 @@ fn dir_entry(name: &str, mtime: Option<i64>) -> Entry {
 
 impl Tree {
     pub fn new(fixture: Arc<Fixture>) -> Tree {
-        Tree { fixture, folders: BTreeMap::new(), touched: BTreeSet::new() }
+        Tree { fixture, folders: BTreeMap::new(), touched: BTreeSet::new(), routes: BTreeMap::new() }
+    }
+
+    /// `host`'s folders are those of the fixture server `server`.
+    pub fn route(&mut self, host: HostId, server: String) {
+        if host.as_str() != server {
+            self.routes.insert(host, server);
+        }
     }
 
     /// The folders whose listing changed since the last call.
@@ -71,7 +80,7 @@ impl Tree {
 
     /// `path` as the fixture lists it, unchanged.
     fn base(&self, host: &HostId, path: &RemotePath) -> Result<Vec<Entry>, Error> {
-        match self.fixture.server(host.as_str()) {
+        match self.fixture.server(self.routes.get(host).map_or(host.as_str(), String::as_str)) {
             Some(s) => s.list(path),
             None => Err(Error::NotFound(path.clone())),
         }

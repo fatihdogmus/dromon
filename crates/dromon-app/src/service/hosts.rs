@@ -1,6 +1,7 @@
 //! Host discovery for the sidebar's SSH Config section (§4.3 "Host discovery"): the literal
 //! aliases from the user's and the system's ssh config, then the settings `ssh -G` resolves
-//! for each, a few at a time. Both steps run off the UI thread.
+//! for each, a few at a time. Both steps run off the UI thread; `hostfiles.rs` runs them at
+//! startup and whenever a config file changes.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -8,11 +9,8 @@ use std::sync::Arc;
 
 use dromon_core::HostSpec;
 use dromon_ssh::{ConfigSources, RESOLVE_TIMEOUT, Resolved, discover_aliases, parse_ssh_g, resolve};
-use tokio::sync::{Semaphore, mpsc};
+use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
-
-use super::Sink;
-use crate::state::ServiceEvent;
 
 /// How many `ssh -G` run at once.
 const RESOLVE_AT_ONCE: usize = 4;
@@ -20,7 +18,13 @@ const RESOLVE_AT_ONCE: usize = 4;
 /// The aliases in the config files `src` names, as hosts with nothing resolved yet. Reads files:
 /// call it off the UI thread (or in a headless run, where nothing waits for a frame).
 pub fn aliases(src: &ConfigSources) -> Vec<HostSpec> {
-    discover_aliases(src).aliases.iter().map(|a| HostSpec::from_config_alias(a)).collect()
+    aliases_and_files(src).0
+}
+
+/// [`aliases`], and every config file that was read (for the watcher).
+pub fn aliases_and_files(src: &ConfigSources) -> (Vec<HostSpec>, Vec<PathBuf>) {
+    let found = discover_aliases(src);
+    (found.aliases.iter().map(|a| HostSpec::from_config_alias(a)).collect(), found.files_read)
 }
 
 /// `spec` with what `ssh -G` printed. Identity files stay unset: ssh lists its default key
@@ -31,29 +35,6 @@ pub fn with_resolved(mut spec: HostSpec, r: Resolved) -> HostSpec {
     spec.port = r.port;
     spec.proxy_jump = r.proxy_jump;
     spec
-}
-
-/// Discovers the hosts, tells the UI and the manager (`found`), then resolves them and tells
-/// both again if anything was learned. With `config_file` (tests), `ssh -G` reads that file
-/// only, as the connections do.
-pub async fn discover<S: Sink>(
-    src: ConfigSources,
-    ssh: PathBuf,
-    config_file: Option<PathBuf>,
-    sink: S,
-    found: mpsc::UnboundedSender<Vec<HostSpec>>,
-) {
-    let specs = tokio::task::spawn_blocking(move || aliases(&src)).await.unwrap_or_default();
-    let _ = found.send(specs.clone());
-    sink.emit(ServiceEvent::Hosts(specs.clone()));
-    if specs.is_empty() {
-        return;
-    }
-    let resolved = resolve_all(&ssh, config_file.as_deref(), specs.clone()).await;
-    if resolved != specs {
-        let _ = found.send(resolved.clone());
-        sink.emit(ServiceEvent::Hosts(resolved));
-    }
 }
 
 /// `ssh [-F config_file] -G <alias>`. Without a config file this is `dromon_ssh::resolve`.
@@ -75,8 +56,9 @@ async fn resolve_with(ssh: &Path, config_file: Option<&Path>, alias: &str) -> Re
 }
 
 /// `ssh -G` for every host, [`RESOLVE_AT_ONCE`] at a time, keeping the order. A host ssh can't
-/// resolve keeps what it had.
-async fn resolve_all(ssh: &Path, config_file: Option<&Path>, specs: Vec<HostSpec>) -> Vec<HostSpec> {
+/// resolve keeps what it had. With `config_file` (tests), `ssh -G` reads that file only, as the
+/// connections do.
+pub(super) async fn resolve_all(ssh: &Path, config_file: Option<&Path>, specs: Vec<HostSpec>) -> Vec<HostSpec> {
     let gate = Arc::new(Semaphore::new(RESOLVE_AT_ONCE));
     let mut set = JoinSet::new();
     for (i, spec) in specs.iter().enumerate() {

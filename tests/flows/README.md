@@ -32,3 +32,13 @@ Rows drag with `{"type": "drag", "key": "rows/<name>", "dx": 0, "dy": -28}`. ⌘
 clipboard; a script's ⌘V reads it only through a `paste` event, so `copy-paste` pastes the
 copied path text explicitly. The delete key is Delete here; on macOS it's ⌘⌫ (`"name":
 "Backspace", "cmd": true`).
+
+Quick connect and saved hosts: `sb-quick-connect` (the sidebar's +), `welcome-quick-connect`,
+the popover `quick` with `quick-<field>-input` and `quick-<field>-error` for `host`, `user`,
+`port`, `alias`, `identity`, `jump`, `quick-more`, `quick-pick-identity` (answer its picker with
+`{"type": "file-dialog", "path": …}`), `quick-save`, `quick-connect`. A `paste` event into Host
+splits `user@host:port`. A host's menu (`secondary-click` on `host-<id>`) has `ctx-host-connect`,
+`ctx-host-disconnect`, `ctx-host-add-to-config`, `ctx-host-edit`, `ctx-host-remove`,
+`ctx-host-save`; the Add to SSH config sheet `add-config` has `add-config-block-text`,
+`add-config-target`, `add-config-backup`, `add-config-confirm`, `add-config-cancel`. A recent
+host's id is `[user@]host:port` (`host-deploy@prod.example.com:22`).

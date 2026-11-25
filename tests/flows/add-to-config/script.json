@@ -1,0 +1,10 @@
+{
+  "description": "Right-click the saved host box: Add to SSH config… opens the sheet with its exact Host block, ~/.ssh/config and the backup's name. Return adds it: the sheet goes and box moves from Saved to SSH Config, where a click connects it.",
+  "events": [
+    {"t": 0.5, "type": "secondary-click", "key": "host-box"},
+    {"t": 1.3, "type": "tap", "key": "ctx-host-add-to-config"},
+    {"t": 3.0, "type": "key", "name": "Enter"},
+    {"t": 4.2, "type": "tap", "key": "host-box"},
+    {"t": 5.5, "type": "mark", "name": "end"}
+  ]
+}

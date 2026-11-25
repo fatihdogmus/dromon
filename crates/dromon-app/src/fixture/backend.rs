@@ -11,6 +11,8 @@
 //! There's no clock: a lost connection says when it would retry, then stays reconnecting.
 //! Answers are compared with the fixture's and wiped; nothing logs them.
 //!
+//! Saved and recent hosts are `fixture/hostbook.rs`'s, in memory.
+//!
 //! Transfer commands go to [`Engine`] (`fixture/transfers.rs`). Its tree (`fixture/tree.rs`:
 //! the fixture's folders with what transfers and file operations changed) is the one this
 //! backend lists and runs file operations on.
@@ -31,6 +33,7 @@ use dromon_sftp::Visibility;
 use tokio::time::{Duration, Instant};
 
 use super::changes;
+use super::hostbook::Book;
 use super::transfers::Engine;
 use super::{Fixture, Step};
 use crate::service::lifecycle::{self, Event, Lifecycle, Phase};
@@ -55,6 +58,8 @@ pub struct FixtureBackend {
     transfers: Engine,
     /// How the window shows (`Command::Window`): polls only while it's on screen.
     window: Visibility,
+    /// Saved and recent hosts (`fixture/hostbook.rs`).
+    book: Book,
 }
 
 #[derive(Default)]
@@ -119,7 +124,8 @@ fn first_line(text: &str) -> &str {
 impl FixtureBackend {
     pub fn new(fixture: Arc<Fixture>) -> Self {
         let transfers = Engine::new(fixture.clone());
-        FixtureBackend { fixture, conns: BTreeMap::new(), store: PasswordStore::new(), last_prompt: 0, transfers, window: Visibility::Hidden }
+        let book = Book::new(fixture.clone());
+        FixtureBackend { fixture, conns: BTreeMap::new(), store: PasswordStore::new(), last_prompt: 0, transfers, window: Visibility::Hidden, book }
     }
 
     /// Whether `host`'s session is up (ready, its "ssh" running).
@@ -177,7 +183,12 @@ impl FixtureBackend {
     }
 
     fn spec(&self, host: &HostId) -> Option<&HostSpec> {
-        self.fixture.host(host.as_str())
+        self.book.spec(host).or_else(|| self.fixture.host(host.as_str()))
+    }
+
+    /// The fixture server's alias `host` reaches (a quick connect's is another host's).
+    fn server_key(&self, host: &HostId) -> String {
+        self.book.server_alias(host).unwrap_or_else(|| host.as_str().to_owned())
     }
 
     /// `user@hostname` as ssh names the account.
@@ -229,7 +240,7 @@ impl FixtureBackend {
             }
             E::Status(status) => out.push(ServiceEvent::Status { host: host.clone(), status }),
             E::Opened => {
-                let start = self.fixture.server(host.as_str()).map_or_else(RemotePath::root, |s| s.home.clone());
+                let start = self.fixture.server(&self.server_key(host)).map_or_else(RemotePath::root, |s| s.home.clone());
                 if let Some(c) = self.conns.get_mut(host) {
                     c.path = None;
                     c.poll.forget();
@@ -267,7 +278,8 @@ impl FixtureBackend {
     /// Asks the current step, or ends the attempt when none is left.
     fn advance(&mut self, host: &HostId, queue: &mut VecDeque<Work>, out: &mut Vec<ServiceEvent>) {
         let fixture = self.fixture.clone();
-        let steps = fixture.server(host.as_str()).map_or(&[][..], |s| &s.auth);
+        let key = self.server_key(host);
+        let steps = fixture.server(&key).map_or(&[][..], |s| &s.auth);
         let (user, hostname) = self.account(host);
         let port = self.spec(host).and_then(|h| h.port);
         loop {
@@ -277,7 +289,7 @@ impl FixtureBackend {
                 return;
             }
             let Some(step) = steps.get(a.step) else {
-                let reason = match fixture.server(host.as_str()) {
+                let reason = match fixture.server(&key) {
                     Some(s) => s.fail.clone(),
                     None => Some(format!("ssh: Could not resolve hostname {hostname}: Name or service not known")),
                 };
@@ -368,7 +380,8 @@ impl FixtureBackend {
     /// What the server makes of `answer` to the current step.
     fn judge(&mut self, host: &HostId, answer: PromptAnswer, queue: &mut VecDeque<Work>, out: &mut Vec<ServiceEvent>) {
         let fixture = self.fixture.clone();
-        let steps = fixture.server(host.as_str()).map_or(&[][..], |s| &s.auth);
+        let key = self.server_key(host);
+        let steps = fixture.server(&key).map_or(&[][..], |s| &s.auth);
         let (user, hostname) = self.account(host);
         let Some(conn) = self.conns.get_mut(host) else { return wipe(answer) };
         let Some(a) = conn.attempt.as_mut() else { return wipe(answer) };
@@ -542,6 +555,9 @@ impl Backend for FixtureBackend {
                     let status = ConnStatus::Failed("Dromon doesn't know this host any more.".into());
                     out.push(ServiceEvent::Status { host, status });
                 } else {
+                    // Its folders are its server's (a quick connect's are another host's).
+                    let key = self.server_key(&host);
+                    self.transfers.tree.route(host.clone(), key);
                     self.drive(&host, Work::Life(Event::Connect), &mut out);
                 }
             }
@@ -568,6 +584,7 @@ impl Backend for FixtureBackend {
                 };
             }
             Command::Poll { host } => self.poll(&host, &mut out),
+            Command::HostBook(cmd) => self.book.command(cmd, &mut out),
         }
         out
     }

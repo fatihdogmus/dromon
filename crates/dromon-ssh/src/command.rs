@@ -44,8 +44,8 @@ pub enum CommandError {
 }
 
 /// How a `-o` value's `%` is treated.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Percent {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Percent {
     /// The keyword has expanded `%` tokens since before 8.4: write `%%`.
     Escape,
     /// Expansion depends on the ssh version (`User`: 10.x expands, older don't): refuse `%`.
@@ -163,18 +163,10 @@ impl SshCommand {
         check_arg("The host alias", &host.alias)?;
         let mut args: Vec<OsString> = BASE_ARGS.iter().map(OsString::from).collect();
         if matches!(host.source, HostSource::Saved | HostSource::Recent) {
-            let port = host.port.map(|p| p.to_string());
-            let options = [
-                ("HostName", host.hostname.as_deref(), Percent::Escape),
-                ("User", host.user.as_deref(), Percent::Reject),
-                ("Port", port.as_deref(), Percent::Literal),
-                ("IdentityFile", host.identity_file.as_deref(), Percent::Escape),
-                ("ProxyJump", host.proxy_jump.as_deref(), Percent::Literal),
-            ];
-            for (keyword, value, percent) in options {
+            for (keyword, value, percent) in host_options(host) {
                 if let Some(value) = value {
                     args.push("-o".into());
-                    args.push(config_option(keyword, value, percent)?.into());
+                    args.push(config_option(keyword, &value, percent)?.into());
                 }
             }
         }
@@ -204,7 +196,26 @@ impl SshCommand {
     }
 }
 
+/// The settings a saved or recent host passes explicitly, in order, each with how its `%` is
+/// treated: the `-o` options of [`SshCommand::sftp`] and the lines of a `Host` block
+/// (`hosts_conf::host_block`).
+pub(crate) fn host_options(host: &HostSpec) -> [(&'static str, Option<String>, Percent); 5] {
+    [
+        ("HostName", host.hostname.clone(), Percent::Escape),
+        ("User", host.user.clone(), Percent::Reject),
+        ("Port", host.port.map(|p| p.to_string()), Percent::Literal),
+        ("IdentityFile", host.identity_file.clone(), Percent::Escape),
+        ("ProxyJump", host.proxy_jump.clone(), Percent::Literal),
+    ]
+}
+
 /// `Keyword=value`, escaped so ssh's config-line parser reads back exactly `value`.
+fn config_option(keyword: &'static str, value: &str, percent: Percent) -> Result<String, CommandError> {
+    Ok(format!("{keyword}={}", config_value(keyword, value, percent)?))
+}
+
+/// `value` as it goes after its keyword on a config line (`-o Keyword=value`, or a line of a
+/// config file), escaped so ssh's config-line parser reads back exactly `value`.
 ///
 /// OpenSSH 8.7+ splits the value like a shell (`"`, `'`, `\` escapes, `#` comments); 8.4–8.6
 /// (Windows 11's inbox client) only knows double quotes and splits on `=`. Values with spaces,
@@ -212,7 +223,7 @@ impl SshCommand {
 /// `"` or a backslash sequence the newer parser would unescape are rejected, since no form reads
 /// back the same in both. `%` follows [`Percent`]; `${` (environment expansion in newer
 /// versions, with no escape) is rejected.
-fn config_option(keyword: &'static str, value: &str, percent: Percent) -> Result<String, CommandError> {
+pub(crate) fn config_value(keyword: &'static str, value: &str, percent: Percent) -> Result<String, CommandError> {
     check_arg(keyword, value)?;
     let unquotable = value.contains('"')
         || value.contains("${")
@@ -226,9 +237,9 @@ fn config_option(keyword: &'static str, value: &str, percent: Percent) -> Result
         if value.ends_with('\\') {
             return Err(CommandError::Unquotable(keyword));
         }
-        Ok(format!("{keyword}=\"{value}\""))
+        Ok(format!("\"{value}\""))
     } else {
-        Ok(format!("{keyword}={value}"))
+        Ok(value)
     }
 }
 

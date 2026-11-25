@@ -13,6 +13,8 @@
 use dromon_core::{ConnStatus, Entry, Error, HostId, HostSpec, Prompt, PromptAnswer, PromptId, RemotePath};
 use dromon_transfer::{ConflictChoice, JobId, JobRequest, JobView, TaskState};
 
+pub use super::hostbook::{HostBookCommand, HostBookEvent};
+
 /// What the UI asks of the service.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
@@ -39,6 +41,9 @@ pub enum Command {
     /// Poll `host`'s folder on screen now (the window just gained focus): answered like any
     /// poll, with `Refreshed` or `ListFailed` when it changed, else nothing.
     Poll { host: HostId },
+    /// Saved and recent hosts, Add to SSH config (`state/hostbook.rs`); answered with
+    /// `HostBook` events.
+    HostBook(HostBookCommand),
 }
 
 /// Identifies one file operation, chosen by the UI (unique per session).
@@ -164,6 +169,8 @@ pub enum ServiceEvent {
     FileOpDone { id: OpId, host: HostId },
     /// The operation stopped at its first error (a delete may have removed some entries).
     FileOpFailed { id: OpId, host: HostId, error: Error },
+    /// Saved hosts and the ssh config (`state/hostbook.rs`).
+    HostBook(HostBookEvent),
 }
 
 /// Set to `1` to have [`super::App::apply`] write one [`trace_line`] per event to stderr.
@@ -209,6 +216,7 @@ pub fn trace_line(ev: &ServiceEvent) -> String {
         ServiceEvent::FileOpProgress { id, host, .. } => format!("FileOpProgress host={host} id={}", id.0),
         ServiceEvent::FileOpDone { id, host } => format!("FileOpDone host={host} id={}", id.0),
         ServiceEvent::FileOpFailed { id, host, .. } => format!("FileOpFailed host={host} id={}", id.0),
+        ServiceEvent::HostBook(ev) => super::hostbook::trace_line(ev),
     }
 }
 

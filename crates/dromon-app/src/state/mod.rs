@@ -9,12 +9,14 @@ pub mod drag;
 pub mod edit;
 pub mod files;
 pub mod history;
+pub mod hostbook;
 pub mod hosts;
 pub mod keys;
 pub mod log;
 pub mod menu;
 pub mod ops;
 pub mod prefs;
+pub mod quick;
 pub mod refresh;
 pub mod selection;
 pub mod service;
@@ -28,12 +30,13 @@ mod tests;
 use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
 
-use dromon_core::{ConnStatus, HostId, HostSource, RemotePath, SortKey};
+use dromon_core::{ConnStatus, HostId, RemotePath, SortKey};
 use rune::TextEdit;
 
 pub use conn::{ConnView, Filter, ListError, Listing, Nav, Sort};
 pub use drag::DragTarget as RowTarget;
 pub use files::{FileAction, FileState};
+pub use hostbook::HostAction;
 pub use menu::MenuKind;
 pub use hosts::{HostDirectory, Section};
 pub use keys::Shortcut;
@@ -42,7 +45,7 @@ pub use prefs::{NoStore, Saved, Store};
 pub use selection::{Selection, TypeSelect};
 #[cfg(test)]
 pub use service::Recorder;
-pub use service::{Backend, Command, FileOp, FileOpKind, OpId, ServiceEvent, Silent, TransferCommand};
+pub use service::{Backend, Command, FileOp, FileOpKind, HostBookCommand, HostBookEvent, OpId, ServiceEvent, Silent, TransferCommand};
 pub use sheets::{Sheet, Sheets};
 pub use transfers::{DropHover, DropTarget, Tab, Transfers};
 
@@ -65,6 +68,8 @@ pub struct UiState {
     pub confirm_quit: bool,
     /// The user chose Quit: the next close request goes through.
     pub quit_approved: bool,
+    /// The quick-connect popover (`quick.rs`).
+    pub quick: quick::QuickConnect,
 }
 
 impl Default for UiState {
@@ -78,6 +83,7 @@ impl Default for UiState {
             sheets: Sheets::default(),
             confirm_quit: false,
             quit_approved: false,
+            quick: quick::QuickConnect::default(),
         }
     }
 }
@@ -143,8 +149,10 @@ pub enum Action {
     /// The filter field's text changed to this.
     FilterChanged(String),
     Escape,
-    /// The quick-connect popover (M4); nothing yet.
+    /// Open the quick-connect popover (the sidebar's +, the welcome button, ⌘⇧K).
     QuickConnect,
+    /// Quick connect's fields and buttons, the host menus, Add to SSH config (`hostbook.rs`).
+    HostBook(HostAction),
     /// The open sheet's primary button: Connect, Trust and connect, Yes.
     SubmitPrompt,
     /// A yes/no sheet's No.
@@ -239,6 +247,7 @@ impl App {
         }
         self.saved = saved;
         self.store = store;
+        self.restore_recent();
     }
 
     /// Hands the remembered settings to the store, after a change.
@@ -310,12 +319,9 @@ impl App {
 
     fn apply_one(&mut self, ev: ServiceEvent) {
         match ev {
-            ServiceEvent::Hosts(specs) => {
-                // Discovery owns the SSH Config section; saved and recent hosts stay.
-                let mut hosts: Vec<_> = specs.into_iter().filter(|h| h.source == HostSource::SshConfig).collect();
-                hosts.extend(self.hosts.hosts.drain(..).filter(|h| h.source != HostSource::SshConfig));
-                self.hosts.hosts = hosts;
-            }
+            // Discovery owns the SSH Config section; saved and recent hosts stay.
+            ServiceEvent::Hosts(specs) => self.set_config_hosts(specs),
+            ServiceEvent::HostBook(ev) => self.host_event(ev),
             ServiceEvent::Status { host, status } => {
                 if matches!(status, ConnStatus::Ready | ConnStatus::Failed(_) | ConnStatus::Disconnected) {
                     self.ui.sheets.on_settled(&host);
@@ -521,7 +527,8 @@ impl App {
                     c.selection.clear();
                 }
             }
-            Action::QuickConnect => {}
+            Action::QuickConnect => self.open_quick(),
+            Action::HostBook(a) => self.host_action(a, &mut fx),
             Action::SubmitPrompt => {
                 if let Some((id, answer)) = self.ui.sheets.submit() {
                     self.send(Command::AnswerPrompt { id, answer });
@@ -588,7 +595,15 @@ impl App {
         if self.conflict_on_screen().is_some() || self.ui.confirm_quit {
             return Vec::new();
         }
+        // The quick-connect popover is modal too: Escape closes it, nothing reaches the list.
+        if self.ui.quick.open {
+            return match sc {
+                Shortcut::Escape => self.act(Action::HostBook(HostAction::CloseQuick)),
+                _ => Vec::new(),
+            };
+        }
         let action = match sc {
+            Shortcut::QuickConnect => Action::QuickConnect,
             Shortcut::Download => Action::Download,
             Shortcut::Back => Action::Back,
             Shortcut::Forward => Action::Forward,

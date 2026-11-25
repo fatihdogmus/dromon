@@ -4,11 +4,14 @@
 use dromon_core::{ConnStatus, HostSpec};
 use rune::{Color, Cursor, Drag, El, Phase, ScrollSpec, Tx, col, el, icon, row, text};
 
-use super::Paint;
 use super::widgets::dot;
+use super::{Paint, menu};
 use crate::icons;
-use crate::state::{Action, App, RowTarget, Section, hosts};
+use crate::state::{Action, App, MenuKind, RowTarget, Section, hosts};
 use crate::theme::{motion, radius, size, space, type_};
+
+/// The key of the + button, which the quick-connect popover hangs from.
+pub const QUICK_CONNECT: &str = "sb-quick-connect";
 
 pub fn view(s: &App, p: Paint) -> El {
     let t = p.t;
@@ -60,6 +63,7 @@ fn host_row(s: &App, p: Paint, h: &HostSpec) -> El {
         _ => None,
     };
     let id = h.id.clone();
+    let menu_id = h.id.clone();
     // Rows dragged here copy into this host's folder on screen.
     let target = RowTarget::Host(h.id.clone());
     let over = super::drag::over(s, &target);
@@ -91,6 +95,9 @@ fn host_row(s: &App, p: Paint, h: &HostSpec) -> El {
         .press(t.press)
         .motion(motion::SNAP)
         .on_press_tx(move |s: &mut App, tx: &mut Tx| super::run(s, Action::SelectHost(id.clone()), tx))
+        // Connect / Disconnect; Add to SSH config…, Edit… and Remove for saved hosts; Save and
+        // Remove for recent ones (`state::hostbook`).
+        .on_secondary_press(move |s: &mut App, at, tx: &mut Tx| menu::open(s, MenuKind::Host(menu_id.clone()), at, tx))
         .child(icon(icons::SERVER.at(p.scale), size::ICON).color(if active { t.text_2 } else { t.text_3 }))
         .child(name);
     if let Some(c) = dot_color {
@@ -105,7 +112,7 @@ fn host_row(s: &App, p: Paint, h: &HostSpec) -> El {
 fn footer(p: Paint) -> El {
     let t = p.t;
     let button = row()
-        .key("sb-quick-connect")
+        .key(QUICK_CONNECT)
         .role("button")
         .label("Quick connect")
         .h(size::ROW)

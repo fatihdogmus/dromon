@@ -1,0 +1,14 @@
+{
+  "description": "Press + in the sidebar: the quick-connect popover opens with Host focused. Paste “deploy@prod.example.com:2222”: it splits into Host, Username and Port. Fix the port to 22 and press Return: it connects, prod's site lists, and the new host sits under Connected; Disconnect from its menu and it shows under Recent, newest first.",
+  "events": [
+    {"t": 0.5, "type": "tap", "key": "sb-quick-connect"},
+    {"t": 1.5, "type": "paste", "text": "deploy@prod.example.com:2222"},
+    {"t": 2.3, "type": "tap", "key": "quick-port-input"},
+    {"t": 2.6, "type": "key", "name": "a", "cmd": true},
+    {"t": 2.8, "type": "type", "text": "22"},
+    {"t": 3.4, "type": "key", "name": "Enter"},
+    {"t": 4.6, "type": "secondary-click", "key": "host-deploy@prod.example.com:22"},
+    {"t": 5.4, "type": "tap", "key": "ctx-host-disconnect"},
+    {"t": 6.5, "type": "mark", "name": "end"}
+  ]
+}
