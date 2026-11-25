@@ -12,6 +12,7 @@ mod menu;
 mod palette;
 mod quick;
 mod quit;
+pub mod settings;
 mod sheets;
 mod sidebar;
 mod states;
@@ -168,6 +169,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         .children(palette::layer(s, p, palette::top(s, cx)))
         .children(sheets::layer(s, p))
         .children(menu::layer(s, p))
+        .children(settings::preview(s, p))
 }
 
 /// The list area: whichever state the active connection is in.

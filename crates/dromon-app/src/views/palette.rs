@@ -191,6 +191,7 @@ fn glyph(item: &Item) -> &'static IconPair {
             "pal-delete" | "pal-disconnect" => &icons::CLOSE,
             "pal-log" => &icons::LOG,
             "pal-clear-finished" => &icons::CHECK,
+            "pal-settings" => &icons::GEAR,
             _ => &icons::FILE,
         },
     }

@@ -25,6 +25,7 @@ mod persist;
 mod reveal;
 mod scenes;
 pub mod service;
+mod settings_window;
 pub mod state;
 #[allow(dead_code)]
 mod theme;
@@ -42,6 +43,8 @@ mod ui_palette_tests;
 mod ui_poll_tests;
 #[cfg(test)]
 mod ui_quick_tests;
+#[cfg(test)]
+mod ui_settings_tests;
 #[cfg(test)]
 mod ui_sheet_tests;
 #[cfg(test)]
@@ -97,10 +100,11 @@ fn spec() -> AppSpec<App> {
     }
 }
 
-/// The app with its window chrome: one 44 pt band for title bar and toolbar (§6.2). Its state
-/// starts on the demo fixture; [`run`] gives it the real service or `--fixture`'s instead.
+/// The app with its window chrome: one 44 pt band for title bar and toolbar (§6.2), and the
+/// Settings window beside it (`settings_window.rs`). Its state starts on the demo fixture;
+/// [`run`] gives it the real service or `--fixture`'s instead.
 pub fn app() -> RuneApp<App> {
-    RuneApp::new(spec())
+    settings_window::attach(RuneApp::new(spec()))
         .titlebar(Titlebar::new(theme::size::TOOLBAR))
         // Closing the window with transfers running asks first (the quit sheet).
         .on_close_request(|s, _tx| if s.close_requested() { rune::CloseResponse::Close } else { rune::CloseResponse::Defer })

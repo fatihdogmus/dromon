@@ -392,6 +392,16 @@ impl Queue {
         Queue { jobs: Vec::new(), up: HashSet::new(), per_host, next_id: 1 }
     }
 
+    /// Changes the per-host limit (at least 1) for the starts from the next `poll` on. Running
+    /// files keep going: a lower limit holds new starts back until fewer run.
+    pub fn set_per_host(&mut self, per_host: usize) {
+        self.per_host = per_host.max(1);
+    }
+
+    pub fn per_host(&self) -> usize {
+        self.per_host
+    }
+
     /// Adds a job (state `Queued`). Ids count from 1.
     pub fn add(&mut self, req: JobRequest, _now: Duration) -> JobId {
         let id = JobId(self.next_id);

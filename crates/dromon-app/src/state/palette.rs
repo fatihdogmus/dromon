@@ -332,6 +332,8 @@ impl App {
         if let Some(live) = live {
             add(true, "disconnect", "Disconnect", None, Action::Disconnect(live.host.clone()));
         }
+        // Last, so an empty query's cap trims it rather than Disconnect; typing finds it.
+        add(true, "settings", "Settings…", Some("mod+comma"), Action::OpenSettings);
         add(self.transfers.has_finished(), "clear-finished", "Clear finished transfers", None, Action::Transfer(TransferCommand::ClearFinished));
         for cmd in &mut out {
             if matches!(cmd.id, "log" | "disconnect") {

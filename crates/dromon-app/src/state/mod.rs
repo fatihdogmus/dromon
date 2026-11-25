@@ -22,6 +22,7 @@ pub mod quick;
 pub mod refresh;
 pub mod selection;
 pub mod service;
+pub mod settings;
 pub mod sheets;
 pub mod toast;
 pub mod transfers;
@@ -49,6 +50,7 @@ pub use selection::{Selection, TypeSelect};
 #[cfg(test)]
 pub use service::Recorder;
 pub use service::{Backend, Command, FileOp, FileOpKind, HostBookCommand, HostBookEvent, OpId, ServiceEvent, Silent, TransferCommand};
+pub use settings::{Density, Settings, SettingsChange, SettingsView, SettingsWindow};
 pub use sheets::{Sheet, Sheets};
 pub use transfers::{DropHover, DropTarget, Tab, Transfers};
 
@@ -78,6 +80,9 @@ pub struct UiState {
     pub quick: quick::QuickConnect,
     /// The ⌘K palette (`palette.rs`).
     pub palette: palette::Palette,
+    /// Scenes only: this window draws the Settings window's view (`views/settings.rs`), since a
+    /// headless run renders no second window.
+    pub settings_preview: bool,
 }
 
 impl Default for UiState {
@@ -94,6 +99,7 @@ impl Default for UiState {
             quit_approved: false,
             quick: quick::QuickConnect::default(),
             palette: palette::Palette::default(),
+            settings_preview: false,
         }
     }
 }
@@ -111,8 +117,12 @@ pub struct App {
     pub ui: UiState,
     /// Seconds since the epoch that relative dates are measured from.
     pub now: i64,
-    /// Show dotfiles by default (§8: on).
+    /// Show dotfiles in hosts opened next: Settings' default, switched for the session by ⌘⇧.
     pub show_hidden_default: bool,
+    /// Theme, density, download folder, transfers at once, hidden files (`settings.rs`, §8).
+    pub settings: Settings,
+    /// The Settings window, a second window with its own state (`settings_window.rs`).
+    pub settings_window: Box<dyn SettingsWindow>,
     /// Sort remembered globally (§12).
     pub sort: Sort,
     pub backend: Box<dyn Backend>,
@@ -127,7 +137,8 @@ pub struct App {
     pub ops: Ops,
     /// The name field, the clip, a row drag, the drawn menu and the toasts (`files.rs`).
     pub files: FileState,
-    /// Where downloads go (§3.5: Downloads, or the folder set in Settings).
+    /// The OS Downloads folder: where downloads go unless Settings chose another (§3.5,
+    /// [`App::download_folder`]).
     pub downloads: PathBuf,
     inbox: VecDeque<ServiceEvent>,
     /// The window's state as the service polls by, and refresh animation (`refresh.rs`).
@@ -201,6 +212,10 @@ pub enum Action {
     File(FileAction),
     /// The ⌘K palette (`palette.rs`).
     Palette(PaletteAction),
+    /// Open the Settings window, or bring it forward (⌘,, the app menu, the palette).
+    OpenSettings,
+    /// A control in the Settings window (`settings.rs`).
+    Setting(SettingsChange),
 }
 
 /// What an action asks the view layer to do afterwards.
@@ -231,6 +246,8 @@ impl App {
             ui: UiState::default(),
             now,
             show_hidden_default: true,
+            settings: Settings::default(),
+            settings_window: Box::new(settings::NoWindow),
             sort: Sort::default(),
             backend,
             wall_ms: system_ms,
@@ -251,14 +268,12 @@ impl App {
         if let Some(sort) = saved.sort {
             self.sort = sort;
         }
-        if let Some(show) = saved.show_hidden {
-            self.show_hidden_default = show;
-        }
         if let Some(w) = saved.sidebar_width.filter(|w| w.is_finite()) {
             self.ui.sidebar_width = w.clamp(size::SIDEBAR_MIN, size::SIDEBAR_MAX);
         }
         self.saved = saved;
         self.store = store;
+        self.restore_settings();
         self.restore_recent();
     }
 
@@ -495,10 +510,9 @@ impl App {
                 }
             }
             Action::ToggleHidden => {
+                // For this session: the remembered default is Settings' (`settings.rs`).
                 self.show_hidden_default = !self.show_hidden_default;
                 let show = self.show_hidden_default;
-                self.saved.show_hidden = Some(show);
-                self.save();
                 for c in self.conns.values_mut() {
                     if c.show_hidden != show {
                         c.toggle_hidden();
@@ -588,6 +602,8 @@ impl App {
             Action::CancelQuit => self.ui.confirm_quit = false,
             Action::File(a) => self.file_action(a, &mut fx),
             Action::Palette(a) => self.palette_action(a, &mut fx),
+            Action::OpenSettings => self.open_settings(),
+            Action::Setting(change) => self.change_setting(change),
         }
         fx
     }
@@ -606,6 +622,10 @@ impl App {
     /// Maps a shortcut to its action (`now` is for type-to-select). The conflict sheet is
     /// modal like the prompt sheets: while it's up, the list's shortcuts do nothing.
     pub fn shortcut(&mut self, sc: Shortcut, now: f64) -> Vec<Effect> {
+        // Settings is another window: it opens whatever is modal here, as the app menu's item does.
+        if sc == Shortcut::Settings {
+            return self.act(Action::OpenSettings);
+        }
         if self.conflict_on_screen().is_some() || self.ui.confirm_quit {
             return Vec::new();
         }
@@ -624,6 +644,7 @@ impl App {
             // ⌘K opens the palette from anywhere, a focused field included.
             Shortcut::Palette => Action::Palette(PaletteAction::Toggle),
             Shortcut::QuickConnect => Action::QuickConnect,
+            Shortcut::Settings => Action::OpenSettings,
             Shortcut::Download => Action::Download,
             Shortcut::Back => Action::Back,
             Shortcut::Forward => Action::Forward,

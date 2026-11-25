@@ -14,6 +14,9 @@ use crate::state::log::LogBuffer;
 use crate::state::{Action, App, DropTarget, Effect, FileAction, HostAction, MenuKind, PaletteAction, RowTarget, ServiceEvent, Silent, Tab};
 use crate::theme::Appearance;
 
+#[path = "scenes_settings.rs"]
+mod settings;
+
 /// The demo's big folder: 10,000 photos.
 pub const BIG_FOLDER: &str = "/srv/media/photos";
 
@@ -613,4 +616,7 @@ pub const SCENES: &[Scene] = &[
     ("palette", palette),
     ("palette-filtered", palette_filtered),
     ("palette-path", palette_path),
+    ("listing-compact", settings::listing_compact),
+    ("settings", settings::settings),
+    ("settings-light", settings::settings_light),
 ];

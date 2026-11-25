@@ -195,7 +195,7 @@ impl App {
         if items.is_empty() {
             return;
         }
-        let req = JobRequest::Download { host: c.host.clone(), items, into: self.downloads.clone() };
+        let req = JobRequest::Download { host: c.host.clone(), items, into: self.download_folder() };
         self.send(Command::Transfer(TransferCommand::Start(req)));
     }
 

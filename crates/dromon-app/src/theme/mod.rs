@@ -117,7 +117,10 @@ pub mod radius {
 pub mod size {
     pub const TOOLBAR: f32 = 44.0;
     pub const HEADER: f32 = 28.0;
+    /// A row: the sidebar's, and the file list's at Comfortable density (§8).
     pub const ROW: f32 = 28.0;
+    /// The file list's rows at Compact density (§8).
+    pub const ROW_COMPACT: f32 = 24.0;
     pub const STATUS: f32 = 24.0;
     pub const BANNER: f32 = 32.0;
     pub const SIDEBAR: f32 = 240.0;
@@ -320,8 +323,10 @@ pub fn tokens(dark: bool) -> &'static Tokens {
     tokens_for(dark, Access::default())
 }
 
-/// Which appearance the user asked for (§8: System by default).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// Which appearance the user asked for (§8: System by default; Settings' Theme, remembered as
+/// `"system"`, `"dark"` or `"light"`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Appearance {
     #[default]
     System,

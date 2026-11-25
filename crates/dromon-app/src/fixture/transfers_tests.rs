@@ -162,6 +162,17 @@ fn replace_overwrites_and_apply_to_all_answers_every_clash() {
 }
 
 #[test]
+fn the_per_host_limit_from_settings_is_taken_and_answered_like_any_command() {
+    let mut b = connected();
+    assert!(jobs(&send(&mut b, TransferCommand::PerHost(1))).is_empty());
+    // Instant fake I/O: one at a time still finishes every file inside the command.
+    let www = RemoteItem { path: RemotePath::new("/var/www"), kind: EntryKind::Dir, size: 4096 };
+    let req = JobRequest::Download { host: prod(), items: vec![www], into: PathBuf::from("/dl") };
+    let j = jobs(&send(&mut b, TransferCommand::Start(req))).remove(0);
+    assert_eq!((&j.state, j.files_done, j.files_total), (&TaskState::Done, 14, 14));
+}
+
+#[test]
 fn nothing_starts_while_the_host_is_down_and_the_job_says_it_waits() {
     let mut b = FixtureBackend::new(demo());
     let j = jobs(&send(&mut b, download(&[("index.html", EntryKind::File, 14812)]))).remove(0);

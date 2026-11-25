@@ -279,8 +279,9 @@ fn every_scene_builds() {
     for (name, scene) in crate::scenes::SCENES {
         let mut s = app();
         scene(&mut s);
-        // Quick connect and the saved hosts' scenes are over the welcome state.
-        let welcome = ["welcome", "quick-connect", "quick-connect-more", "quick-connect-error", "add-to-config", "host-menu"];
+        // Quick connect, the saved hosts' and the Settings window's scenes are over the welcome
+        // state.
+        let welcome = ["welcome", "quick-connect", "quick-connect-more", "quick-connect-error", "add-to-config", "host-menu", "settings"];
         if !welcome.contains(name) {
             assert!(s.conn().is_some(), "{name}");
         }

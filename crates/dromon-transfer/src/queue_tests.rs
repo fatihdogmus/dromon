@@ -183,6 +183,33 @@ fn the_limit_is_per_host_across_jobs_and_hosts_are_independent() {
 }
 
 #[test]
+fn a_changed_limit_applies_to_new_starts_and_running_files_keep_going() {
+    let mut q = Queue::new(2);
+    let files: Vec<(String, u64)> = (0..8).map(|n| (format!("f{n}"), 10)).collect();
+    let refs: Vec<(&str, u64)> = files.iter().map(|(n, s)| (n.as_str(), *s)).collect();
+    let id = running_download(&mut q, "a", &["dir"], &[&refs]);
+    assert_eq!(starts(&q.poll(T0)), vec![(id, FileId(0)), (id, FileId(1))]);
+    // Raised: the next poll fills up to the new limit.
+    q.set_per_host(4);
+    assert_eq!(starts(&q.poll(T0)), vec![(id, FileId(2)), (id, FileId(3))]);
+    // Lowered: nothing running is stopped, and nothing new starts until fewer than 1 run.
+    q.set_per_host(1);
+    assert!(q.poll(T0).is_empty());
+    assert_eq!(view(&q, id).state, TaskState::Running);
+    for f in 0..3 {
+        q.file_done(id, FileId(f), secs(1));
+        assert!(q.poll(secs(1)).is_empty(), "{} still run", 3 - f);
+    }
+    q.file_done(id, FileId(3), secs(1));
+    assert_eq!(starts(&q.poll(secs(1))), vec![(id, FileId(4))]);
+    // Zero would stop everything for good: it counts as 1.
+    q.set_per_host(0);
+    assert_eq!(q.per_host(), 1);
+    q.file_done(id, FileId(4), secs(2));
+    assert_eq!(starts(&q.poll(secs(2))), vec![(id, FileId(5))]);
+}
+
+#[test]
 fn nothing_starts_while_the_host_is_down() {
     let mut q = Queue::new(3);
     let id = running_download(&mut q, "a", &["d"], &[&[("f", 1)]]);

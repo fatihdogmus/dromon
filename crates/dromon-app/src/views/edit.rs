@@ -115,5 +115,5 @@ pub fn new_folder_row(s: &App, c: &ConnView, p: Paint) -> Option<El> {
         .child(field(f, s.files.edit.is_sending(), p))
         .child(text("—").font(type_::META).color(t.text_3).w(size::COL_SIZE).align(rune::Align::End))
         .child(el().w(size::COL_MODIFIED));
-    Some(row().key("new-folder").role("row").label("New folder").w_full().h(size::ROW).px(space::S1).child(cells))
+    Some(row().key("new-folder").role("row").label("New folder").w_full().h(s.settings.density.row()).px(space::S1).child(cells))
 }

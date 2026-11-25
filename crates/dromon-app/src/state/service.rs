@@ -130,6 +130,9 @@ pub enum TransferCommand {
     Resolve { job: JobId, choice: ConflictChoice, apply_all: bool },
     /// Forget finished, failed and cancelled jobs.
     ClearFinished,
+    /// Settings' "Transfers at once": how many files may run at once per host (§8), for the
+    /// starts from now on; running files aren't stopped. Answered like any transfer command.
+    PerHost(usize),
 }
 
 /// What the service tells the UI.

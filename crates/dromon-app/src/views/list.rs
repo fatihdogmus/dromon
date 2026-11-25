@@ -1,5 +1,6 @@
-//! The file list: a sortable header and virtualized 28 pt rows (only the rows in the mounted
-//! window are built, so a 10,000-entry folder costs what a screenful does).
+//! The file list: a sortable header and virtualized rows, 28 pt or 24 pt by Settings' density
+//! (only the rows in the mounted window are built, so a 10,000-entry folder costs what a
+//! screenful does).
 
 use std::borrow::Cow;
 
@@ -16,7 +17,7 @@ use crate::theme::{motion, radius, size, space, type_};
 /// The list area for one connection, in whatever state it's in.
 pub fn view(s: &App, c: &ConnView, p: Paint) -> El {
     match &c.listing {
-        Listing::Loading => col().w_full().h_full().child(header(c, p)).child(states::skeleton(p)),
+        Listing::Loading => col().w_full().h_full().child(header(c, p)).child(states::skeleton(p, s.settings.density.row())),
         Listing::Failed(ListError::PermissionDenied) => states::denied(p, c),
         Listing::Failed(ListError::NotFound) => states::message(p, "This folder no longer exists", c.cwd.as_str(), true),
         Listing::Failed(ListError::Other(e)) => states::message(p, "Couldn't open this folder", e, true),
@@ -103,9 +104,9 @@ fn rows(s: &App, c: &ConnView, p: Paint) -> El {
         .row_count(c.row_count())
         .w_full()
         .growth(GrowthSpec::default())
-        .virtual_rows(c.row_count(), size::ROW, row_key, move |s: &App, i| match s.conn() {
+        .virtual_rows(c.row_count(), s.settings.density.row(), row_key, move |s: &App, i| match s.conn() {
             Some(c) if i < c.row_count() => file_row(s, c, i, p),
-            _ => el().h(size::ROW),
+            _ => el().h(s.settings.density.row()),
         })
         .virtual_rows_version((c.host.as_str().to_owned(), c.rows_version));
     let mut content = col().w_full().py(space::S1).children(edit::new_folder_row(s, c, p)).child(stack);
@@ -193,7 +194,7 @@ fn file_row(s: &App, c: &ConnView, i: usize, p: Paint) -> El {
         .label(e.name.clone())
         .row_index(i)
         .w_full()
-        .h(size::ROW)
+        .h(s.settings.density.row())
         .px(space::S1)
         .on_press_tx(move |s: &mut App, tx: &mut Tx| {
             let m = tx.mods();

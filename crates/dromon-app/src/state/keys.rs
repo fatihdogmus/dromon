@@ -34,6 +34,8 @@ pub enum Shortcut {
     Host(usize),
     /// ⌘⇧J: the transfers popover.
     ShowTransfers,
+    /// ⌘, (Ctrl+, elsewhere): the Settings window.
+    Settings,
 }
 
 /// The chord spec of ⌘1 … ⌘9 for the sidebar's host `n` (1-based), for hints.
@@ -136,6 +138,7 @@ pub fn shortcut(ev: &KeyEvent, platform: KeyPlatform) -> Option<Shortcut> {
         Key::Command('a') => Shortcut::SelectAll,
         Key::Command('f') => Shortcut::Filter,
         Key::Command('d') if !m.shift && !m.alt => Shortcut::Download,
+        Key::Command(',') if !m.shift && !m.alt => Shortcut::Settings,
         // ⌘⇧. arrives as '.' or, with Shift applied by the layout, '>'.
         Key::Command('.') if m.shift => Shortcut::ToggleHidden,
         Key::Command('>') => Shortcut::ToggleHidden,
@@ -287,6 +290,16 @@ mod tests {
         assert_eq!(host_chord(9), Some("mod+9"));
         assert_eq!(host_chord(0), None);
         assert_eq!(host_chord(10), None);
+    }
+
+    #[test]
+    fn settings_is_cmd_comma() {
+        let ctrl = Mods { ctrl: true, logo: false, ..CMD };
+        assert_eq!(k(Key::Command(','), CMD), Some(Shortcut::Settings));
+        assert_eq!(on(Key::Command(','), ctrl, KeyPlatform::Windows), Some(Shortcut::Settings));
+        assert_eq!(on(Key::Command(','), ctrl, KeyPlatform::Linux), Some(Shortcut::Settings));
+        assert_eq!(k(Key::Command(','), Mods { shift: true, ..CMD }), None);
+        assert_eq!(k(Key::Text(",".into()), NONE), Some(Shortcut::Type(",".into())), "a plain comma still types");
     }
 
     #[test]

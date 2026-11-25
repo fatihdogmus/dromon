@@ -44,7 +44,7 @@ use crate::state::{ServiceEvent, TransferCommand};
 /// The size every uploaded path pretends to have.
 pub const UPLOAD_SIZE: u64 = 1_200_000;
 
-/// Files that run at once per host (the real default, §4.6).
+/// Files that run at once per host until Settings says otherwise (the real default, §4.6).
 pub const PER_HOST: usize = 3;
 
 /// How deep a scan goes before it stops looking.
@@ -162,6 +162,7 @@ impl Engine {
                 self.queue.clear_finished();
                 self.pictures.retain(|p| p.state.is_active());
             }
+            TransferCommand::PerHost(n) => self.queue.set_per_host(n),
         }
         loop {
             for a in std::mem::take(&mut actions) {

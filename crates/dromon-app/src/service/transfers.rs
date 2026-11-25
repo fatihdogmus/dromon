@@ -28,7 +28,12 @@ use tokio::time::Instant;
 use super::Sink;
 use crate::state::{ServiceEvent, TransferCommand};
 
-/// Files running at once per host (§4.6; a setting later).
+#[cfg(test)]
+#[path = "transfers_tests.rs"]
+mod tests;
+
+/// Files running at once per host until the UI sends Settings' value (§4.6, §8;
+/// `TransferCommand::PerHost`).
 pub const PER_HOST: usize = 3;
 /// The most often the UI hears about transfers.
 pub const EMIT_EVERY: Duration = Duration::from_millis(100);
@@ -157,6 +162,8 @@ impl<S: Sink> Engine<S> {
                     let live: Vec<JobId> = self.queue.views(now).iter().map(|v| v.id).collect();
                     self.requests.retain(|id, _| live.contains(id));
                 }
+                // `drive` polls next: a raised limit starts more files at once.
+                TransferCommand::PerHost(n) => self.queue.set_per_host(n),
             },
             EngineMsg::HostUp(host, sftp) => {
                 self.sessions.insert(host.clone(), sftp);

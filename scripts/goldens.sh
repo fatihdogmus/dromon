@@ -43,7 +43,8 @@ scenes=(welcome connecting listing listing-sorted-size big-folder empty-folder p
   poll-added folder-vanished
   quick-connect quick-connect-more quick-connect-error add-to-config host-menu
   sheet-light conflict-light delete-light transfers-light toast-light contrast contrast-light solid
-  palette palette-filtered palette-path)
+  palette palette-filtered palette-path
+  listing-compact settings settings-light)
 
 for scene in "${scenes[@]}"; do
   theme=dark

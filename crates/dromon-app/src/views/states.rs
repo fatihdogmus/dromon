@@ -129,14 +129,15 @@ pub fn disconnected(s: &App, c: &ConnView, p: Paint) -> El {
     centred("disconnected", p, &format!("Disconnected from {host}"), Some(sub))
 }
 
-/// Twelve rows of placeholder bars, pulsing gently in opacity (no shimmer sweep).
-pub fn skeleton(p: Paint) -> El {
+/// Twelve rows of placeholder bars, `row_h` tall as the list's, pulsing gently in opacity (no
+/// shimmer sweep).
+pub fn skeleton(p: Paint, row_h: f32) -> El {
     const NAMES: [f32; 12] = [128.0, 184.0, 96.0, 152.0, 220.0, 112.0, 168.0, 140.0, 204.0, 88.0, 176.0, 120.0];
     let bar = |w: f32| el().w(w).h(8.0).radius(4.0).fill(p.t.skeleton);
     let rows = NAMES.iter().enumerate().map(|(i, &w)| {
         row()
             .w_full()
-            .h(size::ROW)
+            .h(row_h)
             .px(space::S1)
             .child(
                 row()

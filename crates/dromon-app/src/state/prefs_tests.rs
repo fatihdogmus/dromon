@@ -63,12 +63,15 @@ fn a_new_launch_starts_from_what_was_saved() {
 }
 
 #[test]
-fn sort_hidden_and_sidebar_changes_are_saved() {
+fn sort_and_sidebar_changes_are_saved_and_the_hidden_toggle_is_for_the_session() {
     let (mut s, store) = app_with(Saved::default());
     s.act(Action::Sort(SortKey::Modified));
     assert_eq!(store.last().sort, Some(Sort { key: SortKey::Modified, dir: SortDir::Descending }));
+    // ⌘⇧. switches this session only: Settings holds the remembered default (`settings.rs`).
+    let saves = store.count();
     s.act(Action::ToggleHidden);
-    assert_eq!(store.last().show_hidden, Some(false));
+    assert!(!s.show_hidden_default);
+    assert_eq!(store.count(), saves);
     s.ui.sidebar_width = 300.0;
     s.sidebar_resized();
     assert_eq!(store.last().sidebar_width, Some(300.0));

@@ -1,5 +1,5 @@
-//! What Dromon remembers between launches (§4.7 "Persisted state"): the sort, whether dotfiles
-//! show, the sidebar's width, the last folder on each host and the recent quick connects. Never
+//! What Dromon remembers between launches (§4.7 "Persisted state"): the sort, the settings
+//! (§8), the sidebar's width, the last folder on each host and the recent quick connects. Never
 //! secrets, never anything a server sent beyond a folder path.
 //!
 //! The app keeps a [`Saved`] and hands every change to a [`Store`]. The real app's store
@@ -12,6 +12,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::conn::Sort;
+use super::settings::Settings;
 
 #[cfg(test)]
 #[path = "prefs_tests.rs"]
@@ -26,7 +27,11 @@ pub const MAX_FOLDERS: usize = 200;
 #[serde(default)]
 pub struct Saved {
     pub sort: Option<Sort>,
+    /// From before Settings: ⌘⇧.'s last state, read once as the hidden-files default while
+    /// `settings` is missing, and dropped when Settings is first saved.
     pub show_hidden: Option<bool>,
+    /// The Settings window's values (§8); missing in prefs from before it.
+    pub settings: Option<Settings>,
     pub sidebar_width: Option<f32>,
     /// The last folder on each host, by host id (the ssh alias).
     pub last_folder: BTreeMap<String, String>,
