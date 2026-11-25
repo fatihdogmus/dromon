@@ -33,7 +33,8 @@ use std::time::Duration;
 use dromon_core::{EntryKind, Error, HostId, LinkTarget, RemotePath, natural_cmp};
 use dromon_transfer::queue::{Action, ItemDst, Queue};
 use dromon_transfer::{
-    DirPlan, FileId, FilePlan, JobId, JobKind, JobRequest, JobView, Scan, TaskEvent, TaskState, step, unique_name,
+    DirPlan, Existing, FileId, FilePlan, JobId, JobKind, JobRequest, JobView, Scan, Side, TaskEvent, TaskState, step,
+    unique_name,
 };
 
 use super::Fixture;
@@ -222,8 +223,20 @@ impl Engine {
         let (Some(name), Some(into)) = (item_name(&req, item), req.remote_into()) else { return };
         match self.tree.list(req.host(), into) {
             Ok(entries) => {
-                let existing = entries.iter().find(|e| e.name == name).map(|e| e.kind.is_dir_like());
-                self.queue.exists(job, item, existing);
+                let existing = entries.iter().find(|e| e.name == name).map(|e| {
+                    let is_dir = e.kind.is_dir_like();
+                    Existing { is_dir, side: Side { size: (!is_dir).then_some(e.size), mtime: e.mtime } }
+                });
+                // An upload is the fixture's pretend file; a copy or move is its source entry.
+                let incoming = match (&req, req.remote_items().and_then(|i| i.get(item))) {
+                    (JobRequest::Upload { .. }, _) => Side { size: Some(UPLOAD_SIZE), mtime: self.mtime },
+                    (_, Some(it)) => Side {
+                        size: (!it.kind.is_dir_like()).then_some(it.size),
+                        mtime: self.tree.entry_at(req.source_host(), &it.path).and_then(|e| e.mtime),
+                    },
+                    _ => Side::default(),
+                };
+                self.queue.exists(job, item, existing, incoming);
             }
             Err(e) => self.queue.item_failed(job, item, e.to_string()),
         }

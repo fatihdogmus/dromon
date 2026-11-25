@@ -36,7 +36,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use dromon_core::{EntryKind, Error, LinkTarget, RemotePath, Result};
 use dromon_sftp::Sftp;
 
-use crate::{DirPlan, FilePlan, download_part_name, unique_name, upload_part_name};
+use crate::{DirPlan, Existing, FilePlan, Side, download_part_name, unique_name, upload_part_name};
 
 pub use self::copy::{Copied, copy_between, copy_remote, delete_verified, move_between};
 pub use self::download::download;
@@ -122,14 +122,35 @@ pub fn local_name_taken(dir: &Path, name: &str) -> bool {
 /// What is at a remote path: `None` (nothing), `Some(true)` a folder (or a link to one),
 /// `Some(false)` anything else (including a dangling link).
 pub async fn remote_kind(sftp: &Sftp, path: &RemotePath) -> Result<Option<bool>> {
+    Ok(remote_existing(sftp, path).await?.map(|e| e.is_dir))
+}
+
+/// [`remote_kind`] with the entry's size and mtime from the same `lstat` (a folder has no
+/// size). A link shows its own size and date, not its target's.
+pub async fn remote_existing(sftp: &Sftp, path: &RemotePath) -> Result<Option<Existing>> {
     match sftp.lstat(path).await {
-        Ok(entry) => Ok(Some(matches!(
-            entry.kind,
-            EntryKind::Dir | EntryKind::Symlink { target: Some(LinkTarget::Dir) }
-        ))),
+        Ok(entry) => {
+            let is_dir = matches!(entry.kind, EntryKind::Dir | EntryKind::Symlink { target: Some(LinkTarget::Dir) });
+            Ok(Some(Existing { is_dir, side: Side { size: (!is_dir).then_some(entry.size), mtime: entry.mtime } }))
+        }
         Err(Error::NotFound(_)) => Ok(None),
         Err(e) => Err(e),
     }
+}
+
+/// The size and mtime of a remote item, best effort (an error or a missing item is unknown).
+pub async fn remote_side(sftp: &Sftp, path: &RemotePath) -> Side {
+    remote_existing(sftp, path).await.ok().flatten().map(|e| e.side).unwrap_or_default()
+}
+
+/// The size and mtime of a local item, best effort (a folder has no size).
+pub async fn local_side(path: &Path) -> Side {
+    let Ok(meta) = tokio::fs::metadata(path).await else { return Side::default() };
+    let mtime = meta.modified().ok().map(|t| match t.duration_since(UNIX_EPOCH) {
+        Ok(d) => d.as_secs() as i64,
+        Err(e) => -(e.duration().as_secs() as i64),
+    });
+    Side { size: meta.is_file().then_some(meta.len()), mtime }
 }
 
 /// A free name for `name` in remote `folder`: one listing, then [`unique_name`]. A name whose

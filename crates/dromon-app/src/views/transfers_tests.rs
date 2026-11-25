@@ -61,7 +61,7 @@ fn waiting_and_clashes_say_so_before_the_numbers() {
     j.state = TaskState::Paused;
     assert_eq!(status_line(&j), "Paused", "the user's pause wins");
     let mut j = job(TaskState::Preparing { files_found: 1 }, 0, 0);
-    j.conflict = Some(ConflictView { name: "index.html".into(), folder: RemotePath::new("/var/www"), existing_is_dir: false, more: 0 });
+    j.conflict = Some(ConflictView { name: "index.html".into(), folder: RemotePath::new("/var/www"), existing_is_dir: false, existing: Default::default(), incoming: Default::default(), more: 0 });
     assert_eq!(status_line(&j), "Waiting for you: ‘index.html’ already exists");
 }
 

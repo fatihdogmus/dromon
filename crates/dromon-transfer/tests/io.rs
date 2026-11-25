@@ -14,10 +14,10 @@ use dromon_core::{EntryKind, Error, RemotePath};
 use dromon_sftp::{Sftp, WriteMode};
 use dromon_testkit::{Fixture, Role, file_sha1, openssh};
 use dromon_transfer::io::{
-    CopyOptions, create_dirs, download, free_remote_name, remote_kind, remove_part, scan_local, scan_remote,
-    upload,
+    CopyOptions, create_dirs, download, free_remote_name, local_side, remote_existing, remote_kind, remote_side,
+    remove_part, scan_local, scan_remote, upload,
 };
-use dromon_transfer::{DirPlan, FilePlan, Scan, is_part_file};
+use dromon_transfer::{DirPlan, FilePlan, Scan, Side, is_part_file};
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 
@@ -587,6 +587,38 @@ async fn remote_kinds_and_free_names() {
     assert_eq!(free_remote_name(s, &dir, "a.txt").await.unwrap(), "a (2).txt");
     let missing = dir.join("missing");
     assert_eq!(free_remote_name(s, &missing, "a").await, Err(Error::NotFound(missing)));
+    rm_rf(s, &dir).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_clash_reports_the_size_and_date_of_both_sides() {
+    let Some(c) = connect("a_clash_reports_the_size_and_date_of_both_sides").await else { return };
+    let s = &c.sftp;
+    let dir = scratch(&c, "sides").await;
+    write_remote(s, &dir.join("f.txt"), b"theirs").await;
+    s.mkdir(&dir.join("d")).await.unwrap();
+
+    let file = remote_existing(s, &dir.join("f.txt")).await.unwrap().unwrap();
+    assert!(!file.is_dir);
+    assert_eq!(file.side.size, Some(6));
+    assert!(file.side.mtime.is_some_and(|t| t > 1_600_000_000));
+    assert_eq!(remote_side(s, &dir.join("f.txt")).await, file.side);
+
+    let folder = remote_existing(s, &dir.join("d")).await.unwrap().unwrap();
+    assert!(folder.is_dir);
+    assert_eq!((folder.side.size, folder.side.mtime.is_some()), (None, true));
+    assert_eq!(remote_existing(s, &dir.join("nope")).await, Ok(None));
+    assert_eq!(remote_side(s, &dir.join("nope")).await, Side::default());
+
+    let tmp = tempfile::tempdir().unwrap();
+    let local = tmp.path().join("mine.txt");
+    std::fs::write(&local, b"twelve bytes").unwrap();
+    let side = local_side(&local).await;
+    assert_eq!(side.size, Some(12));
+    assert!(side.mtime.is_some_and(|t| t > 1_600_000_000));
+    let folder = local_side(tmp.path()).await;
+    assert_eq!((folder.size, folder.mtime.is_some()), (None, true));
+    assert_eq!(local_side(&tmp.path().join("nope")).await, Side::default());
     rm_rf(s, &dir).await;
 }
 

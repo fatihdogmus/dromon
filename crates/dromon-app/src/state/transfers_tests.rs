@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use dromon_core::{EntryKind, HostId, LinkTarget, RemotePath};
-use dromon_transfer::{ConflictChoice, ConflictView, JobId, JobKind, JobRequest, JobView, Progress, RemoteItem, Reveal, TaskState};
+use dromon_transfer::{ConflictChoice, ConflictView, JobId, JobKind, JobRequest, JobView, Progress, RemoteItem, Reveal, Side, TaskState};
 
 use super::*;
 use crate::fixture;
@@ -145,7 +145,14 @@ fn the_ring_sums_active_jobs_and_the_tab_follows_the_newest_job() {
 #[test]
 fn the_oldest_clash_is_asked_first_and_apply_to_all_goes_with_the_answer() {
     let (mut s, rec) = connected();
-    let clash = |name: &str| ConflictView { name: name.into(), folder: RemotePath::new(SITE), existing_is_dir: false, more: 0 };
+    let clash = |name: &str| ConflictView {
+        name: name.into(),
+        folder: RemotePath::new(SITE),
+        existing_is_dir: false,
+        existing: Side::default(),
+        incoming: Side::default(),
+        more: 0,
+    };
     let mut newer = job(8, JobKind::Upload, TaskState::Preparing { files_found: 0 }, 0, 0);
     newer.conflict = Some(clash("b.txt"));
     let mut older = job(7, JobKind::Upload, TaskState::Preparing { files_found: 0 }, 0, 0);
@@ -240,7 +247,14 @@ fn a_file_drag_shows_where_it_would_upload_and_moving_on_doesnt_lose_it() {
 fn the_conflict_sheet_waits_behind_prompts_and_holds_the_keyboard() {
     let (mut s, rec) = connected();
     let mut j = job(1, JobKind::Upload, TaskState::Preparing { files_found: 0 }, 0, 0);
-    j.conflict = Some(ConflictView { name: "index.html".into(), folder: RemotePath::new(SITE), existing_is_dir: false, more: 0 });
+    j.conflict = Some(ConflictView {
+        name: "index.html".into(),
+        folder: RemotePath::new(SITE),
+        existing_is_dir: false,
+        existing: Side::default(),
+        incoming: Side::default(),
+        more: 0,
+    });
     s.apply(ServiceEvent::Transfers(vec![j]));
     assert_eq!(s.conflict_on_screen().map(|(id, _)| id), Some(JobId(1)));
 

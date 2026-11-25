@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use dromon_core::{Entry, EntryKind, HostId, HostSource, HostSpec, LinkTarget, RemotePath};
-use dromon_transfer::{ConflictView, JobId, JobKind, JobView, Progress, Reveal, TaskState};
+use dromon_transfer::{ConflictView, JobId, JobKind, JobView, Progress, Reveal, Side, TaskState};
 use serde_json::{Map, Value};
 
 use super::generate::{Generator, MAX_COUNT, Mtime, Pattern, Size};
@@ -360,7 +360,7 @@ fn transfers(v: &Value, at: &At, hosts: &[HostSpec]) -> R<Vec<JobView>> {
 
 fn conflict(v: &Value, at: &At) -> R<ConflictView> {
     let m = object(v, at)?;
-    known(m, &["name", "folder", "dir", "more"], at)?;
+    known(m, &["name", "folder", "dir", "more", "existing", "incoming"], at)?;
     let name = text(required(m, "name", at)?, &at.key("name"))?;
     let folder = absolute(&text(required(m, "folder", at)?, &at.key("folder"))?, &at.key("folder"))?;
     let existing_is_dir = match optional(m, "dir") {
@@ -368,7 +368,17 @@ fn conflict(v: &Value, at: &At) -> R<ConflictView> {
         Some(v) => v.as_bool().map_or_else(|| at.key("dir").err(format!("expected true or false, found {}", what(v))), Ok)?,
     };
     let more = optional(m, "more").map(|v| uint(v, &at.key("more"))).transpose()?.unwrap_or(0) as usize;
-    Ok(ConflictView { name, folder, existing_is_dir, more })
+    let side = |k: &str| -> R<Side> {
+        let Some(v) = optional(m, k) else { return Ok(Side::default()) };
+        let at = at.key(k);
+        let s = object(v, &at)?;
+        known(s, &["size", "mtime"], &at)?;
+        Ok(Side {
+            size: optional(s, "size").map(|v| uint(v, &at.key("size"))).transpose()?,
+            mtime: optional(s, "mtime").map(|v| time(v, &at.key("mtime"))).transpose()?,
+        })
+    };
+    Ok(ConflictView { name, folder, existing_is_dir, existing: side("existing")?, incoming: side("incoming")?, more })
 }
 
 fn hosts(v: &Value, at: &At) -> R<Vec<HostSpec>> {

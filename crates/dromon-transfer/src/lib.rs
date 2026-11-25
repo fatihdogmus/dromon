@@ -14,7 +14,8 @@ pub use format::eta as format_eta;
 pub use format::progress_line;
 pub use format::speed as format_speed;
 pub use job::{
-    ConflictChoice, ConflictView, DirPlan, FileId, FilePlan, JobId, JobRequest, JobView, RemoteItem, Reveal, Scan,
+    ConflictChoice, ConflictView, DirPlan, Existing, FileId, FilePlan, JobId, JobRequest, JobView, RemoteItem, Reveal,
+    Scan, Side,
 };
 pub use naming::download_part_name;
 pub use naming::is_part_file;

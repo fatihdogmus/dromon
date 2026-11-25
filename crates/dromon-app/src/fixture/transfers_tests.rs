@@ -5,7 +5,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use dromon_core::{EntryKind, HostId, RemotePath};
-use dromon_transfer::{ConflictChoice, ConflictView, JobId, JobKind, JobRequest, JobView, Progress, RemoteItem, Reveal, TaskState};
+use dromon_transfer::{
+    ConflictChoice, ConflictView, JobId, JobKind, JobRequest, JobView, Progress, RemoteItem, Reveal, Side, TaskState,
+};
 
 use super::transfers::UPLOAD_SIZE;
 use super::*;
@@ -118,7 +120,18 @@ fn a_clash_waits_for_the_user_and_keep_both_uploads_under_a_free_name() {
     let j = jobs(&send(&mut b, upload(&["index.html", "notes.txt"], SITE))).remove(0);
     assert_eq!(j.title, "2 items");
     assert!(matches!(j.state, TaskState::Preparing { .. }), "{:?}", j.state);
-    assert_eq!(j.conflict, Some(ConflictView { name: "index.html".into(), folder: site(), existing_is_dir: false, more: 0 }));
+    // Both sides: the server's file from the tree, the upload as the fixture pretends it is.
+    let on_server = entries(&mut b, prod(), SITE).into_iter().find(|e| e.name == "index.html").unwrap();
+    assert!(on_server.size > 0 && on_server.mtime.is_some(), "the demo's index.html has a size and a date");
+    let c = ConflictView {
+        name: "index.html".into(),
+        folder: site(),
+        existing_is_dir: false,
+        existing: Side { size: Some(on_server.size), mtime: on_server.mtime },
+        incoming: Side { size: Some(UPLOAD_SIZE), mtime: Some(DEMO_NOW) },
+        more: 0,
+    };
+    assert_eq!(j.conflict, Some(c));
 
     let evs = send(&mut b, TransferCommand::Resolve { job: j.id, choice: ConflictChoice::KeepBoth, apply_all: false });
     let j = jobs(&evs).remove(0);
@@ -247,7 +260,11 @@ fn a_folder_copy_lands_with_its_tree_and_a_clash_asks() {
 
     // Again: the folder is there now.
     let j = start(&mut b, req);
-    assert_eq!(j.conflict, Some(ConflictView { name: "20261125-1348".into(), folder: RemotePath::new(UPLOADS), existing_is_dir: true, more: 0 }));
+    // A folder shows its date only; the copy's incoming side is the source folder's.
+    let c = j.conflict.clone().unwrap();
+    assert_eq!((c.name.as_str(), c.folder.as_str(), c.existing_is_dir, c.more), ("20261125-1348", UPLOADS, true, 0));
+    assert_eq!((c.existing.size, c.incoming.size), (None, None));
+    assert!(c.existing.mtime.is_some() && c.incoming.mtime.is_some());
     let j = jobs(&send(&mut b, TransferCommand::Resolve { job: j.id, choice: ConflictChoice::Replace, apply_all: false })).remove(0);
     assert_eq!(j.state, TaskState::Done);
     assert_eq!(names(&mut b, prod(), &format!("{UPLOADS}/20261125-1348")).len(), 4, "merged, nothing doubled");
@@ -371,7 +388,8 @@ fn the_transfers_key_reads_job_snapshots_newest_first() {
     assert_eq!((t[0].speed, t[0].eta), (Some(8_100_000.0), Some(std::time::Duration::from_secs(9))));
     assert_eq!(t[0].reveal, Some(Reveal::Local(PathBuf::from("/Users/me/Downloads/photos"))));
     assert_eq!((&t[1].state, t[1].waiting_for_connection), (&TaskState::Preparing { files_found: 1204 }, true));
-    assert_eq!(t[2].conflict, Some(ConflictView { name: "index.html".into(), folder: RemotePath::new("/var/www"), existing_is_dir: false, more: 2 }));
+    let (no_side, c) = (Side::default(), t[2].conflict.as_ref().unwrap());
+    assert_eq!(*c, ConflictView { name: "index.html".into(), folder: RemotePath::new("/var/www"), existing_is_dir: false, existing: no_side, incoming: no_side, more: 2 });
     assert_eq!(t[3].state, TaskState::Failed { error: "Permission denied".into() });
     assert_eq!((t[3].errors.len(), t[3].skipped.len()), (1, 1));
     assert_eq!(t[4].reveal, Some(Reveal::Remote(prod(), RemotePath::new("/srv/a.txt"))));
@@ -396,6 +414,30 @@ fn the_docs_transfers_example_reads() {
     assert_eq!(states.len(), 6);
     assert_eq!(states[1], &TaskState::Preparing { files_found: 1204 });
     assert_eq!(fx.transfers[3].conflict.as_ref().map(|c| c.more), Some(1));
+}
+
+#[test]
+fn a_pictures_conflict_reads_both_sides_sizes_and_dates() {
+    let src = r#"{"version": 1, "hosts": [{"alias": "prod", "source": "saved"}], "transfers": [
+        {"kind": "upload", "host": "prod", "title": "index.html", "state": "preparing",
+         "conflict": {"name": "index.html", "folder": "/var/www", "dir": false,
+                      "existing": {"size": 14812, "mtime": "2026-11-20T09:12:00Z"},
+                      "incoming": {"size": 15040, "mtime": 1795615200}}}]}"#;
+    let c = parse(src).unwrap().transfers[0].conflict.clone().unwrap();
+    assert_eq!(c.existing, Side { size: Some(14_812), mtime: Some(1_795_165_920) });
+    assert_eq!(c.incoming, Side { size: Some(15_040), mtime: Some(1_795_615_200) });
+
+    let bad = |side: &str| {
+        let src = format!(
+            r#"{{"version": 1, "hosts": [{{"alias": "prod", "source": "saved"}}], "transfers": [
+            {{"kind": "upload", "host": "prod", "title": "t", "state": "preparing",
+              "conflict": {{"name": "t", "folder": "/", "existing": {side}}}}}]}}"#
+        );
+        parse(&src).unwrap_err().to_string()
+    };
+    assert_eq!(bad(r#"{"size": -1}"#), "transfers: job 1: conflict.existing.size: expected a whole number of at least 0, found -1");
+    assert!(bad(r#"{"mtime": "soon"}"#).starts_with("transfers: job 1: conflict.existing.mtime: "));
+    assert!(bad(r#"{"colour": 1}"#).contains(r#"unknown field "colour""#));
 }
 
 #[test]

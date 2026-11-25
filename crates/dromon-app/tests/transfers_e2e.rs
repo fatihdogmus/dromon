@@ -248,6 +248,15 @@ fn uploads_land_on_the_server_and_a_clash_can_keep_both() {
     h.wait_jobs("the name clash", |jobs| jobs.iter().any(|j| j.id == again && j.conflict.is_some()));
     let clash = h.job(again).conflict.unwrap();
     assert_eq!((clash.name.as_str(), clash.existing_is_dir, clash.more), ("hello.txt", false, 0));
+    // Both sides are real: the server's file from the same lstat that found the clash, the
+    // local one from its metadata. The upload kept the local date, so the dates agree.
+    let local_mtime = std::fs::metadata(local.join("hello.txt")).unwrap().modified().unwrap();
+    let local_mtime = local_mtime.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+    assert_eq!(clash.existing.size, Some("hello from dromon\n".len() as u64));
+    assert_eq!(clash.incoming.size, Some(std::fs::metadata(local.join("hello.txt")).unwrap().len()));
+    assert_eq!(clash.incoming.mtime, Some(local_mtime));
+    assert_eq!(clash.existing.mtime, Some(h.mtime_of("hello.txt")), "the server's date, as the shell sees it");
+    assert_eq!(clash.existing.mtime, clash.incoming.mtime);
     h.transfer(TransferCommand::Resolve { job: again, choice: ConflictChoice::KeepBoth, apply_all: false });
     assert_eq!(h.finished(again).state, TaskState::Done);
     assert_eq!(h.remote(&format!("cat '{dir}/hello (1).txt'")), "hello from dromon\n");
@@ -353,10 +362,16 @@ fn copies_and_moves_on_one_host_keep_bytes_and_dates_and_a_clash_can_replace() {
 
     // Move onto the copies: the clash is answered Replace; the file is replaced, the folder merged.
     h.seed("printf 'new alpha\\n' >\"$D/src/a.txt\"; printf 'cee\\n' >\"$D/src/tree/sub/c.txt\"");
-    let items = vec![ritem(&h, "src/a.txt", EntryKind::File), ritem(&h, "src/tree", EntryKind::Dir)];
+    // The picked item carries its listed size (the helper's is 0).
+    let new_alpha = RemoteItem { size: "new alpha\n".len() as u64, ..ritem(&h, "src/a.txt", EntryKind::File) };
+    let items = vec![new_alpha, ritem(&h, "src/tree", EntryKind::Dir)];
     let job = h.run(JobRequest::Move { host: host(), items, into: into.clone() }, true);
     let clash = job.conflict.unwrap();
     assert_eq!((clash.name.as_str(), clash.existing_is_dir, clash.more, job.kind), ("a.txt", false, 1, JobKind::Move));
+    // The copy at the destination ("alpha\n", dated 2020) against the file about to replace it.
+    assert_eq!((clash.existing.size, clash.existing.mtime), (Some(6), Some(1_600_000_000)));
+    assert_eq!(clash.incoming.size, Some("new alpha\n".len() as u64));
+    assert!(clash.incoming.mtime.is_some_and(|t| t > 1_600_000_000), "{clash:?}");
     h.transfer(TransferCommand::Resolve { job: job.id, choice: ConflictChoice::Replace, apply_all: true });
     let job = h.finished(job.id);
     assert_eq!((&job.state, job.files_done, job.files_total), (&TaskState::Done, 2, 2), "{job:#?}");

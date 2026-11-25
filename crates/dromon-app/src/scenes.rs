@@ -5,7 +5,7 @@
 use std::time::Duration;
 
 use dromon_core::{ConnStatus, HostId, Prompt, PromptId, PromptKind, RemotePath};
-use dromon_transfer::{ConflictView, JobId, JobKind, JobView, Progress, Reveal, TaskState};
+use dromon_transfer::{ConflictView, JobId, JobKind, JobView, Progress, Reveal, Side, TaskState};
 use rune::TextEdit;
 
 use crate::fixture;
@@ -189,7 +189,15 @@ fn transfer_jobs(clash: bool) -> Vec<JobView> {
     (hero.speed, hero.eta) = (Some(640_000.0), Some(Duration::from_secs(3)));
     let mut site = job(7, Upload, "prod", "2 items", TaskState::Preparing { files_found: 1 }, 0, 0);
     if clash {
-        site.conflict = Some(ConflictView { name: "index.html".into(), folder: RemotePath::new("/var/www/site"), existing_is_dir: false, more: 0 });
+        let (existing, incoming) = (Side::default(), Side::default());
+        site.conflict = Some(ConflictView {
+            name: "index.html".into(),
+            folder: RemotePath::new("/var/www/site"),
+            existing_is_dir: false,
+            existing,
+            incoming,
+            more: 0,
+        });
     }
     let node = job(6, Download, "prod", "node_modules", TaskState::Preparing { files_found: 1204 }, 0, 0);
     let backup = job(5, Download, "prod", "backup-2026-11-01.tar.gz", TaskState::Paused, 7_300_000, 18_204_116);
@@ -226,7 +234,15 @@ pub fn transfers_uploads(s: &mut App) {
 pub fn transfer_conflict(s: &mut App) {
     listing(s);
     let mut j = job(1, JobKind::Upload, "prod", "4 items", TaskState::Preparing { files_found: 0 }, 0, 0);
-    j.conflict = Some(ConflictView { name: "index.html".into(), folder: RemotePath::new("/var/www/site"), existing_is_dir: false, more: 2 });
+    j.conflict = Some(ConflictView {
+        name: "index.html".into(),
+        folder: RemotePath::new("/var/www/site"),
+        existing_is_dir: false,
+        // The server's copy is from Nov 20 (09:12); the upload was saved today at 13:48.
+        existing: Side { size: Some(14_812), mtime: Some(1_795_165_920) },
+        incoming: Side { size: Some(15_240), mtime: Some(1_795_614_480) },
+        more: 2,
+    });
     s.apply(ServiceEvent::Transfers(vec![j]));
 }
 

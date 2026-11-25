@@ -20,7 +20,7 @@ use dromon_core::{Error, HostId, RemotePath};
 use dromon_sftp::Sftp;
 use dromon_transfer::io::{self, CopyOptions};
 use dromon_transfer::queue::{Action, ItemDst, Queue};
-use dromon_transfer::{FileId, FilePlan, JobId, JobKind, JobRequest, Scan, unique_name};
+use dromon_transfer::{Existing, FileId, FilePlan, JobId, JobKind, JobRequest, RemoteItem, Scan, Side, unique_name};
 use tokio::sync::mpsc;
 use tokio::task::AbortHandle;
 use tokio::time::Instant;
@@ -51,7 +51,8 @@ enum Outcome {
     /// can't be made), remote for Keep both.
     Named { job: JobId, item: usize, dst: Result<ItemDst, Error>, used: Used },
     /// Upload, copy, move: what is at `into/name` on the destination.
-    Exists { job: JobId, item: usize, existing: Result<Option<bool>, Error>, used: Used },
+    /// `incoming` is what the item to transfer looks like (for the conflict sheet).
+    Exists { job: JobId, item: usize, existing: Result<Option<Existing>, Error>, incoming: Side, used: Used },
     ScanProgress { job: JobId, item: usize, found: u64 },
     Scanned { job: JobId, item: usize, scan: Result<Scan, Error>, used: Used },
     Progress { job: JobId, file: FileId, done: u64 },
@@ -187,8 +188,8 @@ impl<S: Sink> Engine<S> {
                 Ok(dst) => self.queue.named(job, item, dst),
                 Err(e) => self.item_error(job, item, e, Action::Name { job, item }, &used),
             },
-            Outcome::Exists { job, item, existing, used } => match existing {
-                Ok(existing) => self.queue.exists(job, item, existing),
+            Outcome::Exists { job, item, existing, incoming, used } => match existing {
+                Ok(existing) => self.queue.exists(job, item, existing, incoming),
                 Err(e) => self.item_error(job, item, e, Action::Name { job, item }, &used),
             },
             Outcome::ScanProgress { job, item, found } => self.queue.scan_progress(job, item, found),
@@ -285,9 +286,22 @@ impl<S: Sink> Engine<S> {
                         let Some(sftp) = self.session(req.host(), Action::Name { job, item }) else { return };
                         let path = into.join(&name);
                         let host = req.host().clone();
+                        // What is being transferred, read in the task: a local file's metadata,
+                        // or the source's mtime on its own session (best effort).
+                        let source = match &req {
+                            JobRequest::Upload { items, .. } => items.get(item).cloned().map(Incoming::Local),
+                            req => req.remote_items().and_then(|i| i.get(item)).map(|i| {
+                                let from = self.sessions.get(req.source_host()).cloned();
+                                Incoming::Remote { item: i.clone(), from }
+                            }),
+                        };
                         tokio::spawn(async move {
-                            let existing = io::remote_kind(&sftp, &path).await;
-                            let _ = tx.send(Outcome::Exists { job, item, existing, used: vec![(host, sftp)] });
+                            let existing = io::remote_existing(&sftp, &path).await;
+                            let incoming = match source {
+                                Some(source) if matches!(existing, Ok(Some(_))) => source.side().await,
+                                _ => Side::default(),
+                            };
+                            let _ = tx.send(Outcome::Exists { job, item, existing, incoming, used: vec![(host, sftp)] });
                         });
                     }
                 }
@@ -402,6 +416,29 @@ impl<S: Sink> Engine<S> {
         std::fs::create_dir_all(into).map_err(|e| Error::Io(format!("Couldn't create {}: {e}", into.display())))?;
         let free = unique_name(name, |n| io::local_name_taken(into, n) || self.queue.is_reserved_local(&into.join(n)));
         Ok(into.join(free))
+    }
+}
+
+/// The item a name check is for, to describe it if its name is taken.
+enum Incoming {
+    Local(PathBuf),
+    /// The picked item and the session of the host it is on (none if that host is down).
+    Remote { item: RemoteItem, from: Option<Sftp> },
+}
+
+impl Incoming {
+    async fn side(self) -> Side {
+        match self {
+            Incoming::Local(path) => io::local_side(&path).await,
+            Incoming::Remote { item, from } => {
+                let mtime = match &from {
+                    Some(sftp) => io::remote_side(sftp, &item.path).await.mtime,
+                    None => None,
+                };
+                let is_dir = item.kind.is_dir_like();
+                Side { size: (!is_dir).then_some(item.size), mtime }
+            }
+        }
     }
 }
 

@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 
 use dromon_core::{HostId, Prompt, PromptId, PromptKind, RemotePath};
-use dromon_transfer::{ConflictView, JobId, JobKind, JobRequest, JobView, Progress, TaskState};
+use dromon_transfer::{ConflictView, JobId, JobKind, JobRequest, JobView, Progress, Side, TaskState};
 use rune::{ClipboardContent, Env, Key, KeyEvent, Mods, Runtime};
 
 use crate::state::{Action, App, Command, DropTarget, Recorder, ServiceEvent, Tab, TransferCommand};
@@ -114,6 +114,11 @@ fn job(id: u64, kind: JobKind, state: TaskState, done: u64, total: u64) -> JobVi
         skipped: Vec::new(),
         folders: Vec::new(),
     }
+}
+
+/// A clash with index.html in the site folder.
+fn clash(existing: Side, incoming: Side) -> ConflictView {
+    ConflictView { name: "index.html".into(), folder: RemotePath::new(SITE), existing_is_dir: false, existing, incoming, more: 0 }
 }
 
 fn paths(names: &[&str]) -> Vec<PathBuf> {
@@ -313,7 +318,7 @@ fn apply_to_all_answers_every_clash_at_once() {
 fn a_prompt_sheet_comes_before_the_conflict_sheet() {
     let (mut rt, _rec) = recorded();
     let mut j = job(1, JobKind::Upload, TaskState::Preparing { files_found: 0 }, 0, 0);
-    j.conflict = Some(ConflictView { name: "index.html".into(), folder: RemotePath::new(SITE), existing_is_dir: false, more: 0 });
+    j.conflict = Some(clash(Side::default(), Side::default()));
     let prompt = Prompt { id: PromptId(1), host: prod(), kind: PromptKind::Password, text: "pw: ".into(), error: None };
     apply(&mut rt, ServiceEvent::Prompt(prompt));
     apply(&mut rt, ServiceEvent::Transfers(vec![j]));
@@ -328,11 +333,54 @@ fn a_prompt_sheet_comes_before_the_conflict_sheet() {
 }
 
 #[test]
+fn the_conflict_sheet_shows_both_sizes_and_dates_and_says_which_is_newer() {
+    let (mut rt, _rec) = recorded();
+    let mut j = job(1, JobKind::Upload, TaskState::Preparing { files_found: 0 }, 0, 0);
+    // The server's file: 14.8 KB from Nov 20; the upload: 15.2 KB from Nov 25 (the newer).
+    let old = Side { size: Some(14_812), mtime: Some(1_795_165_920) };
+    let new = Side { size: Some(15_240), mtime: Some(1_795_614_480) };
+    j.conflict = Some(clash(old, new));
+    apply(&mut rt, ServiceEvent::Transfers(vec![j.clone()]));
+    assert!(shown(&rt, "conflict"));
+    assert_eq!(text_of(&rt, "conflict-existing-label"), "EXISTING");
+    assert_eq!(text_of(&rt, "conflict-incoming-label"), "INCOMING");
+    assert_eq!(text_of(&rt, "conflict-existing-size"), "14.8 KB");
+    assert_eq!(text_of(&rt, "conflict-incoming-size"), "15.2 KB");
+    assert_eq!(text_of(&rt, "conflict-existing-date"), "Nov 20, 2026");
+    assert_eq!(text_of(&rt, "conflict-incoming-date"), "Nov 25, 2026 · newer", "marked in words, not by colour");
+
+    // The other way round, and a folder (no size) over an older file.
+    let mut swapped = j.clone();
+    swapped.conflict = Some(clash(new, Side { size: None, mtime: Some(1_795_165_920) }));
+    apply(&mut rt, ServiceEvent::Transfers(vec![swapped]));
+    assert_eq!(text_of(&rt, "conflict-existing-date"), "Nov 25, 2026 · newer");
+    assert_eq!((text_of(&rt, "conflict-incoming-size"), text_of(&rt, "conflict-incoming-date")), ("—".into(), "Nov 20, 2026".into()));
+
+    // The same date on both: neither is newer. Unknown on one side: a dash.
+    let mut same = j.clone();
+    same.conflict = Some(clash(old, Side { size: Some(1), mtime: old.mtime }));
+    apply(&mut rt, ServiceEvent::Transfers(vec![same]));
+    assert_eq!(text_of(&rt, "conflict-existing-date"), text_of(&rt, "conflict-incoming-date"));
+    assert!(!text_of(&rt, "conflict-existing-date").contains("newer"));
+    let mut unknown = j.clone();
+    unknown.conflict = Some(clash(old, Side::default()));
+    apply(&mut rt, ServiceEvent::Transfers(vec![unknown]));
+    assert_eq!((text_of(&rt, "conflict-incoming-size"), text_of(&rt, "conflict-incoming-date")), ("—".into(), "—".into()));
+    assert!(!text_of(&rt, "conflict-existing-date").contains("newer"));
+
+    // Nothing known of either: no comparison, the rest of the sheet stays.
+    let mut none = j;
+    none.conflict = Some(clash(Side::default(), Side::default()));
+    apply(&mut rt, ServiceEvent::Transfers(vec![none]));
+    assert!(!shown(&rt, "conflict-sides") && shown(&rt, "conflict-replace") && shown(&rt, "conflict-explain"));
+}
+
+#[test]
 fn a_clash_waits_in_the_open_popover_until_resolve_brings_its_sheet() {
     let (mut rt, rec) = recorded();
     click(&mut rt, "tb-transfers");
     let mut j = job(7, JobKind::Upload, TaskState::Preparing { files_found: 0 }, 0, 0);
-    j.conflict = Some(ConflictView { name: "index.html".into(), folder: RemotePath::new(SITE), existing_is_dir: false, more: 0 });
+    j.conflict = Some(clash(Side::default(), Side::default()));
     apply(&mut rt, ServiceEvent::Transfers(vec![j]));
     assert!(shown(&rt, "transfers") && !shown(&rt, "conflict"));
     assert_eq!(rt.state.transfers.tab, Tab::Downloads, "the open popover keeps its tab");

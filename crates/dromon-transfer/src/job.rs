@@ -225,6 +225,23 @@ pub enum ConflictChoice {
     Skip,
 }
 
+/// What is known of one of the two clashing items. Both parts are `None` when unknown, and the
+/// size is always `None` for a folder.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Side {
+    pub size: Option<u64>,
+    /// Seconds since the Unix epoch.
+    pub mtime: Option<i64>,
+}
+
+/// What is already at a destination name: what a clash is about.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Existing {
+    /// A folder (or a link to one); anything else, even a dangling link, is `false`.
+    pub is_dir: bool,
+    pub side: Side,
+}
+
 /// A question a job is waiting on.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConflictView {
@@ -234,6 +251,10 @@ pub struct ConflictView {
     pub folder: RemotePath,
     /// Whether the existing item is a folder.
     pub existing_is_dir: bool,
+    /// The item already at the destination.
+    pub existing: Side,
+    /// The item being transferred.
+    pub incoming: Side,
     /// How many more clashes this job has after this one (for "Apply to all").
     pub more: usize,
 }

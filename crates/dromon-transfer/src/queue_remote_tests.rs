@@ -79,7 +79,7 @@ fn a_two_host_job_waits_for_both_and_counts_against_both_limits() {
     q.host_up(&host("b"));
     assert!(!view(&q, id).waiting_for_connection);
     assert_eq!(q.poll(T0), vec![Action::Name { job: id, item: 0 }]);
-    q.exists(id, 0, None);
+    q.exists(id, 0, None, Side::default());
     let dst = ItemDst::Remote { path: p("/dst/d"), overwrite: false };
     assert_eq!(q.poll(T0), vec![Action::Scan { job: id, item: 0, dst }]);
     let v = view(&q, id);
@@ -115,11 +115,14 @@ fn every_remote_kind_asks_on_a_clash_at_the_destination() {
         both_up(&mut q);
         let id = q.add(request(kind, vec![file("/src/a.txt"), folder("/src/d"), file("/src/c")], "/dst"), T0);
         assert_eq!(q.poll(T0).len(), 3, "{kind:?}: three names");
-        q.exists(id, 0, Some(false));
-        q.exists(id, 1, Some(true));
-        q.exists(id, 2, Some(false));
+        let (old, new) = (Side { size: Some(3), mtime: Some(1_000) }, Side { size: Some(10), mtime: Some(2_000) });
+        q.exists(id, 0, Some(Existing { is_dir: false, side: old }), new);
+        q.exists(id, 1, Some(Existing { is_dir: true, side: Side::default() }), Side::default());
+        q.exists(id, 2, Some(Existing { is_dir: false, side: Side::default() }), Side::default());
         let c = view(&q, id).conflict.unwrap();
-        assert_eq!(c, ConflictView { name: "a.txt".into(), folder: p("/dst"), existing_is_dir: false, more: 2 }, "{kind:?}");
+        let expected =
+            ConflictView { name: "a.txt".into(), folder: p("/dst"), existing_is_dir: false, existing: old, incoming: new, more: 2 };
+        assert_eq!(c, expected, "{kind:?}");
 
         q.resolve(id, ConflictChoice::Replace, false);
         q.resolve(id, ConflictChoice::KeepBoth, false);
@@ -159,9 +162,10 @@ fn apply_to_all_answers_later_clashes_of_a_move() {
     both_up(&mut q);
     let id = q.add(request(JobKind::CrossHostMove, vec![file("/src/a"), file("/src/b")], "/dst"), T0);
     q.poll(T0);
-    q.exists(id, 0, Some(false));
+    let taken = Some(Existing { is_dir: false, side: Side::default() });
+    q.exists(id, 0, taken, Side::default());
     q.resolve(id, ConflictChoice::Skip, true);
-    q.exists(id, 1, Some(false));
+    q.exists(id, 1, taken, Side::default());
     let v = view(&q, id);
     assert_eq!((v.skipped.len(), v.state, v.conflict), (2, TaskState::Done, None));
 }
@@ -206,7 +210,7 @@ fn a_folder_into_itself_fails_the_item() {
     let id = q.add(request(JobKind::Move, vec![folder("/srv/d"), file("/srv/x")], "/srv/d/sub"), T0);
     assert_eq!(q.poll(T0), [Action::Name { job: id, item: 1 }]);
     assert_eq!(view(&q, id).errors, ["d: can't move a folder into itself"]);
-    q.exists(id, 1, None);
+    q.exists(id, 1, None, Side::default());
     q.poll(T0);
     q.file_done(id, FileId(0), T0);
     assert_eq!(view(&q, id).state, TaskState::Failed { error: "d: can't move a folder into itself".into() });
@@ -229,9 +233,9 @@ fn a_move_is_one_file_per_item_done_at_once() {
     q.host_up(&host("a"));
     let id = q.add(request(JobKind::Move, vec![folder("/srv/d"), file("/srv/f")], "/dst"), T0);
     q.poll(T0);
-    q.exists(id, 0, None);
+    q.exists(id, 0, None, Side::default());
     assert!(matches!(view(&q, id).state, TaskState::Preparing { .. }));
-    q.exists(id, 1, None);
+    q.exists(id, 1, None, Side::default());
     let v = view(&q, id);
     assert_eq!((v.state, v.files_total, v.progress.total), (TaskState::Running, 2, 10));
     assert_eq!(v.reveal, Some(Reveal::Remote(host("a"), p("/dst/d"))));
@@ -257,7 +261,7 @@ fn a_cross_host_move_tidies_each_folder_before_it_is_done() {
     let id = q.add(request(JobKind::CrossHostMove, items, "/dst"), T0);
     q.poll(T0);
     for n in 0..3 {
-        q.exists(id, n, None);
+        q.exists(id, n, None, Side::default());
     }
     q.poll(T0);
     q.scanned(id, 0, Scan { files: vec![copy_plan("1", 1), copy_plan("2", 1)], ..Scan::default() });
@@ -292,7 +296,7 @@ fn copies_never_tidy_and_cancel_cleans_their_parts() {
     both_up(&mut q);
     let id = q.add(request(JobKind::CrossHostCopy, vec![folder("/src/d")], "/dst"), T0);
     q.poll(T0);
-    q.exists(id, 0, None);
+    q.exists(id, 0, None, Side::default());
     q.poll(T0);
     q.scanned(id, 0, Scan { files: vec![copy_plan("1", 100)], ..Scan::default() });
     q.poll(T0);
@@ -302,7 +306,7 @@ fn copies_never_tidy_and_cancel_cleans_their_parts() {
 
     let id = q.add(request(JobKind::RemoteCopy, vec![folder("/src/d")], "/dst"), T0);
     q.poll(T0);
-    q.exists(id, 0, None);
+    q.exists(id, 0, None, Side::default());
     q.poll(T0);
     q.scanned(id, 0, Scan::default());
     assert!(q.poll(T0).is_empty());

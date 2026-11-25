@@ -32,6 +32,11 @@ fn upload(h: &str, names: &[&str]) -> JobRequest {
     }
 }
 
+/// A file with no known size or date is at the destination.
+fn file() -> Option<Existing> {
+    Some(Existing { is_dir: false, side: Side::default() })
+}
+
 fn dl_plan(name: &str, size: u64) -> FilePlan {
     FilePlan::Download { src: RemotePath::new(&format!("/r/{name}")), dst: PathBuf::from(format!("/d/{name}")), size, mtime: None }
 }
@@ -200,7 +205,7 @@ fn upload_without_clash_scans_into_the_folder() {
     q.host_up(&host("a"));
     let id = q.add(upload("a", &["a.txt"]), T0);
     assert_eq!(q.poll(T0), vec![Action::Name { job: id, item: 0 }]);
-    q.exists(id, 0, None);
+    q.exists(id, 0, None, Side::default());
     let dst = ItemDst::Remote { path: RemotePath::new("/srv/a.txt"), overwrite: false };
     assert_eq!(q.poll(T0), vec![Action::Scan { job: id, item: 0, dst }]);
     assert_eq!(view(&q, id).reveal, Some(Reveal::Remote(host("a"), RemotePath::new("/srv/a.txt"))));
@@ -217,18 +222,28 @@ fn upload_conflicts_are_shown_one_at_a_time() {
     q.host_up(&host("a"));
     let id = q.add(upload("a", &["a", "b", "c"]), T0);
     q.poll(T0);
-    q.exists(id, 0, Some(false));
-    q.exists(id, 1, Some(true));
-    q.exists(id, 2, None);
+    let (old, new) = (Side { size: Some(10), mtime: Some(100) }, Side { size: Some(20), mtime: Some(200) });
+    let folder = Side { size: None, mtime: Some(300) };
+    q.exists(id, 0, Some(Existing { is_dir: false, side: old }), new);
+    q.exists(id, 1, Some(Existing { is_dir: true, side: folder }), folder);
+    q.exists(id, 2, None, Side::default());
     let c = view(&q, id).conflict.unwrap();
     assert_eq!(
         c,
-        ConflictView { name: "a".into(), folder: RemotePath::new("/srv"), existing_is_dir: false, more: 1 }
+        ConflictView {
+            name: "a".into(),
+            folder: RemotePath::new("/srv"),
+            existing_is_dir: false,
+            existing: old,
+            incoming: new,
+            more: 1
+        }
     );
-    // Replace the first: the next one comes up.
+    // Replace the first: the next one comes up, with its own sizes and dates.
     q.resolve(id, ConflictChoice::Replace, false);
     let c = view(&q, id).conflict.unwrap();
     assert_eq!((c.name.as_str(), c.existing_is_dir, c.more), ("b", true, 0));
+    assert_eq!((c.existing, c.incoming), (folder, folder));
     assert_eq!(
         q.poll(T0),
         vec![
@@ -252,7 +267,7 @@ fn keep_both_asks_for_a_free_name_then_scans() {
     q.host_up(&host("a"));
     let id = q.add(upload("a", &["a.txt"]), T0);
     q.poll(T0);
-    q.exists(id, 0, Some(false));
+    q.exists(id, 0, file(), Side::default());
     assert!(q.poll(T0).is_empty()); // waiting for the user
     q.resolve(id, ConflictChoice::KeepBoth, false);
     assert_eq!(view(&q, id).conflict, None);
@@ -268,7 +283,7 @@ fn skip_leaves_the_item_out_and_an_all_skipped_job_is_done() {
     q.host_up(&host("a"));
     let id = q.add(upload("a", &["a.txt"]), T0);
     q.poll(T0);
-    q.exists(id, 0, Some(false));
+    q.exists(id, 0, file(), Side::default());
     q.resolve(id, ConflictChoice::Skip, false);
     let v = view(&q, id);
     assert_eq!(v.skipped, vec!["a.txt".to_owned()]);
@@ -283,7 +298,7 @@ fn resolve_without_a_conflict_is_ignored() {
     let id = q.add(upload("a", &["a.txt"]), T0);
     q.poll(T0);
     q.resolve(id, ConflictChoice::Skip, true);
-    q.exists(id, 0, Some(false)); // apply_all was not stored
+    q.exists(id, 0, file(), Side::default()); // apply_all was not stored
     assert!(view(&q, id).conflict.is_some());
 }
 
@@ -293,22 +308,22 @@ fn apply_all_answers_other_conflicts_now_and_later_ones() {
     q.host_up(&host("a"));
     let id = q.add(upload("a", &["a", "b", "c", "d"]), T0);
     q.poll(T0);
-    q.exists(id, 0, Some(false));
-    q.exists(id, 1, Some(false));
+    q.exists(id, 0, file(), Side::default());
+    q.exists(id, 1, file(), Side::default());
     q.resolve(id, ConflictChoice::Skip, true);
     assert_eq!(view(&q, id).conflict, None);
     assert_eq!(view(&q, id).skipped, vec!["a".to_owned(), "b".to_owned()]);
     // A later clash is answered at once.
-    q.exists(id, 2, Some(true));
+    q.exists(id, 2, Some(Existing { is_dir: true, side: Side::default() }), Side::default());
     assert_eq!(view(&q, id).skipped.len(), 3);
     assert_eq!(view(&q, id).conflict, None);
 
     // apply_all with Replace answers later items with Replace.
     let id2 = q.add(upload("a", &["x", "y"]), T0);
     q.poll(T0);
-    q.exists(id2, 0, Some(false));
+    q.exists(id2, 0, file(), Side::default());
     q.resolve(id2, ConflictChoice::Replace, true);
-    q.exists(id2, 1, Some(false));
+    q.exists(id2, 1, file(), Side::default());
     let scans: Vec<_> = q.poll(T0).into_iter().filter(|a| matches!(a, Action::Scan { job, .. } if *job == id2)).collect();
     assert_eq!(scans.len(), 2);
     assert!(scans.iter().all(|a| matches!(a, Action::Scan { dst: ItemDst::Remote { overwrite: true, .. }, .. })));
@@ -589,7 +604,7 @@ fn poll_is_idempotent_and_unknown_ids_are_ignored() {
 
     let ghost = JobId(42);
     q.named(ghost, 0, local("x"));
-    q.exists(ghost, 0, None);
+    q.exists(ghost, 0, None, Side::default());
     q.resolve(ghost, ConflictChoice::Skip, true);
     q.scan_progress(ghost, 0, 3);
     q.scanned(ghost, 0, Scan::default());

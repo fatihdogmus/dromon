@@ -17,8 +17,8 @@ use std::time::Duration;
 use dromon_core::{EntryKind, HostId, RemotePath};
 
 use crate::{
-    ConflictChoice, ConflictView, FileId, FilePlan, JobId, JobKind, JobRequest, JobView, Progress, Reveal, Scan,
-    SpeedMeter, TaskEvent, TaskState, download_part_name, eta, step,
+    ConflictChoice, ConflictView, Existing, FileId, FilePlan, JobId, JobKind, JobRequest, JobView, Progress, Reveal, Scan,
+    Side, SpeedMeter, TaskEvent, TaskState, download_part_name, eta, step,
 };
 
 /// The settled destination of one top-level item.
@@ -62,7 +62,7 @@ enum ItemState {
     /// `Name` was (or will be) emitted; waiting for `named` (download) or `exists` (the others).
     Naming,
     /// The name is taken at the destination; waiting for the user.
-    Conflict { existing_is_dir: bool },
+    Conflict { existing: Existing, incoming: Side },
     /// KeepBoth: `FreeRemoteName` was emitted; waiting for `named`.
     Renaming,
     /// `Scan` was (or will be) emitted; waiting for `scanned`.
@@ -346,11 +346,18 @@ impl Job {
     fn conflict_view(&self) -> Option<ConflictView> {
         let into = self.req.remote_into()?;
         let mut clashes = self.items.iter().enumerate().filter_map(|(n, i)| match i.state {
-            ItemState::Conflict { existing_is_dir } => Some((n, existing_is_dir)),
+            ItemState::Conflict { existing, incoming } => Some((n, existing, incoming)),
             _ => None,
         });
-        let (first, existing_is_dir) = clashes.next()?;
-        Some(ConflictView { name: self.item_name(first), folder: into.clone(), existing_is_dir, more: clashes.count() })
+        let (first, existing, incoming) = clashes.next()?;
+        Some(ConflictView {
+            name: self.item_name(first),
+            folder: into.clone(),
+            existing_is_dir: existing.is_dir,
+            existing: existing.side,
+            incoming,
+            more: clashes.count(),
+        })
     }
 
     fn reveal(&self) -> Option<Reveal> {
@@ -490,9 +497,9 @@ impl Queue {
         }
     }
 
-    /// Upload, copy, move: is `into/name` taken at the destination? `Some(is_dir)` / `None` =
-    /// free.
-    pub fn exists(&mut self, job: JobId, item: usize, existing: Option<bool>) {
+    /// Upload, copy, move: is `into/name` taken at the destination? `Some(what is there)` /
+    /// `None` = free. `incoming` is what the item to transfer looks like, for the conflict view.
+    pub fn exists(&mut self, job: JobId, item: usize, existing: Option<Existing>, incoming: Side) {
         let Some(j) = self.live(job) else { return };
         let Some(into) = j.req.remote_into() else { return };
         let path = into.join(&j.item_name(item));
@@ -504,7 +511,7 @@ impl Queue {
                 j.begin_scan(item, ItemDst::Remote { path, overwrite: false });
             }
             (Some(_), Some(choice)) => j.apply_choice(item, choice),
-            (Some(existing_is_dir), None) => j.items[item].state = ItemState::Conflict { existing_is_dir },
+            (Some(existing), None) => j.items[item].state = ItemState::Conflict { existing, incoming },
         }
         j.advance();
     }
