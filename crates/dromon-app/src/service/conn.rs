@@ -23,6 +23,7 @@ use zeroize::Zeroizing;
 
 use super::auth::{self, AttemptPrompts, PromptIds, Routed};
 use super::lifecycle::{Effect, Event, Lifecycle, Phase, step};
+use super::transfers::EngineMsg;
 use super::{Config, Sink};
 use crate::state::ServiceEvent;
 
@@ -41,14 +42,15 @@ pub enum ConnCmd {
     Disconnect,
 }
 
-/// What the connection tasks share: configuration, the askpass endpoint, the password store
-/// and prompt ids.
+/// What the connection tasks share: configuration, the askpass endpoint, the password store,
+/// prompt ids, and the transfer engine (told when a session comes and goes).
 #[derive(Clone)]
 pub struct Shared {
     pub cfg: Arc<Config>,
     pub askpass: Option<Arc<AskpassServer>>,
     pub store: Arc<Mutex<PasswordStore>>,
     pub ids: PromptIds,
+    pub engine: mpsc::UnboundedSender<EngineMsg>,
 }
 
 /// The manager's end of a connection task.
@@ -302,6 +304,20 @@ impl<S: Sink> Task<S> {
         self.emit(ServiceEvent::Log { host: self.host.clone(), line: line.into() });
     }
 
+    /// Hands the transfer engine this host's live SFTP session.
+    fn session_up(&self) {
+        if let Some(sftp) = self.session.as_ref().and_then(|s| s.sftp.clone()) {
+            let _ = self.shared.engine.send(EngineMsg::HostUp(self.host.clone(), sftp));
+        }
+    }
+
+    /// Tells the transfer engine a session it had is gone (`s` is being dropped).
+    fn session_gone(&self, s: &Session) {
+        if s.sftp.is_some() {
+            let _ = self.shared.engine.send(EngineMsg::HostDown(self.host.clone()));
+        }
+    }
+
     async fn on_command(&mut self, cmd: ConnCmd) {
         match cmd {
             ConnCmd::Connect(spec) => {
@@ -424,6 +440,7 @@ impl<S: Sink> Task<S> {
     /// ssh is gone (or SFTP couldn't start): collects its last words and tells the machine.
     async fn finish(&mut self, error: Option<String>) {
         let Some(mut s) = self.session.take() else { return };
+        self.session_gone(&s);
         for id in s.prompts.close_all() {
             self.emit(ServiceEvent::PromptClosed(id));
         }
@@ -448,7 +465,9 @@ impl<S: Sink> Task<S> {
             for fx in step(&mut self.life, event) {
                 match fx {
                     Effect::Spawn => {
-                        self.session = None;
+                        if let Some(old) = self.session.take() {
+                            self.session_gone(&old);
+                        }
                         match Session::start(&self.spec, &self.shared).await {
                             Ok((session, note)) => {
                                 self.session = Some(session);
@@ -459,6 +478,7 @@ impl<S: Sink> Task<S> {
                     }
                     Effect::Kill => {
                         if let Some(mut s) = self.session.take() {
+                            self.session_gone(&s);
                             for id in s.prompts.close_all() {
                                 self.emit(ServiceEvent::PromptClosed(id));
                             }
@@ -469,11 +489,13 @@ impl<S: Sink> Task<S> {
                         let start = self.session.as_ref().map_or_else(RemotePath::root, |s| s.home.clone());
                         self.path = None;
                         self.emit(ServiceEvent::Opened { host: self.host.clone(), start });
+                        self.session_up();
                     }
                     Effect::Reopened => {
                         if let Some(path) = self.path.clone() {
                             self.list(path);
                         }
+                        self.session_up();
                     }
                     Effect::Retry { attempt, after } => {
                         self.retry = Some((attempt, Instant::now() + after));

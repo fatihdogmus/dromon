@@ -17,6 +17,7 @@ mod conn;
 pub(crate) mod hosts;
 /// Also drives the fixture backend's connections, so both change status alike.
 pub(crate) mod lifecycle;
+mod transfers;
 
 // A shell-script fake ssh and OpenSSH's sftp-server: Unix only.
 #[cfg(all(test, unix))]
@@ -158,7 +159,8 @@ pub async fn run<S: Sink>(mut commands: Commands, sink: S, cfg: Config) {
         tokio::spawn(hosts::discover(src, cfg.ssh.clone(), cfg.config_file.clone(), sink.clone(), found_tx));
     }
     let store = Arc::new(Mutex::new(PasswordStore::new()));
-    let shared = Shared { cfg: Arc::new(cfg), askpass, store: store.clone(), ids: PromptIds::default() };
+    let engine = transfers::start(sink.clone());
+    let shared = Shared { cfg: Arc::new(cfg), askpass, store: store.clone(), ids: PromptIds::default(), engine };
     let mut conns: HashMap<HostId, ConnHandle> = HashMap::new();
     loop {
         tokio::select! {
@@ -219,8 +221,9 @@ fn dispatch<S: Sink>(cmd: Command, known: &HashMap<HostId, HostSpec>, conns: &mu
                 None => auth::wipe(answer),
             }
         }
-        // The transfer engine joins the service next (M2); until then nothing runs.
-        Command::Transfer(_) => {}
+        Command::Transfer(cmd) => {
+            let _ = shared.engine.send(transfers::EngineMsg::Command(cmd));
+        }
     }
 }
 
