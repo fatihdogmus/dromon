@@ -27,7 +27,7 @@ use dromon_ssh::{
 };
 use dromon_testkit::{
     NULL_DEVICE, PASSPHRASE, PASSWORD, USER_ENCRYPTED_KEY, USER_KBD, USER_KEY, USER_KEY_THEN_PASSWORD, USER_PASSWORD,
-    openssh, totp_now, wrong_totp,
+    totp_now, wrong_totp,
 };
 use secrecy::ExposeSecret;
 use tokio::sync::mpsc;
@@ -277,21 +277,12 @@ fn on_stderr_line(line: &str, attempt: &mut AuthAttempt, store: &mut PasswordSto
     }
 }
 
-/// The fixture's host key fingerprint, from `ssh-keyscan` and `ssh-keygen -l`.
-async fn fixture_fingerprint(dir: &Path, port: u16) -> String {
-    let scan = tokio::process::Command::new(openssh("ssh-keyscan"))
-        .args(["-t", "ed25519", "-p", &port.to_string(), "127.0.0.1"])
-        .output()
-        .await
-        .unwrap();
-    assert!(scan.status.success() && !scan.stdout.is_empty(), "{}", String::from_utf8_lossy(&scan.stderr));
-    let file = dir.join("keyscan");
-    std::fs::write(&file, &scan.stdout).unwrap();
-    let out =
-        tokio::process::Command::new(openssh("ssh-keygen")).args(["-l", "-E", "sha256", "-f"]).arg(&file).output().await.unwrap();
-    assert!(out.status.success());
-    // `256 SHA256:… [127.0.0.1]:<port> (ED25519)`
-    let line = String::from_utf8(out.stdout).unwrap();
+/// The fixture's host key fingerprint, read from the host key itself inside the container
+/// (`ssh-keygen -l` there). Not `ssh-keyscan` here: Windows' 9.5 offers a key exchange it
+/// can't do (sntrup761x25519) and gives up ("choose_kex: unsupported KEX method").
+fn fixture_fingerprint(sshd: &dromon_testkit::Fixture) -> String {
+    let line = sshd.exec(&["ssh-keygen", "-l", "-E", "sha256", "-f", "/etc/ssh/ssh_host_ed25519_key.pub"]).unwrap();
+    // `256 SHA256:… root@<container> (ED25519)`
     let fp = line.split_whitespace().nth(1).unwrap().to_owned();
     assert!(fp.starts_with("SHA256:"), "{line}");
     fp
@@ -313,7 +304,7 @@ const PUBKEY_ONLY: &str = "PubkeyAuthentication yes\nPreferredAuthentications pu
 #[tokio::test(flavor = "multi_thread")]
 async fn unknown_host_key_is_asked_once_then_known() {
     let Some(mut f) = Fixture::new("unknown_host_key_is_asked_once_then_known").await else { return };
-    let expected = fixture_fingerprint(f.tmp.path(), f.port()).await;
+    let expected = fixture_fingerprint(f.sshd);
     let host = f.host(USER_KEY, Some(f.plain_key()));
 
     let first = f.connect(&host, PUBKEY_ONLY, None, &mut accept_host_key_only).await;

@@ -182,7 +182,8 @@ jobs:
           DOCKER_HOST: tcp://127.0.0.1:2375
           # Fail, don't skip, when the sshd fixture can't start.
           DROMON_REQUIRE_DOCKER: "1"
-        run: cargo test --locked -p dromon-testkit -p dromon-ssh -p dromon-sftp -p dromon-transfer
+        # --no-fail-fast: one run shows every failing test binary, not just the first.
+        run: cargo test --locked --no-fail-fast -p dromon-testkit -p dromon-ssh -p dromon-sftp -p dromon-transfer
       - name: Docker state
         if: failure()
         shell: wsl-bash {0}
