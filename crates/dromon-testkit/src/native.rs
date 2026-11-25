@@ -18,14 +18,19 @@
 //!    password). `pw`, `kbd` and `keypw` get [`PASSWORD`](crate::PASSWORD); `key` and `enc` none
 //!    (Linux `*`; macOS a random one, since Open Directory wants one).
 //! 4. `tests/docker/seed.sh <home>` as `dromon_key`, so the seed data is the image's.
-//! 5. `sshd -t`, then `sshd -D -e -f <dir>/sshd_config` on 127.0.0.1 at a free port, with the
-//!    platform's PAM (`UsePAM yes`) and the Match blocks of `tests/docker/sshd_config`. The
-//!    platform PAM has no TOTP module: [`Feature::Totp`](crate::Feature::Totp) is Docker only.
+//! 5. TOTP for `dromon_kbd` where a `pam_google_authenticator.so` is installed (`totp.rs`): its
+//!    `~/.google_authenticator` and its own PAM service `/etc/pam.d/<folder name, lower case>` (the
+//!    platform's sshd policy plus the module), picked by `PAMServiceName` in its Match block.
+//!    Without the module [`Feature::Totp`](crate::Feature::Totp) is off.
+//! 6. `sshd -t`, then `sshd -D -e -f <dir>/sshd_config` on 127.0.0.1 at a free port, with the
+//!    platform's PAM (`UsePAM yes`) and the Match blocks of `tests/docker/sshd_config`; with TOTP,
+//!    a probe login as `dromon_kbd` with the password and a code.
 //!
 //! Cleanup: statics are never dropped, so sshd is started by a small root watchdog (`sh`) that
 //! polls this process's pid once a second; when it is gone (normal exit, panic, `kill -9`), the
-//! watchdog stops sshd, ends the fixture users' leftover sessions and deletes the folder. The
-//! users and their homes stay (reused by the next run). `DROMON_FIXTURE_KEEP=1`: no watchdog.
+//! watchdog stops sshd, ends the fixture users' leftover sessions and deletes the folder and the
+//! kbd user's PAM service. The users and their homes stay (reused by the next run).
+//! `DROMON_FIXTURE_KEEP=1`: no watchdog.
 
 use std::io::Write as _;
 use std::path::Path;
@@ -38,6 +43,8 @@ use crate::{
     Account, ENCRYPTED_KEY, Fixture, HOST, KEEP_ENV, KEY, NATIVE_OK_ENV, NULL_DEVICE, PASSWORD, Role, Server, State,
     client_keys, env_flag, note, probe_login,
 };
+
+mod totp;
 
 /// Prefix of the fixture's account names.
 const USER_PREFIX: &str = "dromon_";
@@ -89,9 +96,16 @@ pub(crate) struct Sshd {
     /// Run commands directly (already root) instead of through `sudo -n`.
     as_root: bool,
     os: Os,
+    /// The kbd user's TOTP second factor, when this machine has the module.
+    totp: Option<totp::Totp>,
 }
 
 impl Sshd {
+    /// Whether the kbd user is asked for a TOTP code after its password.
+    pub(crate) fn has_totp(&self) -> bool {
+        self.totp.is_some()
+    }
+
     pub(crate) fn exec(&self, command: &[&str]) -> Result<String, String> {
         let out = root_command(self.as_root, command)
             .stdin(Stdio::null())
@@ -201,8 +215,9 @@ fn root_sh(as_root: bool, what: &str, script: &str, args: &[&str], stdin: &[u8])
 /// Every script starts with this: `sudo` may keep the caller's PATH, which needn't have sbin.
 const SCRIPT_HEAD: &str = "set -eu\nPATH=/usr/sbin:/usr/bin:/sbin:/bin:$PATH\nexport PATH\n";
 
-/// `$1` this process's pid, `$2` keep (`1`/`0`). Sweeps folders of processes that are gone,
-/// makes a fresh one with the host key and prints its path.
+/// `$1` this process's pid, `$2` keep (`1`/`0`). Sweeps folders of processes that are gone, and
+/// the kbd PAM services (`totp.rs`) no remaining folder's `pam_service` names, makes a fresh
+/// folder with the host key and prints its path.
 const PREPARE: &str = r#"
 pid=$1 keep=$2
 for d in /var/tmp/dromon-testkit-sshd.*; do
@@ -211,6 +226,16 @@ for d in /var/tmp/dromon-testkit-sshd.*; do
     if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then continue; fi
     rm -rf "$d"
 done
+for p in /etc/pam.d/dromon-testkit-sshd.*; do
+    if [ ! -f "$p" ]; then continue; fi
+    live=0
+    for f in /var/tmp/dromon-testkit-sshd.*/pam_service; do
+        if [ -f "$f" ] && [ "$(cat "$f")" = "${p##*/}" ]; then live=1; fi
+    done
+    if [ "$live" = 0 ]; then rm -f "$p"; fi
+done
+# Debian's sshd wants its privilege separation folder, also for `sshd -t`.
+if [ "$(uname -s)" = Linux ] && [ ! -d /run/sshd ]; then mkdir -m 755 /run/sshd; fi
 dir=$(mktemp -d /var/tmp/dromon-testkit-sshd.XXXXXXXX)
 chmod 755 "$dir"
 echo "$pid" >"$dir/owner"
@@ -294,13 +319,12 @@ while [ $# -ge 2 ]; do
     chmod 644 "$dir/authorized_keys/$1"
     shift 2
 done
-# Debian's sshd wants its privilege separation folder.
-if [ "$(uname -s)" = Linux ] && [ ! -d /run/sshd ]; then mkdir -m 755 /run/sshd; fi
 "$sshd" -t -f "$dir/sshd_config"
 "#;
 
 /// `$1` the test process's pid, `$2` the folder, `$3` sshd, `$4` keep, then the fixture users.
-/// Starts sshd, then (unless kept) waits for the test process to go and cleans up after it.
+/// Starts sshd, then (unless kept) waits for the test process to go and cleans up after it,
+/// also the kbd user's PAM service (`totp.rs`), if any.
 /// INT and HUP are ignored so a Ctrl-C in the developer's terminal doesn't orphan sshd.
 const WATCHDOG: &str = r#"
 set +e
@@ -314,6 +338,7 @@ while kill -0 "$pid" 2>/dev/null; do sleep 1; done
 kill "$sshd_pid" 2>/dev/null
 wait "$sshd_pid" 2>/dev/null
 for u in "$@"; do pkill -u "$u" 2>/dev/null; done
+if [ -f "$dir/pam_service" ]; then rm -f "/etc/pam.d/$(cat "$dir/pam_service")"; fi
 rm -rf "$dir"
 "#;
 
@@ -329,7 +354,6 @@ async fn launch(os: Os, as_root: bool, sshd_bin: &str, sftp_server: &str) -> Res
     let keep_arg = if keep { "1" } else { "0" };
 
     let dir = root_sh(as_root, "prepare the sshd folder", &script(PREPARE), &[&pid, keep_arg], b"")?.trim().to_owned();
-    let sshd = Sshd { dir: dir.clone(), as_root, os };
 
     let names: Vec<String> = Role::ALL.iter().map(|r| format!("{USER_PREFIX}{}", r.base_name())).collect();
     let mut user_args = vec![os.arg(), os.home_root()];
@@ -347,6 +371,14 @@ async fn launch(os: Os, as_root: bool, sshd_bin: &str, sftp_server: &str) -> Res
     }
     let key_account = &accounts[Role::Key.index()];
     root_sh(as_root, "seed.sh", &script(SEED_AS), &[&key_account.name, &key_account.home], SEED.as_bytes())?;
+    let (totp, totp_note) = match totp::setup(os, as_root, &dir, sshd_bin, &accounts[Role::Kbd.index()])? {
+        totp::Setup::Ready(t) => {
+            let note = format!("TOTP for {}: PAM service {} ({})", names[Role::Kbd.index()], t.policy(), t.module);
+            (Some(t), note)
+        }
+        totp::Setup::Unavailable(why) => (None, format!("no TOTP ({why})")),
+    };
+    let sshd = Sshd { dir: dir.clone(), as_root, os, totp };
 
     let port = free_port()?;
     let pub_key = |file: &str| {
@@ -355,7 +387,7 @@ async fn launch(os: Os, as_root: bool, sshd_bin: &str, sftp_server: &str) -> Res
     };
     let (plain, encrypted) = (pub_key(KEY)?, pub_key(ENCRYPTED_KEY)?);
     let name = |role: Role| names[role.index()].as_str();
-    let config = sshd_config(port, &dir, sftp_server, &names);
+    let config = sshd_config(port, &dir, sftp_server, &names, sshd.totp.as_ref());
     let config_args = [
         dir.as_str(),
         sshd_bin,
@@ -384,17 +416,24 @@ async fn launch(os: Os, as_root: bool, sshd_bin: &str, sftp_server: &str) -> Res
 
     let fixture = Fixture { port, keys, accounts, server: Server::Native(sshd), big_file: OnceCell::new() };
     probe_login(&fixture).await?;
+    if let Server::Native(sshd @ Sshd { totp: Some(t), .. }) = &fixture.server {
+        totp::probe(&fixture, sshd, t).await;
+    }
     note(format_args!(
         "dromon-testkit: native sshd fixture on {HOST}:{port}, {sshd_bin} with {sftp_server}, folder {dir}, users {}*, \
-         ready after {:.1} s",
+         {totp_note}, ready after {:.1} s",
         USER_PREFIX,
         started.elapsed().as_secs_f64(),
     ));
     if keep {
+        let policy = match &fixture.server {
+            Server::Native(Sshd { totp: Some(t), .. }) => format!(" {}", t.policy()),
+            _ => String::new(),
+        };
         note(format_args!(
             "dromon-testkit: {KEEP_ENV}=1: sshd keeps running; log in with \
              `ssh -F {NULL_DEVICE} -i {} -p {port} {}@{HOST}`; clean up with \
-             `sudo sh -c 'kill $(cat {dir}/sshd.pid); rm -rf {dir}'; rm -r {}`",
+             `sudo sh -c 'kill $(cat {dir}/sshd.pid); rm -rf {dir}{policy}'; rm -r {}`",
             fixture.key().display(),
             fixture.user(Role::Key),
             fixture.keys.display(),
@@ -429,10 +468,19 @@ async fn wait_listening(sshd: &Sshd) -> Result<(), String> {
 }
 
 /// `tests/docker/sshd_config` for this machine: the same methods per user (Match blocks), with
-/// paths into `dir`, the platform's sftp-server and the prefixed users.
+/// paths into `dir`, the platform's sftp-server and the prefixed users; with `totp`, the kbd user's
+/// PAM service (debug logging for it, so sshd's log names the service PAM starts with).
 /// `names` by [`Role::index`].
-fn sshd_config(port: u16, dir: &str, sftp_server: &str, names: &[String]) -> String {
+fn sshd_config(port: u16, dir: &str, sftp_server: &str, names: &[String], totp: Option<&totp::Totp>) -> String {
     let name = |role: Role| names[role.index()].as_str();
+    let kbd_totp = totp.map_or_else(String::new, |t| {
+        format!(
+            "    # TOTP after the password: the platform's sshd policy plus {} ({}).\n    PAMServiceName {}\n    LogLevel DEBUG1\n",
+            t.module,
+            t.policy(),
+            t.service
+        )
+    });
     format!(
         "# Generated by dromon-testkit (native backend); mirrors tests/docker/sshd_config.
 ListenAddress {HOST}
@@ -464,7 +512,7 @@ Match User {kbd}
     KbdInteractiveAuthentication yes
     PubkeyAuthentication no
     AuthenticationMethods keyboard-interactive
-
+{kbd_totp}
 Match User {keypw}
     PasswordAuthentication yes
     AuthenticationMethods publickey,password
@@ -483,12 +531,25 @@ mod tests {
     #[test]
     fn config_has_the_docker_match_blocks_for_the_prefixed_users() {
         let names: Vec<String> = Role::ALL.iter().map(|r| format!("dromon_{}", r.base_name())).collect();
-        let config = sshd_config(2222, "/var/tmp/d", "/usr/libexec/sftp-server", &names);
+        let config = sshd_config(2222, "/var/tmp/d", "/usr/libexec/sftp-server", &names, None);
         assert!(config.contains("AllowUsers dromon_key dromon_pw dromon_kbd dromon_keypw dromon_enc\n"));
+        assert!(config.contains("    AuthenticationMethods keyboard-interactive\n\nMatch User dromon_keypw\n"));
+        assert!(!config.contains("PAMServiceName"));
         assert!(config.contains("Match User dromon_pw\n    PasswordAuthentication yes\n    PubkeyAuthentication no\n    AuthenticationMethods password\n"));
         assert!(config.contains("Match User dromon_keypw\n    PasswordAuthentication yes\n    AuthenticationMethods publickey,password\n"));
         assert!(config.contains("AuthorizedKeysFile /var/tmp/d/authorized_keys/%u\n"));
         assert!(config.contains("Subsystem sftp /usr/libexec/sftp-server\n"));
         assert!(config.contains("ListenAddress 127.0.0.1\nPort 2222\n"));
+    }
+
+    #[test]
+    fn totp_selects_the_kbd_users_pam_service_in_its_match_block_only() {
+        let names: Vec<String> = Role::ALL.iter().map(|r| format!("dromon_{}", r.base_name())).collect();
+        let t = totp::Totp { service: "dromon-testkit-sshd.abc".into(), module: "/m/pam_google_authenticator.so".into() };
+        let config = sshd_config(2222, "/var/tmp/dromon-testkit-sshd.abc", "/s", &names, Some(&t));
+        let kbd = config.split("Match User dromon_kbd\n").nth(1).unwrap().split("Match User").next().unwrap();
+        assert!(kbd.contains("    PAMServiceName dromon-testkit-sshd.abc\n    LogLevel DEBUG1\n"), "{kbd}");
+        assert!(kbd.contains("/etc/pam.d/dromon-testkit-sshd.abc"), "{kbd}");
+        assert_eq!(config.matches("PAMServiceName").count(), 1);
     }
 }

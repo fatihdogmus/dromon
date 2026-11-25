@@ -8,7 +8,8 @@ name: CI
 #   sshd fixture tests (askpass, SFTP, transfer I/O, the app's e2e and transfers) against a
 #   private native sshd instead of Docker: dromon-testkit's native backend
 #   (DROMON_FIXTURE_BACKEND=native) starts Apple's sshd as root through sudo, with test users
-#   dromon_*; the TOTP tests skip (no TOTP PAM module on macOS). Then the headless smoke.
+#   dromon_*; the TOTP tests use Homebrew's google-authenticator-libpam as dromon_kbd's second
+#   factor. Then the headless smoke.
 # - windows: the test suite, then the Docker sshd fixture tests (askpass, SFTP, transfer I/O, the
 #   app's e2e, transfers and file operations) with Windows' own OpenSSH and the named-pipe
 #   askpass, against the same Linux image: Docker runs in
@@ -109,10 +110,23 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Tests
         run: cargo test --workspace --locked
+      # The native sshd's TOTP second factor for dromon_kbd (tests/docker/README.md): a bottle,
+      # so seconds. Without it the TOTP tests would skip.
+      - name: TOTP PAM module (Homebrew)
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+          HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: "1"
+        run: |
+          brew install google-authenticator-libpam
+          module="$(brew --prefix google-authenticator-libpam)/lib/security/pam_google_authenticator.so"
+          ls -lL "$module"
+          codesign -dv "$module" 2>&1 || true
       # No Docker on Apple-silicon runners (no nested virtualisation): the sshd fixture tests
       # again, against dromon-testkit's native backend (Apple's /usr/sbin/sshd as root through
       # the runner's passwordless sudo, users dromon_*; tests/docker/README.md). The TOTP tests
-      # skip there. Both commands run; the step fails if either does.
+      # run there too: dromon_kbd's PAM service adds the module above to Apple's sshd policy.
+      # Both commands run; the step fails if either does.
       - name: Tests (native sshd)
         env:
           DROMON_FIXTURE_BACKEND: native

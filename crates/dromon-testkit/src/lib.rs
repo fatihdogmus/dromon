@@ -92,7 +92,10 @@ impl Role {
 /// What not every backend offers; asked through [`Fixture::supports`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Feature {
-    /// A TOTP second factor for [`Role::Kbd`] (libpam-google-authenticator): Docker only.
+    /// A TOTP second factor for [`Role::Kbd`] (libpam-google-authenticator, [`totp_now`]): Docker,
+    /// and the native backend where that module is installed (macOS CI: Homebrew's
+    /// `google-authenticator-libpam`; Debian: `libpam-google-authenticator`) and sshd has
+    /// `PAMServiceName` (OpenSSH 9.8+).
     Totp,
 }
 
@@ -235,11 +238,14 @@ impl Fixture {
         }
     }
 
-    /// Whether this backend offers `feature`. When it doesn't, prints
-    /// `skipping <test>: <why> (Docker fixture only)`: the test then returns and passes.
+    /// Whether this fixture offers `feature`. When it doesn't, prints
+    /// `skipping <test>: <why> (Docker fixture only)`: the test then returns and passes. The
+    /// native backend has [`Feature::Totp`] when its start set it up (the start line says which
+    /// module, or why not).
     pub fn supports(&self, feature: Feature, test: &str) -> bool {
         match (feature, &self.server) {
             (Feature::Totp, Server::Docker(_)) => true,
+            (Feature::Totp, Server::Native(sshd)) if sshd.has_totp() => true,
             (Feature::Totp, Server::Native(_)) => {
                 note(format_args!("skipping {test}: the native sshd has no TOTP PAM module (Docker fixture only)"));
                 false

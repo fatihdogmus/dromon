@@ -72,25 +72,39 @@ What it does, once per test binary:
   with `UsePAM yes` (the platform's PAM stack), `AllowUsers` the five, and the Match blocks of
   `sshd_config` here, so every user has the same methods as in Docker. `StrictModes no`: the
   key files are root's but live under world-writable `/var/tmp`.
+- **TOTP** for `dromon_kbd`, as `pam-sshd` gives `kbd`, when a `pam_google_authenticator.so` is
+  installed (macOS: Homebrew's `google-authenticator-libpam`, which the CI job installs; Debian:
+  `libpam-google-authenticator`) and sshd has `PAMServiceName` (OpenSSH 9.8+): the image's
+  `google_authenticator` as `~/.google_authenticator` (mode 400), and a PAM service of its own,
+  `/etc/pam.d/<folder name in lower case>`: a copy of the platform's `/etc/pam.d/sshd` with
+  `auth required <module>` appended (what Homebrew's caveat tells an admin to add). The Match
+  block of `dromon_kbd` selects it with `PAMServiceName` (and `LogLevel DEBUG1`, so `sshd.log`
+  names the service), so `/etc/pam.d/sshd` and the other users are untouched. After start, a
+  probe login as `dromon_kbd` with the password and a code prints the prompts it saw, or, if it
+  fails, the policy, `sshd.log` and on macOS `codesign -dv` of the module and of
+  `sshd`/`sshd-session`/`sshd-auth` and the unified log's PAM and library-validation lines.
+  macOS: `sshd-session` is a platform binary, so the first `dlopen` of the Homebrew module is
+  refused by library validation; Apple's OpenPAM then clears it (`csops(CS_OPS_CLEAR_LV)`,
+  allowed by the `com.apple.private.security.clear-library-validation` entitlement of
+  `sshd-session`) and loads the module. Without a module, `Fixture::supports(Feature::Totp, …)`
+  prints `skipping <test>: the native sshd has no TOTP PAM module (Docker fixture only)` and
+  `keyboard_interactive_password_then_verification_code`,
+  `keyboard_interactive_wrong_code_fails_cleanly` (askpass) and
+  `keyboard_interactive_password_then_code` (app e2e) skip; the start line says why.
 - **Cleanup**: sshd is started by a root `sh` watchdog that checks once a second whether the test
   process still exists; when it is gone (normal exit, panic, `kill -9`) the watchdog stops sshd,
-  `pkill -u`s the fixture users' leftover sessions and deletes the folder. The users and their
-  homes stay. `DROMON_FIXTURE_KEEP=1` skips the watchdog and prints how to log in and clean up.
+  `pkill -u`s the fixture users' leftover sessions and deletes the folder and the kbd PAM
+  service; the next start also deletes services no folder names. The users and their homes
+  stay. `DROMON_FIXTURE_KEEP=1` skips the watchdog and prints how to log in and clean up.
 - **`Fixture::exec`** runs `sudo -n <command>` (as root, like `docker exec`); `kill_sessions` is
   `pkill -u` as in the container; `Fixture::sha1` uses `shasum -a 1` on macOS.
-
-Not available natively: the TOTP second factor (`libpam-google-authenticator`; macOS has no such
-module). Tests that need it ask `Fixture::supports(Feature::Totp, …)`, which prints
-`skipping <test>: the native sshd has no TOTP PAM module (Docker fixture only)`:
-`keyboard_interactive_password_then_verification_code` and
-`keyboard_interactive_wrong_code_fails_cleanly` (askpass) and
-`keyboard_interactive_password_then_code` (app e2e). Everything else runs.
 
 To run it locally, use a throwaway VM or container, never your own machine: it adds users and
 runs a root sshd. A Debian/Ubuntu container works as a stand-in for the macOS runner, with a
 non-root user that has passwordless sudo, `openssh-server`, `openssh-client`, `sudo` and the
-toolchain (plus `libxkbcommon-dev libwayland-dev` for `dromon-app`); give the user the uid that
-owns the checkout so the mounted folder is writable:
+toolchain (plus `libxkbcommon-dev libwayland-dev` for `dromon-app`, and
+`libpam-google-authenticator` for the TOTP tests); give the user the uid that owns the checkout
+so the mounted folder is writable:
 
 ```sh
 docker run --rm -v "$PWD:/src" -w /src \
@@ -99,7 +113,8 @@ docker run --rm -v "$PWD:/src" -w /src \
   cargo test --no-fail-fast -p dromon-testkit -p dromon-ssh -p dromon-sftp -p dromon-transfer
 ```
 
-On a throwaway macOS VM: `CI=1 DROMON_FIXTURE_BACKEND=native DROMON_REQUIRE_DOCKER=1 cargo test …`
+On a throwaway macOS VM: `brew install google-authenticator-libpam` for the TOTP tests, then
+`CI=1 DROMON_FIXTURE_BACKEND=native DROMON_REQUIRE_DOCKER=1 cargo test …`
 as an admin with passwordless sudo. Remove the users afterwards with
 `sudo dscl . -delete /Users/dromon_key; sudo rm -rf /Users/dromon_key` (and the other four), on
 Linux `sudo userdel -r dromon_key`.
