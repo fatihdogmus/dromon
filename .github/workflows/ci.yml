@@ -9,8 +9,9 @@ name: CI
 #   private native sshd instead of Docker: dromon-testkit's native backend
 #   (DROMON_FIXTURE_BACKEND=native) starts Apple's sshd as root through sudo, with test users
 #   dromon_*; the TOTP tests skip (no TOTP PAM module on macOS). Then the headless smoke.
-# - windows: the test suite, then the Docker sshd fixture tests of the library crates with
-#   Windows' own OpenSSH and the named-pipe askpass, against the same Linux image: Docker runs in
+# - windows: the test suite, then the Docker sshd fixture tests (askpass, SFTP, transfer I/O, the
+#   app's e2e, transfers and file operations) with Windows' own OpenSSH and the named-pipe
+#   askpass, against the same Linux image: Docker runs in
 #   WSL2 (Ubuntu 24.04) and answers on tcp://127.0.0.1:2375; the ports its containers publish on
 #   127.0.0.1 reach Windows through WSL's localhost forwarding. Then the headless smoke.
 
@@ -178,14 +179,20 @@ jobs:
             if ((Get-Date) -gt $deadline) { throw 'no Linux Docker on http://127.0.0.1:2375 after 60 s' }
             Start-Sleep -Seconds 2
           }
-      # dromon-app's end-to-end tests are Unix-only for now.
+      # The library crates' fixture tests, then dromon-app's end-to-end tests (the app's service
+      # thread, and in e2e the headless UI without rendering, with dromon.exe as ssh's askpass
+      # helper). Both commands run; the step fails if either does.
       - name: Tests (Docker sshd fixture in WSL2, Windows' OpenSSH)
         env:
           DOCKER_HOST: tcp://127.0.0.1:2375
           # Fail, don't skip, when the sshd fixture can't start.
           DROMON_REQUIRE_DOCKER: "1"
         # --no-fail-fast: one run shows every failing test binary, not just the first.
-        run: cargo test --locked --no-fail-fast -p dromon-testkit -p dromon-ssh -p dromon-sftp -p dromon-transfer
+        run: |
+          status=0
+          cargo test --locked --no-fail-fast -p dromon-testkit -p dromon-ssh -p dromon-sftp -p dromon-transfer || status=1
+          cargo test --locked --no-fail-fast -p dromon-app --test e2e --test transfers_e2e --test fileops_e2e || status=1
+          exit "$status"
       - name: Docker state
         if: failure()
         shell: wsl-bash {0}

@@ -10,8 +10,10 @@
 //!
 //! When the backend can't run every test prints a skip line and passes
 //! (`DROMON_REQUIRE_DOCKER=1` fails).
-
-#![cfg(unix)]
+//!
+//! Windows: the same tests with the inbox `ssh.exe`, against the Docker image in WSL2 (CI); the
+//! key copy gets a current-user-only ACL (`dromon_testkit::copy_private_key`) and the config
+//! names `NUL` for "no file".
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -21,7 +23,7 @@ use std::time::{Duration, Instant};
 use dromon_app::service::{self, Config, Sink};
 use dromon_app::state::{Backend, Command, FileOp, OpId, ServiceEvent};
 use dromon_core::{ConnStatus, Error, HostId, RemotePath};
-use dromon_testkit::{Fixture, Role};
+use dromon_testkit::{Fixture, NULL_DEVICE, Role, copy_private_key};
 
 const HELPER: &str = env!("CARGO_BIN_EXE_dromon");
 const WAIT: Duration = Duration::from_secs(60);
@@ -49,6 +51,8 @@ struct Harness {
     events: mpsc::Receiver<ServiceEvent>,
     /// This test's folder on the server.
     scratch: RemotePath,
+    /// Every connection-log line (ssh's stderr among them) and prompt, for failure messages.
+    log: Vec<String>,
 }
 
 impl Harness {
@@ -75,7 +79,7 @@ impl Harness {
         // `exec` runs as root: the folder goes to the user the app signs in as.
         let make = format!("rm -rf '{0}' && mkdir -p '{0}' && chown {1} '{0}'", scratch.as_str(), fx.owner(Role::Key));
         fx.exec(&["sh", "-c", &make]).unwrap();
-        let mut h = Harness { fx, _dir: dir, backend, events, scratch };
+        let mut h = Harness { fx, _dir: dir, backend, events, scratch, log: Vec::new() };
         if connect {
             h.backend.send(Command::Connect { host: host() });
             h.wait_for("the connection to open", |ev| matches!(ev, ServiceEvent::Opened { .. }).then_some(()));
@@ -90,9 +94,18 @@ impl Harness {
         let deadline = Instant::now() + WAIT;
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
-            let ev = self.events.recv_timeout(left).unwrap_or_else(|_| panic!("timed out waiting for {what}"));
-            if let ServiceEvent::Status { status: ConnStatus::Failed(why), .. } = &ev {
-                panic!("the connection failed: {why}");
+            let ev = self
+                .events
+                .recv_timeout(left)
+                .unwrap_or_else(|_| panic!("timed out waiting for {what}\nconnection log:\n{}", self.log.join("\n")));
+            match &ev {
+                ServiceEvent::Log { host, line } => self.log.push(format!("[{}] {line}", host.0)),
+                // Key auth and accept-new: nothing should ask. Kept for the failure message.
+                ServiceEvent::Prompt(p) => self.log.push(format!("unexpected prompt: {p:?}")),
+                ServiceEvent::Status { status: ConnStatus::Failed(why), .. } => {
+                    panic!("the connection failed: {why}\nconnection log:\n{}", self.log.join("\n"))
+                }
+                _ => {}
             }
             if let Some(found) = pick(&ev) {
                 return found;
@@ -154,11 +167,11 @@ impl Harness {
 
 fn write_ssh_config(fx: &Fixture, dir: &Path) -> PathBuf {
     let key = dir.join("id_ed25519");
-    std::fs::copy(fx.key(), &key).unwrap();
+    copy_private_key(&fx.key(), &key).unwrap();
     let mut config = String::new();
     writeln!(config, "Host fx-key\n    HostName {}\n    Port {}\n    User {}", fx.host(), fx.port(), fx.user(Role::Key)).unwrap();
     writeln!(config, "    IdentityFile {}\n    IdentitiesOnly yes\n    PreferredAuthentications publickey", key.display()).unwrap();
-    writeln!(config, "    UserKnownHostsFile {}\n    GlobalKnownHostsFile /dev/null", dir.join("known_hosts").display()).unwrap();
+    writeln!(config, "    UserKnownHostsFile {}\n    GlobalKnownHostsFile {NULL_DEVICE}", dir.join("known_hosts").display()).unwrap();
     writeln!(config, "    StrictHostKeyChecking accept-new\n    UpdateHostKeys no").unwrap();
     let path = dir.join("ssh_config");
     std::fs::write(&path, config).unwrap();

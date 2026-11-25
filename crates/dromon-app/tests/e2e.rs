@@ -19,8 +19,11 @@
 //!
 //! When the backend can't run every test prints a skip line and passes
 //! (`DROMON_REQUIRE_DOCKER=1` fails). The TOTP test needs the Docker backend.
-
-#![cfg(unix)]
+//!
+//! Windows: the same tests with the inbox `ssh.exe` and the named-pipe askpass, against the
+//! Docker image in WSL2 (CI). The key copies get a current-user-only ACL
+//! (`dromon_testkit::copy_private_key`), the config names `NUL` for "no file", and the host
+//! key's fingerprint is read on the server, not with `ssh-keyscan`.
 
 use std::fmt::Write as _;
 use std::io::Write as _;
@@ -32,7 +35,7 @@ use std::time::{Duration, Instant};
 use dromon_app::service::{self, Config, Sink};
 use dromon_app::state::{App, HostDirectory, ListError, Listing, ServiceEvent, Sheet};
 use dromon_core::{ConnStatus, EntryKind, HostId, HostSource, LinkTarget, PromptKind, RemotePath};
-use dromon_testkit::{Feature, Fixture, PASSPHRASE, PASSWORD, Role, totp_now};
+use dromon_testkit::{Feature, Fixture, NULL_DEVICE, PASSPHRASE, PASSWORD, Role, copy_private_key, totp_now};
 use rune::{Env, Key, KeyEvent, Mods, Runtime};
 
 const HELPER: &str = env!("CARGO_BIN_EXE_dromon");
@@ -343,13 +346,14 @@ fn contains_number(hay: &str, number: &str) -> bool {
 /// The test's ssh config: one alias per fixture user (ssh keeps the first value it reads, so
 /// the per-host lines win), then the isolation settings for all of them.
 fn write_ssh_config(fx: &Fixture, dir: &Path) -> PathBuf {
-    // Copies of the keys in the test's folder (mode kept): a short path, since ssh cuts the
-    // path in its passphrase prompt at 100 bytes.
+    // Copies of the keys in the test's folder (still private: mode 0600, on Windows an ACL for
+    // the current user alone): a short path, since ssh cuts the path in its passphrase prompt
+    // at 100 bytes.
     let key = dir.join("id_ed25519");
     let enc = dir.join("id_ed25519_enc");
-    std::fs::copy(fx.key(), &key).unwrap();
-    std::fs::copy(fx.encrypted_key(), &enc).unwrap();
-    assert!(enc.to_str().unwrap().len() <= 100);
+    copy_private_key(&fx.key(), &key).unwrap();
+    copy_private_key(&fx.encrypted_key(), &enc).unwrap();
+    assert!(enc.to_str().unwrap().len() <= 100, "{}", enc.display());
 
     let port = fx.port();
     let hosts = [
@@ -370,7 +374,7 @@ fn write_ssh_config(fx: &Fixture, dir: &Path) -> PathBuf {
     writeln!(config, "Host *").unwrap();
     for line in [
         format!("UserKnownHostsFile {}", dir.join("known_hosts").display()),
-        "GlobalKnownHostsFile /dev/null".into(),
+        format!("GlobalKnownHostsFile {NULL_DEVICE}"),
         "StrictHostKeyChecking ask".into(),
         "UpdateHostKeys no".into(),
         "HashKnownHosts no".into(),
@@ -385,17 +389,17 @@ fn write_ssh_config(fx: &Fixture, dir: &Path) -> PathBuf {
     path
 }
 
-/// The fixture's host key fingerprint, from `ssh-keyscan` and `ssh-keygen -l`.
-fn fixture_fingerprint(dir: &Path, port: u16) -> String {
-    let scan = std::process::Command::new("ssh-keyscan").args(["-t", "ed25519", "-p", &port.to_string(), "127.0.0.1"]).output().unwrap();
-    assert!(scan.status.success() && !scan.stdout.is_empty(), "{}", String::from_utf8_lossy(&scan.stderr));
-    let file = dir.join("keyscan");
-    std::fs::write(&file, &scan.stdout).unwrap();
-    let out = std::process::Command::new("ssh-keygen").args(["-l", "-E", "sha256", "-f"]).arg(&file).output().unwrap();
-    assert!(out.status.success());
-    let line = String::from_utf8(out.stdout).unwrap();
-    let fp = line.split_whitespace().nth(1).unwrap().to_owned();
-    assert!(fp.starts_with("SHA256:"), "{line}");
+/// The fixture's host key fingerprint, read from the host key itself on the server
+/// (`ssh-keygen -l` there, as `dromon-ssh/tests/askpass_e2e.rs` does). Not `ssh-keyscan` here:
+/// Windows' 9.5 offers a key exchange it can't do (sntrup761x25519) and gives up.
+fn fixture_fingerprint(fx: &Fixture) -> String {
+    let key = fx.host_public_key();
+    let line = fx
+        .exec(&["ssh-keygen", "-l", "-E", "sha256", "-f", &key])
+        .unwrap_or_else(|e| panic!("the fingerprint of the server's host key {key}: {e}"));
+    // `256 SHA256:… root@<host> (ED25519)`
+    let fp = line.split_whitespace().nth(1).unwrap_or_default().to_owned();
+    assert!(fp.starts_with("SHA256:"), "{line:?}");
     fp
 }
 
@@ -427,11 +431,11 @@ fn key_host_trust_list_and_browse() {
     assert_eq!(spec.source, HostSource::SshConfig);
     assert_eq!((spec.user.as_deref(), spec.port), (Some(h.fx.user(Role::Key)), Some(h.fx.port())));
 
-    let expected = fixture_fingerprint(h.dir.path(), h.fx.port());
+    let expected = fixture_fingerprint(h.fx);
     h.connect("fx-key");
     let fingerprint = h.trust_host_key("fx-key");
     assert_eq!(fingerprint, expected, "the sheet shows the server's own fingerprint");
-    h.step(&format!("host-key sheet showed {fingerprint} (= ssh-keyscan), trusted"));
+    h.step(&format!("host-key sheet showed {fingerprint} (= the server's host key), trusted"));
 
     let key_home = h.home(Role::Key);
     let mixed = format!("{key_home}/fixture/mixed");
