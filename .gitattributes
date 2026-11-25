@@ -1,0 +1,11 @@
+# LF everywhere, on every OS: Git for Windows would otherwise check text out as CRLF, which
+# breaks the shell scripts under Git Bash and tests that read docs or fixtures as text.
+# PowerShell and WiX read LF files fine.
+* text=auto eol=lf
+
+# Binary: never touched.
+*.png binary
+*.ico binary
+*.icns binary
+*.ttf binary
+*.otf binary

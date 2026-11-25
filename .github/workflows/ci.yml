@@ -45,7 +45,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev mesa-vulkan-drivers xvfb ffmpeg openssh-client
+            libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev mesa-vulkan-drivers xvfb ffmpeg openssh-client python3-pil
       - name: Rust toolchain
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -56,20 +56,16 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Tests (with the Docker sshd fixture)
         run: cargo test --workspace --locked
+      # Within GOLDEN_TOLERANCE per channel: other Mesa versions round a few pixels differently.
       - name: Goldens unchanged
-        run: |
-          bash scripts/goldens.sh
-          if [ -n "$(git status --porcelain -- tests/goldens)" ]; then
-            git status --short -- tests/goldens
-            echo "::error::Goldens changed. Run scripts/goldens.sh, look at every changed image, and commit the ones you meant."
-            exit 1
-          fi
+        run: bash scripts/goldens.sh --check
       - name: Upload changed goldens
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: goldens-linux
-          path: tests/goldens
+          path: target/goldens
+          if-no-files-found: ignore
           retention-days: 7
       - name: Smoke (headless, window under Xvfb, real connect)
         run: |

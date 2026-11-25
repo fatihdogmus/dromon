@@ -19,7 +19,8 @@ The plan is `.plans/dromon-plan.md`; where implementation stands is `.plans/prog
 cargo test --workspace                     # everything; the sshd tests run when Docker answers
 DROMON_REQUIRE_DOCKER=1 cargo test --workspace   # CI: fail instead of skipping without Docker
 cargo clippy --workspace --all-targets -- -D warnings
-bash scripts/goldens.sh                    # re-render tests/goldens; `git status tests/goldens` must stay clean
+bash scripts/goldens.sh                    # re-render tests/goldens (look at every changed image)
+bash scripts/goldens.sh --check            # CI: render to target/goldens, compare within ±2 per channel
 bash scripts/flows.sh                      # render tests/flows/* to target/flows (strips, trees)
 bash scripts/smoke-app.sh [--window] [--connect]
 bash scripts/repro.sh <issue-number|issue.md>
