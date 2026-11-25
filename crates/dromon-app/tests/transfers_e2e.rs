@@ -4,9 +4,11 @@
 //! Commands go in through the service's channel as the UI sends them; the `Transfers`
 //! snapshots coming back are what the popover would show.
 //!
-//! Each test writes its own ssh config (one key-auth alias, `fx-key`, with a private
-//! `known_hosts` that accepts the fixture's key), downloads into its own temporary folder and
-//! uploads into its own scratch folder on the server (in the key user's home).
+//! Each test writes its own ssh config (key-auth aliases `fx-key` and `fx-key-2` for the same
+//! user, with a private `known_hosts` that accepts the fixture's key), downloads into its own
+//! temporary folder and uploads into its own scratch folder on the server (in the key user's
+//! home). Tests across hosts connect both aliases: two ssh connections, two `HostId`s, one
+//! server.
 //!
 //! When the backend can't run every test prints a skip line and passes
 //! (`DROMON_REQUIRE_DOCKER=1` fails).
@@ -31,6 +33,11 @@ fn host() -> HostId {
     HostId("fx-key".into())
 }
 
+/// A second alias for the same server and user: "another host" with its own connection.
+fn host2() -> HostId {
+    HostId("fx-key-2".into())
+}
+
 #[derive(Clone)]
 struct TestSink(mpsc::Sender<ServiceEvent>);
 
@@ -52,7 +59,13 @@ struct Harness {
 }
 
 impl Harness {
+    /// Connected to `fx-key` only.
     fn new(name: &str) -> Option<Harness> {
+        Harness::connected(name, &[host()])
+    }
+
+    /// Connected to every host in `hosts`.
+    fn connected(name: &str, hosts: &[HostId]) -> Option<Harness> {
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         let fx = rt.block_on(dromon_testkit::fixture(name))?;
         let dir = tempfile::tempdir().unwrap();
@@ -65,7 +78,10 @@ impl Harness {
             verbose: false,
             config_file: Some(config),
             discover: None,
-            hosts: vec![dromon_core::HostSpec::from_config_alias("fx-key")],
+            hosts: vec![
+                dromon_core::HostSpec::from_config_alias("fx-key"),
+                dromon_core::HostSpec::from_config_alias("fx-key-2"),
+            ],
             without_env: vec!["SSH_AUTH_SOCK".into()],
         };
         service::start(commands, TestSink(tx), cfg).expect("start the service thread");
@@ -74,8 +90,10 @@ impl Harness {
         let make = format!("rm -rf '{0}' && mkdir -p '{0}' && chown {1} '{0}'", scratch.as_str(), fx.owner(Role::Key));
         fx.exec(&["sh", "-c", &make]).unwrap();
         let mut h = Harness { fx, dir, backend, events, jobs: Vec::new(), scratch };
-        h.backend.send(Command::Connect { host: host() });
-        h.wait_for("the connection to open", |ev, _| matches!(ev, ServiceEvent::Opened { .. }));
+        for want in hosts {
+            h.backend.send(Command::Connect { host: want.clone() });
+            h.wait_for("the connection to open", |ev, _| matches!(ev, ServiceEvent::Opened { host, .. } if host == want));
+        }
         Some(h)
     }
 
@@ -144,10 +162,12 @@ fn write_ssh_config(fx: &Fixture, dir: &Path) -> PathBuf {
     let key = dir.join("id_ed25519");
     std::fs::copy(fx.key(), &key).unwrap();
     let mut config = String::new();
-    writeln!(config, "Host fx-key\n    HostName {}\n    Port {}\n    User {}", fx.host(), fx.port(), fx.user(Role::Key)).unwrap();
-    writeln!(config, "    IdentityFile {}\n    IdentitiesOnly yes\n    PreferredAuthentications publickey", key.display()).unwrap();
-    writeln!(config, "    UserKnownHostsFile {}\n    GlobalKnownHostsFile /dev/null", dir.join("known_hosts").display()).unwrap();
-    writeln!(config, "    StrictHostKeyChecking accept-new\n    UpdateHostKeys no").unwrap();
+    for alias in ["fx-key", "fx-key-2"] {
+        writeln!(config, "Host {alias}\n    HostName {}\n    Port {}\n    User {}", fx.host(), fx.port(), fx.user(Role::Key)).unwrap();
+        writeln!(config, "    IdentityFile {}\n    IdentitiesOnly yes\n    PreferredAuthentications publickey", key.display()).unwrap();
+        writeln!(config, "    UserKnownHostsFile {}\n    GlobalKnownHostsFile /dev/null", dir.join("known_hosts").display()).unwrap();
+        writeln!(config, "    StrictHostKeyChecking accept-new\n    UpdateHostKeys no").unwrap();
+    }
     let path = dir.join("ssh_config");
     std::fs::write(&path, config).unwrap();
     path
@@ -247,6 +267,134 @@ fn a_dropped_connection_resumes_the_download_where_it_stopped() {
     assert!(before < 64 << 20, "the drop came before the end");
 
     assert_eq!(file_sha1(&into.join("big.bin")).unwrap(), want);
+}
+
+impl Harness {
+    /// Runs `script` on the server with `$D` this test's scratch folder, then hands everything
+    /// in it to the user the app signs in as.
+    fn seed(&self, script: &str) {
+        let d = self.scratch.as_str();
+        self.remote(&format!("D='{d}'; set -e; {script}; chown -R {} \"$D\"", self.fx.owner(Role::Key)));
+    }
+
+    /// A path in the scratch folder.
+    fn at(&self, rel: &str) -> RemotePath {
+        self.scratch.join(rel)
+    }
+
+    /// What `cat` says of scratch paths.
+    fn cat(&self, rels: &[&str]) -> String {
+        let files: Vec<String> = rels.iter().map(|r| format!("'{}'", self.at(r))).collect();
+        self.remote(&format!("cat {}", files.join(" ")))
+    }
+
+    /// Whether a scratch path exists.
+    fn there(&self, rel: &str) -> bool {
+        self.remote(&format!("test -e '{}' && echo yes || echo no", self.at(rel))).trim() == "yes"
+    }
+
+    /// A scratch path's mtime, in seconds (perl's `stat`: the same on Linux and macOS).
+    fn mtime_of(&self, rel: &str) -> i64 {
+        let out = self.remote(&format!("perl -e 'print((stat shift)[9])' '{}'", self.at(rel)));
+        out.trim().parse().unwrap_or_else(|_| panic!("mtime of {rel}: {out:?}"))
+    }
+
+    /// Starts `req` and waits for the new job to finish (or to ask about a clash, with
+    /// `clash`); returns it.
+    fn run(&mut self, req: JobRequest, clash: bool) -> JobView {
+        let before = self.jobs.first().map(|j| j.id);
+        self.transfer(TransferCommand::Start(req));
+        let id = self.newest(before);
+        if clash {
+            self.wait_jobs("the name clash", |jobs| jobs.iter().any(|j| j.id == id && j.conflict.is_some()));
+            return self.job(id);
+        }
+        self.finished(id)
+    }
+}
+
+fn ritem(h: &Harness, rel: &str, kind: EntryKind) -> RemoteItem {
+    RemoteItem { path: h.at(rel), kind, size: 0 }
+}
+
+#[test]
+fn copies_and_moves_on_one_host_keep_bytes_and_dates_and_a_clash_can_replace() {
+    let Some(mut h) = Harness::new("same-host") else { return };
+    h.seed(
+        "mkdir -p \"$D/src/tree/sub\" \"$D/src/tree/empty\" \"$D/dst\"; \
+         printf 'alpha\\n' >\"$D/src/a.txt\"; printf 'bee\\n' >\"$D/src/tree/sub/b.txt\"; \
+         touch -m -d @1600000000 \"$D/src/a.txt\" \"$D/src/tree/sub/b.txt\"",
+    );
+    let into = h.at("dst");
+
+    // Copy (copy-data on the fixture): bytes, mtimes and the empty folder arrive.
+    let items = vec![ritem(&h, "src/a.txt", EntryKind::File), ritem(&h, "src/tree", EntryKind::Dir)];
+    let job = h.run(JobRequest::RemoteCopy { host: host(), items, into: into.clone() }, false);
+    assert_eq!(job.state, TaskState::Done, "{job:#?}");
+    assert_eq!((job.kind, job.files_done, job.reveal.clone()), (JobKind::RemoteCopy, 2, Some(Reveal::Remote(host(), into.join("a.txt")))));
+    assert_eq!(h.cat(&["dst/a.txt", "dst/tree/sub/b.txt"]), "alpha\nbee\n");
+    assert_eq!((h.mtime_of("dst/a.txt"), h.mtime_of("dst/tree/sub/b.txt")), (1_600_000_000, 1_600_000_000));
+    assert!(h.there("dst/tree/empty") && h.there("src/a.txt"), "the empty folder came along; the source stays");
+
+    // A copy into its own folder keeps both, without asking.
+    let job = h.run(JobRequest::RemoteCopy { host: host(), items: vec![ritem(&h, "src/a.txt", EntryKind::File)], into: h.at("src") }, false);
+    assert_eq!((&job.state, job.conflict.as_ref()), (&TaskState::Done, None));
+    assert_eq!(h.cat(&["src/a (1).txt"]), "alpha\n");
+
+    // Move onto the copies: the clash is answered Replace; the file is replaced, the folder merged.
+    h.seed("printf 'new alpha\\n' >\"$D/src/a.txt\"; printf 'cee\\n' >\"$D/src/tree/sub/c.txt\"");
+    let items = vec![ritem(&h, "src/a.txt", EntryKind::File), ritem(&h, "src/tree", EntryKind::Dir)];
+    let job = h.run(JobRequest::Move { host: host(), items, into: into.clone() }, true);
+    let clash = job.conflict.unwrap();
+    assert_eq!((clash.name.as_str(), clash.existing_is_dir, clash.more, job.kind), ("a.txt", false, 1, JobKind::Move));
+    h.transfer(TransferCommand::Resolve { job: job.id, choice: ConflictChoice::Replace, apply_all: true });
+    let job = h.finished(job.id);
+    assert_eq!((&job.state, job.files_done, job.files_total), (&TaskState::Done, 2, 2), "{job:#?}");
+    assert_eq!(h.cat(&["dst/a.txt", "dst/tree/sub/b.txt", "dst/tree/sub/c.txt"]), "new alpha\nbee\ncee\n");
+    assert!(!h.there("src/a.txt") && !h.there("src/tree"), "moved away");
+    assert_eq!(h.remote(&format!("find '{}' -name '*.dromon-part' | wc -l", h.scratch)).trim(), "0");
+
+    // A move into its own folder does nothing.
+    let job = h.run(JobRequest::Move { host: host(), items: vec![ritem(&h, "dst/a.txt", EntryKind::File)], into: into.clone() }, false);
+    assert_eq!((&job.state, job.skipped.as_slice()), (&TaskState::Done, &["a.txt: already there".to_owned()][..]));
+}
+
+#[test]
+fn copies_and_moves_between_two_hosts_stream_through_the_app() {
+    let Some(mut h) = Harness::connected("cross-host", &[host(), host2()]) else { return };
+    h.seed(
+        "mkdir -p \"$D/a/dir/inner\" \"$D/a/gone/empty\" \"$D/b\"; head -c 3145728 /dev/urandom >\"$D/a/x.bin\"; \
+         printf 'one\\n' >\"$D/a/dir/inner/one.txt\"; printf 'two\\n' >\"$D/a/gone/two.txt\"; \
+         touch -m -d @1600000000 \"$D/a/x.bin\"",
+    );
+    let want = h.fx.sha1(h.at("a/x.bin").as_str()).unwrap();
+    let into = h.at("b");
+
+    // Copy from fx-key to fx-key-2: listed under the destination host.
+    let items = vec![ritem(&h, "a/x.bin", EntryKind::File), ritem(&h, "a/dir", EntryKind::Dir)];
+    let job = h.run(JobRequest::CrossHostCopy { from: host(), items, to: host2(), into: into.clone() }, false);
+    assert_eq!(job.state, TaskState::Done, "{job:#?}");
+    assert_eq!((job.kind, &job.host, job.files_done), (JobKind::CrossHostCopy, &host2(), 2));
+    assert_eq!(job.reveal, Some(Reveal::Remote(host2(), into.join("x.bin"))));
+    assert_eq!(h.fx.sha1(h.at("b/x.bin").as_str()).unwrap(), want);
+    assert_eq!(h.mtime_of("b/x.bin"), 1_600_000_000);
+    assert_eq!(h.cat(&["b/dir/inner/one.txt"]), "one\n");
+    assert!(h.there("a/x.bin"), "a copy keeps the source");
+
+    // Move: each file checked on the destination, then deleted; the emptied folders go too.
+    let job = h.run(JobRequest::CrossHostMove { from: host(), items: vec![ritem(&h, "a/gone", EntryKind::Dir)], to: host2(), into: into.clone() }, false);
+    assert_eq!((&job.state, job.kind), (&TaskState::Done, JobKind::CrossHostMove), "{job:#?}");
+    assert_eq!(h.cat(&["b/gone/two.txt"]), "two\n");
+    assert!(h.there("b/gone/empty"));
+    assert!(!h.there("a/gone"), "the source folder is gone with its empty subfolder");
+
+    // Moving x.bin again clashes with the copy; Keep both lands it beside, then the source goes.
+    let job = h.run(JobRequest::CrossHostMove { from: host(), items: vec![ritem(&h, "a/x.bin", EntryKind::File)], to: host2(), into }, true);
+    h.transfer(TransferCommand::Resolve { job: job.id, choice: ConflictChoice::KeepBoth, apply_all: false });
+    assert_eq!(h.finished(job.id).state, TaskState::Done);
+    assert_eq!(h.fx.sha1(h.at("b/x (1).bin").as_str()).unwrap(), want);
+    assert!(!h.there("a/x.bin"));
+    assert_eq!(h.remote(&format!("find '{}' -name '*.dromon-part' | wc -l", h.scratch)).trim(), "0");
 }
 
 fn walk(dir: &Path) -> Vec<PathBuf> {

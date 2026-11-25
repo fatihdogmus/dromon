@@ -7,6 +7,8 @@ pub enum JobKind {
     Upload,
     /// Copy within one host.
     RemoteCopy,
+    /// Move within one host (a rename).
+    Move,
     CrossHostCopy,
     CrossHostMove,
 }
@@ -22,17 +24,17 @@ pub enum Direction {
 
 impl JobKind {
     /// Direction of the job: `Download` → `Download`, `Upload` → `Upload`, everything else
-    /// (`RemoteCopy`, `CrossHostCopy`, `CrossHostMove`) → `Remote`.
+    /// (`RemoteCopy`, `Move`, `CrossHostCopy`, `CrossHostMove`) → `Remote`.
     pub fn direction(self) -> Direction {
         match self {
             Self::Download => Direction::Download,
             Self::Upload => Direction::Upload,
-            Self::RemoteCopy | Self::CrossHostCopy | Self::CrossHostMove => Direction::Remote,
+            Self::RemoteCopy | Self::Move | Self::CrossHostCopy | Self::CrossHostMove => Direction::Remote,
         }
     }
 
     /// Whether the job is listed under the popover's **Uploads** tab. The popover only has
-    /// Downloads and Uploads tabs; every job that writes to a remote (Upload, RemoteCopy,
+    /// Downloads and Uploads tabs; every job that writes to a remote (Upload, RemoteCopy, Move,
     /// CrossHostCopy, CrossHostMove) goes under Uploads, and only Download under Downloads.
     pub fn in_uploads_tab(self) -> bool {
         !matches!(self, Self::Download)
@@ -295,6 +297,7 @@ mod tests {
             (JobKind::Download, Direction::Download, false),
             (JobKind::Upload, Direction::Upload, true),
             (JobKind::RemoteCopy, Direction::Remote, true),
+            (JobKind::Move, Direction::Remote, true),
             (JobKind::CrossHostCopy, Direction::Remote, true),
             (JobKind::CrossHostMove, Direction::Remote, true),
         ];

@@ -233,7 +233,7 @@ async fn download_a_file_keeps_bytes_and_mtime() {
     let link = tmp.path().join("link-file");
     let plan = the_plan(scan_remote(s, &p(&format!("{mixed}/link-file")), &link, |_| {}).await.unwrap());
     assert!(matches!(plan, FilePlan::Download { size: 100, mtime: Some(1_577_934_245), .. }));
-    download(s, &plan, CopyOptions { in_flight: 1 }, |_| {}).await.unwrap();
+    download(s, &plan, CopyOptions { in_flight: 1, ..CopyOptions::default() }, |_| {}).await.unwrap();
     assert_eq!(std::fs::read(&link).unwrap(), vec![0u8; 100]);
 
     // Wrong variant: a programming error, not a panic.
@@ -273,7 +273,7 @@ async fn download_mixed_folder_recursively() {
         .iter()
         .map(|f| match f {
             FilePlan::Download { src, .. } => src.as_str().strip_prefix(&format!("{mixed}/")).unwrap().to_owned(),
-            FilePlan::Upload { .. } => panic!("an upload plan in a remote scan"),
+            other => panic!("not a download plan in a remote scan: {other:?}"),
         })
         .collect();
     assert_eq!(srcs, want_files);

@@ -27,7 +27,7 @@ fn uploads(scan: &Scan) -> Vec<(PathBuf, String, u64)> {
         .iter()
         .map(|f| match f {
             FilePlan::Upload { src, dst, size, .. } => (src.clone(), dst.to_string(), *size),
-            FilePlan::Download { .. } => panic!("a download plan in a local scan"),
+            other => panic!("not an upload plan in a local scan: {other:?}"),
         })
         .collect()
 }

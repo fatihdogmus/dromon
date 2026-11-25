@@ -123,12 +123,13 @@ async fn read_full(file: &mut File, buf: &mut [u8]) -> std::io::Result<usize> {
     Ok(filled)
 }
 
-/// Renames the finished part into place and returns where it landed.
+/// Renames the finished part into place and returns where it landed (uploads and remote
+/// copies).
 ///
 /// - `overwrite`: `posix-rename` replaces `dst` atomically; without it, `dst` is removed first.
 /// - otherwise: a free name when `dst` is taken now; if something appears at `dst` between that
 ///   check and the rename, a free name is picked once more.
-async fn finish(sftp: &Sftp, part: &RemotePath, dst: &RemotePath, overwrite: bool) -> Result<RemotePath> {
+pub(super) async fn finish(sftp: &Sftp, part: &RemotePath, dst: &RemotePath, overwrite: bool) -> Result<RemotePath> {
     let (Some(folder), Some(name)) = (dst.parent(), dst.file_name()) else {
         return Err(Error::Other(format!("Can't upload to {dst}")));
     };

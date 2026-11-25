@@ -179,6 +179,173 @@ fn the_same_commands_give_the_same_events() {
     assert_eq!(run(), run());
 }
 
+fn nas() -> HostId {
+    HostId("nas".into())
+}
+
+fn ritem(path: &str, kind: EntryKind) -> RemoteItem {
+    RemoteItem { path: RemotePath::new(path), kind, size: if kind == EntryKind::File { 14812 } else { 4096 } }
+}
+
+const RELEASE: &str = "/var/www/site/releases/20261125-1348";
+const UPLOADS: &str = "/var/www/site/uploads";
+
+/// The entries of `path` on `host` as a fresh listing gives them.
+fn entries(b: &mut FixtureBackend, host: HostId, path: &str) -> Vec<dromon_core::Entry> {
+    let evs = b.send(Command::List { host, path: RemotePath::new(path) });
+    let mut out = Vec::new();
+    for e in evs {
+        match e {
+            ServiceEvent::ListingPage { entries, first, .. } => {
+                if first {
+                    out.clear();
+                }
+                out.extend(entries);
+            }
+            ServiceEvent::ListFailed { error, .. } => panic!("{path}: {error}"),
+            _ => {}
+        }
+    }
+    out
+}
+
+fn names(b: &mut FixtureBackend, host: HostId, path: &str) -> Vec<String> {
+    let mut n: Vec<String> = entries(b, host, path).into_iter().map(|e| e.name).collect();
+    n.sort();
+    n
+}
+
+fn start(b: &mut FixtureBackend, req: JobRequest) -> JobView {
+    jobs(&send(b, TransferCommand::Start(req))).remove(0)
+}
+
+#[test]
+fn a_copy_into_its_own_folder_keeps_both_with_the_same_size_and_date() {
+    let mut b = connected();
+    let req = JobRequest::RemoteCopy { host: prod(), items: vec![ritem("/var/www/site/index.html", EntryKind::File)], into: site() };
+    let evs = send(&mut b, TransferCommand::Start(req));
+    let j = jobs(&evs).remove(0);
+    assert_eq!((j.kind, &j.state, j.conflict.as_ref()), (JobKind::RemoteCopy, &TaskState::Done, None), "no question asked");
+    assert_eq!(j.reveal, Some(Reveal::Remote(prod(), site().join("index (1).html"))));
+    let names = listed(&evs, SITE).expect("the site is on screen, so it lists again");
+    assert!(names.contains(&"index.html".to_owned()) && names.contains(&"index (1).html".to_owned()), "{names:?}");
+    let all = entries(&mut b, prod(), SITE);
+    let find = |n: &str| all.iter().find(|e| e.name == n).cloned().unwrap();
+    assert_eq!((find("index (1).html").size, find("index (1).html").mtime), (find("index.html").size, find("index.html").mtime));
+}
+
+#[test]
+fn a_folder_copy_lands_with_its_tree_and_a_clash_asks() {
+    let mut b = connected();
+    let req = JobRequest::RemoteCopy { host: prod(), items: vec![ritem(RELEASE, EntryKind::Dir)], into: RemotePath::new(UPLOADS) };
+    let j = start(&mut b, req.clone());
+    assert_eq!((&j.state, j.files_total), (&TaskState::Done, 3));
+    assert_eq!(names(&mut b, prod(), UPLOADS), ["20261125-1348"]);
+    assert_eq!(names(&mut b, prod(), &format!("{UPLOADS}/20261125-1348")), ["app.min.js", "assets", "index.html", "package.json"]);
+    assert_eq!(names(&mut b, prod(), &format!("{UPLOADS}/20261125-1348/assets")), Vec::<String>::new());
+    assert_eq!(names(&mut b, prod(), RELEASE).len(), 4, "the original stays");
+
+    // Again: the folder is there now.
+    let j = start(&mut b, req);
+    assert_eq!(j.conflict, Some(ConflictView { name: "20261125-1348".into(), folder: RemotePath::new(UPLOADS), existing_is_dir: true, more: 0 }));
+    let j = jobs(&send(&mut b, TransferCommand::Resolve { job: j.id, choice: ConflictChoice::Replace, apply_all: false })).remove(0);
+    assert_eq!(j.state, TaskState::Done);
+    assert_eq!(names(&mut b, prod(), &format!("{UPLOADS}/20261125-1348")).len(), 4, "merged, nothing doubled");
+}
+
+#[test]
+fn a_move_takes_the_tree_along_and_replace_merges() {
+    let mut b = connected();
+    // A copy first, so the move clashes with it.
+    let copy = JobRequest::RemoteCopy { host: prod(), items: vec![ritem(RELEASE, EntryKind::Dir)], into: RemotePath::new(UPLOADS) };
+    start(&mut b, copy);
+    let mv = JobRequest::Move {
+        host: prod(),
+        items: vec![ritem(RELEASE, EntryKind::Dir), ritem("/var/www/site/robots.txt", EntryKind::File)],
+        into: RemotePath::new(UPLOADS),
+    };
+    let j = start(&mut b, mv);
+    assert_eq!(j.kind, JobKind::Move);
+    assert_eq!(j.conflict.as_ref().map(|c| (c.name.as_str(), c.existing_is_dir)), Some(("20261125-1348", true)));
+    let evs = send(&mut b, TransferCommand::Resolve { job: j.id, choice: ConflictChoice::Replace, apply_all: false });
+    let j = jobs(&evs).remove(0);
+    assert_eq!((&j.state, j.files_done, j.files_total), (&TaskState::Done, 2, 2), "one file per item");
+    assert_eq!(names(&mut b, prod(), UPLOADS), ["20261125-1348", "robots.txt"]);
+    assert_eq!(names(&mut b, prod(), &format!("{UPLOADS}/20261125-1348")), ["app.min.js", "assets", "index.html", "package.json"]);
+    assert_eq!(names(&mut b, prod(), "/var/www/site/releases"), ["20261120-1730", "20261124-0912"]);
+    // The site on screen lost robots.txt and listed again.
+    let on_screen = listed(&evs, SITE).expect("relisted");
+    assert!(!on_screen.contains(&"robots.txt".to_owned()));
+    let later = b.send(Command::List { host: prod(), path: RemotePath::new(RELEASE) });
+    assert!(later.iter().any(|e| matches!(e, ServiceEvent::ListFailed { .. })), "the old folder is gone");
+}
+
+#[test]
+fn own_folder_rules_skip_a_move_and_fail_a_folder_into_itself() {
+    let mut b = connected();
+    let here = JobRequest::Move { host: prod(), items: vec![ritem("/var/www/site/index.html", EntryKind::File)], into: site() };
+    let j = start(&mut b, here);
+    assert_eq!((&j.state, j.skipped.as_slice()), (&TaskState::Done, &["index.html: already there".to_owned()][..]));
+    let inside = JobRequest::Move { host: prod(), items: vec![ritem(SITE, EntryKind::Dir)], into: RemotePath::new(UPLOADS) };
+    let j = start(&mut b, inside);
+    assert_eq!(j.state, TaskState::Failed { error: "site: can't move a folder into itself".into() });
+    assert!(names(&mut b, prod(), SITE).contains(&"uploads".to_owned()), "nothing moved");
+}
+
+#[test]
+fn copies_and_moves_between_two_hosts_wait_for_both() {
+    let mut b = connected();
+    let copy = JobRequest::CrossHostCopy {
+        from: prod(),
+        items: vec![ritem("/var/www/site/index.html", EntryKind::File)],
+        to: nas(),
+        into: RemotePath::new("/volume1"),
+    };
+    let j = start(&mut b, copy);
+    assert_eq!((&j.state, j.waiting_for_connection, &j.host), (&TaskState::Queued, true, &nas()), "nas isn't connected");
+    b.send(Command::Connect { host: nas() });
+    let j = jobs(&send(&mut b, TransferCommand::ClearFinished)).remove(0);
+    assert_eq!((&j.state, j.kind), (&TaskState::Done, JobKind::CrossHostCopy));
+    assert_eq!(j.reveal, Some(Reveal::Remote(nas(), RemotePath::new("/volume1/index.html"))));
+    assert!(names(&mut b, nas(), "/volume1").contains(&"index.html".to_owned()));
+    assert!(names(&mut b, prod(), SITE).contains(&"index.html".to_owned()), "a copy keeps the source");
+
+    // A move: copied file by file, each source deleted, the emptied folders tidied away.
+    let mv = JobRequest::CrossHostMove { from: prod(), items: vec![ritem(RELEASE, EntryKind::Dir)], to: nas(), into: RemotePath::new("/volume1") };
+    let j = start(&mut b, mv);
+    assert_eq!((&j.state, j.files_total, j.kind), (&TaskState::Done, 3, JobKind::CrossHostMove));
+    assert_eq!(names(&mut b, nas(), "/volume1/20261125-1348"), ["app.min.js", "assets", "index.html", "package.json"]);
+    assert_eq!(names(&mut b, prod(), "/var/www/site/releases"), ["20261120-1730", "20261124-0912"]);
+
+    // A clash on the destination asks, as for uploads.
+    let again = JobRequest::CrossHostMove {
+        from: prod(),
+        items: vec![ritem("/var/www/site/index.html", EntryKind::File)],
+        to: nas(),
+        into: RemotePath::new("/volume1"),
+    };
+    let j = start(&mut b, again);
+    assert_eq!(j.conflict.as_ref().map(|c| c.name.as_str()), Some("index.html"));
+    let j = jobs(&send(&mut b, TransferCommand::Resolve { job: j.id, choice: ConflictChoice::KeepBoth, apply_all: false })).remove(0);
+    assert_eq!(j.state, TaskState::Done);
+    assert!(names(&mut b, nas(), "/volume1").contains(&"index (1).html".to_owned()));
+    assert!(!names(&mut b, prod(), SITE).contains(&"index.html".to_owned()), "moved away");
+}
+
+#[test]
+fn copies_and_moves_are_deterministic() {
+    let run = || {
+        let mut b = connected();
+        b.send(Command::Connect { host: nas() });
+        let mut all = send(&mut b, TransferCommand::Start(JobRequest::RemoteCopy { host: prod(), items: vec![ritem(RELEASE, EntryKind::Dir)], into: site() }));
+        let mv = JobRequest::CrossHostMove { from: prod(), items: vec![ritem(RELEASE, EntryKind::Dir)], to: nas(), into: RemotePath::new("/volume1") };
+        all.extend(send(&mut b, TransferCommand::Start(mv)));
+        all.extend(b.send(Command::List { host: nas(), path: RemotePath::new("/volume1/20261125-1348") }));
+        all
+    };
+    assert_eq!(run(), run());
+}
+
 const WITH_JOBS: &str = r#"{"version": 1, "now": "2026-11-25T14:00:00Z",
     "hosts": [{"alias": "prod", "source": "ssh-config"}],
     "servers": {"prod": {"home": "/srv"}},

@@ -1,24 +1,31 @@
-//! Scans and single-file copies between the local disk and an SFTP server: what the transfer
-//! engine runs inside its tokio tasks (`.plans/dromon-plan.md` §3.5, §3.6, §4.6).
+//! Scans, single-file copies and moves between the local disk and SFTP servers: what the
+//! transfer engine runs inside its tokio tasks (`.plans/dromon-plan.md` §3.5–§3.7, §4.6).
 //!
-//! - Scans ([`scan_remote`], [`scan_local`]) walk one picked item depth first and turn it into
-//!   folders to create, files to copy and what was left out (links to folders, special files,
-//!   unreadable folders), see `scan`.
-//! - Copies ([`download`], [`upload`]) write a part file next to the destination, keep
-//!   [`CopyOptions::in_flight`] requests outstanding, preserve the mtime and rename the part
-//!   into place once complete, see `download` and `upload`.
+//! - Scans ([`scan_remote`], [`scan_remote_copy`], [`scan_local`]) walk one picked item depth
+//!   first and turn it into folders to create, files to copy and what was left out (links to
+//!   folders, special files, unreadable folders), see `scan`.
+//! - Copies ([`download`], [`upload`], [`copy_remote`], [`copy_between`]) write a part file
+//!   next to the destination, keep [`CopyOptions::in_flight`] requests outstanding (or let the
+//!   server copy with `copy-data`), preserve the mtime and rename the part into place once
+//!   complete, see `download`, `upload` and `copy`.
+//! - Moves: [`move_remote`] renames on one host (merging folders on Replace); [`move_between`]
+//!   copies to another host, checks the copy and only then deletes the source;
+//!   [`remove_empty_dirs`] tidies the source folders afterwards, see `moves`.
 //!
 //! **Cancel safety.** The engine pauses or cancels a copy by dropping its future. At every await
 //! point the destination name holds either nothing of ours or the finished file: everything in
 //! between lives in the part file. Bytes are appended to the part strictly in order, so its
 //! length is always a verified prefix of the source and the next call resumes from it (when the
-//! source still has the planned size and mtime). [`remove_part`] discards it.
+//! source still has the planned size and mtime). [`remove_part`] discards it. A move between
+//! hosts deletes its source only after the finished copy was checked.
 //!
 //! Local errors become [`Error::Io`] with the path and the OS message ("Couldn't write
 //! /x/y: No space left on device"); remote errors keep `dromon-sftp`'s mapping, where
 //! [`Error::ConnectionLost`] means "interrupted, resume later".
 
+mod copy;
 mod download;
+mod moves;
 mod scan;
 mod upload;
 
@@ -31,20 +38,26 @@ use dromon_sftp::Sftp;
 
 use crate::{DirPlan, FilePlan, download_part_name, unique_name, upload_part_name};
 
+pub use self::copy::{Copied, copy_between, copy_remote, delete_verified, move_between};
 pub use self::download::download;
-pub use self::scan::{scan_local, scan_remote};
+pub use self::moves::{move_remote, remove_empty_dirs};
+pub use self::scan::{scan_local, scan_remote, scan_remote_copy};
 pub use self::upload::upload;
 
 /// How a single file is copied.
 #[derive(Clone, Copy, Debug)]
 pub struct CopyOptions {
-    /// Read (download) or write (upload) requests kept outstanding per file.
+    /// Read (download), write (upload) or read and write (remote copy) requests kept
+    /// outstanding per file.
     pub in_flight: usize,
+    /// A same-host copy lets the server copy (`copy-data`) when it offers it. `false` streams it
+    /// through the app (for tests).
+    pub server_copy: bool,
 }
 
 impl Default for CopyOptions {
     fn default() -> Self {
-        CopyOptions { in_flight: 16 }
+        CopyOptions { in_flight: 16, server_copy: true }
     }
 }
 
@@ -81,7 +94,8 @@ pub async fn create_dirs(sftp: &Sftp, dirs: &[DirPlan]) -> Result<()> {
     Ok(())
 }
 
-/// Deletes a plan's part file if present (on cancel). Best effort: errors are ignored.
+/// Deletes a plan's part file if present (on cancel). Best effort: errors are ignored. `sftp`
+/// is the session of the host the plan writes to (a copy's destination); a move has none.
 pub async fn remove_part(sftp: &Sftp, plan: &FilePlan) {
     match plan {
         FilePlan::Download { dst, .. } => {
@@ -89,11 +103,12 @@ pub async fn remove_part(sftp: &Sftp, plan: &FilePlan) {
                 let _ = tokio::fs::remove_file(part).await;
             }
         }
-        FilePlan::Upload { dst, .. } => {
+        FilePlan::Upload { dst, .. } | FilePlan::Copy { dst, .. } => {
             if let Some(part) = upload::part_path(dst) {
                 let _ = sftp.remove_file(&part).await;
             }
         }
+        FilePlan::Move { .. } => {}
     }
 }
 

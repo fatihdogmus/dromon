@@ -1,10 +1,11 @@
 //! The types every part of the transfer engine shares: what the user asks for
 //! ([`JobRequest`]), one file's copy ([`FilePlan`]), what a scan finds ([`Scan`]), the answer to
-//! an upload name clash ([`ConflictChoice`]) and what the UI shows of a job ([`JobView`]).
+//! a name clash at a remote destination ([`ConflictChoice`]) and what the UI shows of a job
+//! ([`JobView`]).
 //!
 //! The engine (`.plans/dromon-plan.md` §4.6) is three parts:
 //! - `queue`: the pure model of every job and file, with the per-host scheduler;
-//! - `io`: scans and file copies over SFTP and the local disk (part files, resume, mtime);
+//! - `io`: scans, file copies and moves over SFTP and the local disk (part files, resume, mtime);
 //! - the engine task that feeds the queue's decisions to `io` and `io`'s results back.
 
 use std::path::PathBuf;
@@ -30,13 +31,21 @@ pub struct RemoteItem {
     pub size: u64,
 }
 
-/// What the user asked for. Only downloads and uploads in M2; copies and moves come with M3.
+/// What the user asked for (`.plans/dromon-plan.md` §3.5–§3.7).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum JobRequest {
     /// Download remote files and folders (recursively) into a local folder.
     Download { host: HostId, items: Vec<RemoteItem>, into: PathBuf },
     /// Upload local files and folders (recursively) into a remote folder.
     Upload { host: HostId, items: Vec<PathBuf>, into: RemotePath },
+    /// Copy remote items into a folder on the same host: server-side `copy-data` when the server offers it, else streamed through the app.
+    RemoteCopy { host: HostId, items: Vec<RemoteItem>, into: RemotePath },
+    /// Move remote items into a folder on the same host with `posix-rename` (nothing is copied).
+    Move { host: HostId, items: Vec<RemoteItem>, into: RemotePath },
+    /// Copy remote items to a folder on another host, streamed through the app.
+    CrossHostCopy { from: HostId, items: Vec<RemoteItem>, to: HostId, into: RemotePath },
+    /// As CrossHostCopy, then each file's size is checked on `to` and the source deleted (folders once empty).
+    CrossHostMove { from: HostId, items: Vec<RemoteItem>, to: HostId, into: RemotePath },
 }
 
 impl JobRequest {
@@ -44,20 +53,73 @@ impl JobRequest {
         match self {
             JobRequest::Download { .. } => JobKind::Download,
             JobRequest::Upload { .. } => JobKind::Upload,
+            JobRequest::RemoteCopy { .. } => JobKind::RemoteCopy,
+            JobRequest::Move { .. } => JobKind::Move,
+            JobRequest::CrossHostCopy { .. } => JobKind::CrossHostCopy,
+            JobRequest::CrossHostMove { .. } => JobKind::CrossHostMove,
         }
     }
 
+    /// The host the job is listed under: its only host, or the destination (`to`) of a
+    /// cross-host job.
     pub fn host(&self) -> &HostId {
         match self {
-            JobRequest::Download { host, .. } | JobRequest::Upload { host, .. } => host,
+            JobRequest::Download { host, .. }
+            | JobRequest::Upload { host, .. }
+            | JobRequest::RemoteCopy { host, .. }
+            | JobRequest::Move { host, .. } => host,
+            JobRequest::CrossHostCopy { to, .. } | JobRequest::CrossHostMove { to, .. } => to,
+        }
+    }
+
+    /// Every host the job talks to, the source first: one for most jobs, `[from, to]` for a
+    /// cross-host one (one when both are the same host).
+    pub fn hosts(&self) -> Vec<&HostId> {
+        match self {
+            JobRequest::CrossHostCopy { from, to, .. } | JobRequest::CrossHostMove { from, to, .. } if from != to => {
+                vec![from, to]
+            }
+            _ => vec![self.host()],
+        }
+    }
+
+    /// The host the items are read from (the only host, or `from`).
+    pub fn source_host(&self) -> &HostId {
+        match self {
+            JobRequest::CrossHostCopy { from, .. } | JobRequest::CrossHostMove { from, .. } => from,
+            _ => self.host(),
         }
     }
 
     /// How many top-level items the user picked.
     pub fn item_count(&self) -> usize {
         match self {
-            JobRequest::Download { items, .. } => items.len(),
             JobRequest::Upload { items, .. } => items.len(),
+            _ => self.remote_items().map_or(0, <[RemoteItem]>::len),
+        }
+    }
+
+    /// The picked remote items: everything but an upload's.
+    pub fn remote_items(&self) -> Option<&[RemoteItem]> {
+        match self {
+            JobRequest::Download { items, .. }
+            | JobRequest::RemoteCopy { items, .. }
+            | JobRequest::Move { items, .. }
+            | JobRequest::CrossHostCopy { items, .. }
+            | JobRequest::CrossHostMove { items, .. } => Some(items),
+            JobRequest::Upload { .. } => None,
+        }
+    }
+
+    /// The remote folder the items go into: everything but a download's.
+    pub fn remote_into(&self) -> Option<&RemotePath> {
+        match self {
+            JobRequest::Upload { into, .. }
+            | JobRequest::RemoteCopy { into, .. }
+            | JobRequest::Move { into, .. }
+            | JobRequest::CrossHostCopy { into, .. }
+            | JobRequest::CrossHostMove { into, .. } => Some(into),
+            JobRequest::Download { .. } => None,
         }
     }
 }
@@ -86,19 +148,31 @@ pub enum FilePlan {
         /// appeared at `dst` since the scan gets a free name instead.
         overwrite: bool,
     },
+    /// RemoteCopy, CrossHostCopy and CrossHostMove: one remote file to a remote path (on the
+    /// same or the destination host), through the part file next to `dst`
+    /// ([`crate::upload_part_name`]). `overwrite` as for uploads.
+    Copy { src: RemotePath, dst: RemotePath, size: u64, mtime: Option<i64>, overwrite: bool },
+    /// Move (same host): one picked item, file or folder, renamed to `dst` as a whole.
+    /// `overwrite` = the user chose Replace: a file is replaced, a folder merged.
+    Move { src: RemotePath, dst: RemotePath, size: u64, overwrite: bool },
 }
 
 impl FilePlan {
     pub fn size(&self) -> u64 {
         match self {
-            FilePlan::Download { size, .. } | FilePlan::Upload { size, .. } => *size,
+            FilePlan::Download { size, .. }
+            | FilePlan::Upload { size, .. }
+            | FilePlan::Copy { size, .. }
+            | FilePlan::Move { size, .. } => *size,
         }
     }
 
     /// The file's name, for the UI and error messages.
     pub fn name(&self) -> String {
         match self {
-            FilePlan::Download { src, .. } => src.file_name().unwrap_or("/").to_owned(),
+            FilePlan::Download { src, .. } | FilePlan::Copy { src, .. } | FilePlan::Move { src, .. } => {
+                src.file_name().unwrap_or("/").to_owned()
+            }
             FilePlan::Upload { src, .. } => src.file_name().map_or_else(|| src.display().to_string(), |n| n.to_string_lossy().into_owned()),
         }
     }
@@ -122,7 +196,7 @@ pub struct Scan {
     pub skipped: Vec<String>,
 }
 
-/// The user's answer to "`name` already exists in `folder`" for an upload.
+/// The user's answer to "`name` already exists in `folder`" for an upload, copy or move.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConflictChoice {
     /// Overwrite (a folder is merged: same-named files inside are overwritten).
@@ -151,6 +225,7 @@ pub struct ConflictView {
 pub struct JobView {
     pub id: JobId,
     pub kind: JobKind,
+    /// [`JobRequest::host`]: the destination host of a cross-host job.
     pub host: HostId,
     /// "report.pdf", "photos", or "3 items".
     pub title: String,
@@ -167,8 +242,8 @@ pub struct JobView {
     pub waiting_for_connection: bool,
     /// Set while the job waits for the user to settle a name clash.
     pub conflict: Option<ConflictView>,
-    /// Where the result is, for "Show in Finder" (download) or the folder (upload): the
-    /// first top-level item's final path.
+    /// Where the result is, for "Show in Finder" (download) or the folder (upload, copy, move:
+    /// on the destination host): the first top-level item's final path.
     pub reveal: Option<Reveal>,
     /// Files that failed, with their errors (the job is `Failed` once nothing else is left).
     pub errors: Vec<String>,

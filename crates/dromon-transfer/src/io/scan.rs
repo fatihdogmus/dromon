@@ -1,5 +1,5 @@
 //! Recursive scans: one picked item becomes folders to create, files to copy and what was left
-//! out, with the same rules on both sides:
+//! out, with the same rules on both sides (and for remote-to-remote copies):
 //!
 //! - depth first, children in natural name order, a folder listed in `dirs` before its
 //!   contents (the item itself first when it is a folder);
@@ -41,6 +41,30 @@ pub async fn scan_remote(
     sftp: &Sftp,
     src: &RemotePath,
     dst: &Path,
+    found: impl FnMut(u64) + Send,
+) -> Result<Scan> {
+    walk_remote(sftp, src, Target::Local(dst.to_owned()), false, found).await
+}
+
+/// Recursively plans copying `src` (as [`scan_remote`]: same order, same skip rules) to `dst`,
+/// the item's final remote root on the same or another host; `overwrite` goes into each
+/// [`FilePlan::Copy`]. Only `sftp`, the source's session, is used: the folders in
+/// [`Scan::dirs`] are [`DirPlan::Remote`] paths on the destination, created afterwards.
+pub async fn scan_remote_copy(
+    sftp: &Sftp,
+    src: &RemotePath,
+    dst: &RemotePath,
+    overwrite: bool,
+    found: impl FnMut(u64) + Send,
+) -> Result<Scan> {
+    walk_remote(sftp, src, Target::Remote(dst.clone()), overwrite, found).await
+}
+
+async fn walk_remote(
+    sftp: &Sftp,
+    src: &RemotePath,
+    dst: Target,
+    overwrite: bool,
     mut found: impl FnMut(u64) + Send,
 ) -> Result<Scan> {
     let top = sftp.stat(src).await?;
@@ -49,14 +73,15 @@ pub async fn scan_remote(
         true
     };
     let mut walk = Walk::new(&mut notify);
+    walk.overwrite = overwrite;
     let root_rel = src.file_name().unwrap_or("/").to_owned();
     match top.kind {
-        EntryKind::File => walk.plan_download(src.clone(), dst.to_owned(), &top),
+        EntryKind::File => walk.plan_remote(src.clone(), dst, &top),
         EntryKind::Dir => {
             let entries = sftp.list(src).await?;
-            walk.scan.dirs.push(DirPlan::Local(dst.to_owned()));
+            walk.scan.dirs.push(dst.dir());
             let mut stack = Vec::new();
-            push_remote(&mut stack, entries, src, dst, &root_rel);
+            push_remote(&mut stack, entries, src, &dst, &root_rel);
             while let Some(item) = stack.pop() {
                 walk_remote_item(sftp, &mut walk, &mut stack, item).await?;
             }
@@ -66,11 +91,34 @@ pub async fn scan_remote(
     Ok(walk.finish())
 }
 
+/// Where a remote scan plans its files: a download's local root or a copy's remote one.
+#[derive(Clone)]
+enum Target {
+    Local(PathBuf),
+    Remote(RemotePath),
+}
+
+impl Target {
+    fn join(&self, name: &str) -> Target {
+        match self {
+            Target::Local(p) => Target::Local(p.join(name)),
+            Target::Remote(p) => Target::Remote(p.join(name)),
+        }
+    }
+
+    fn dir(&self) -> DirPlan {
+        match self {
+            Target::Local(p) => DirPlan::Local(p.clone()),
+            Target::Remote(p) => DirPlan::Remote(p.clone()),
+        }
+    }
+}
+
 /// A remote child waiting on the walk's stack.
 struct RemoteChild {
     entry: Entry,
     src: RemotePath,
-    dst: PathBuf,
+    dst: Target,
     rel: String,
 }
 
@@ -81,10 +129,10 @@ async fn walk_remote_item(
     item: RemoteChild,
 ) -> Result<()> {
     match item.entry.kind {
-        EntryKind::File => walk.plan_download(item.src, item.dst, &item.entry),
+        EntryKind::File => walk.plan_remote(item.src, item.dst, &item.entry),
         EntryKind::Dir => match sftp.list(&item.src).await {
             Ok(entries) => {
-                walk.scan.dirs.push(DirPlan::Local(item.dst.clone()));
+                walk.scan.dirs.push(item.dst.dir());
                 push_remote(stack, entries, &item.src, &item.dst, &item.rel);
             }
             Err(Error::PermissionDenied(_)) => walk.skip(&item.rel, DENIED),
@@ -92,7 +140,7 @@ async fn walk_remote_item(
             Err(e) => return Err(e),
         },
         EntryKind::Symlink { target: Some(LinkTarget::File) } => match sftp.stat(&item.src).await {
-            Ok(target) if target.kind == EntryKind::File => walk.plan_download(item.src, item.dst, &target),
+            Ok(target) if target.kind == EntryKind::File => walk.plan_remote(item.src, item.dst, &target),
             Ok(_) => walk.skip(&item.rel, LINK_TO_SPECIAL),
             Err(Error::NotFound(_) | Error::PermissionDenied(_)) => walk.skip(&item.rel, BROKEN_LINK),
             Err(e) => return Err(e),
@@ -106,7 +154,7 @@ async fn walk_remote_item(
 }
 
 /// Pushes a folder's children so they pop in natural name order.
-fn push_remote(stack: &mut Vec<RemoteChild>, mut entries: Vec<Entry>, src: &RemotePath, dst: &Path, rel: &str) {
+fn push_remote(stack: &mut Vec<RemoteChild>, mut entries: Vec<Entry>, src: &RemotePath, dst: &Target, rel: &str) {
     entries.sort_by(|a, b| natural_cmp(&b.name, &a.name));
     for entry in entries {
         let rel = if rel.ends_with('/') { format!("{rel}{}", entry.name) } else { format!("{rel}/{}", entry.name) };
@@ -271,11 +319,13 @@ struct Walk<'a> {
     files: u64,
     found: &'a mut (dyn FnMut(u64) -> bool + Send),
     stopped: bool,
+    /// A remote-to-remote copy's Replace, for its plans.
+    overwrite: bool,
 }
 
 impl<'a> Walk<'a> {
     fn new(found: &'a mut (dyn FnMut(u64) -> bool + Send)) -> Self {
-        Walk { scan: Scan::default(), files: 0, found, stopped: false }
+        Walk { scan: Scan::default(), files: 0, found, stopped: false, overwrite: false }
     }
 
     fn plan(&mut self, plan: FilePlan) {
@@ -286,8 +336,12 @@ impl<'a> Walk<'a> {
         }
     }
 
-    fn plan_download(&mut self, src: RemotePath, dst: PathBuf, entry: &Entry) {
-        self.plan(FilePlan::Download { src, dst, size: entry.size, mtime: entry.mtime });
+    fn plan_remote(&mut self, src: RemotePath, dst: Target, entry: &Entry) {
+        let (size, mtime) = (entry.size, entry.mtime);
+        self.plan(match dst {
+            Target::Local(dst) => FilePlan::Download { src, dst, size, mtime },
+            Target::Remote(dst) => FilePlan::Copy { src, dst, size, mtime, overwrite: self.overwrite },
+        });
     }
 
     fn plan_upload(&mut self, src: PathBuf, dst: RemotePath, meta: &Metadata, overwrite: bool) {
