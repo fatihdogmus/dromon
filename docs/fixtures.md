@@ -220,6 +220,9 @@ with files copied in Finder or Explorer) run on the fixture through the real tra
 - Files are done the moment they start: jobs finish at once, so the ring never shows on its own.
 - A finished upload is added to its folder: the folder on screen lists again at once (as the
   real app's polling would notice), and later listings show it.
+- Transfers and file operations (new folder, rename, delete) change the same folders: an upload
+  into a new folder lands there, a deleted folder can't be downloaded, a renamed one downloads
+  under its new name, and a delete takes uploaded files with it.
 
 `transfers` adds jobs the session starts with, for pictures of states the instant engine never
 holds still in (a transfer half done, paused, failed). They stay listed after the session's own

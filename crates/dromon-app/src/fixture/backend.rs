@@ -11,9 +11,9 @@
 //! There's no clock: a lost connection says when it would retry, then stays reconnecting.
 //! Answers are compared with the fixture's and wiped; nothing logs them.
 //!
-//! Transfer commands go to [`Engine`] (`fixture/transfers.rs`), whose listings (the tree plus
-//! finished uploads) are the ones this backend sends, with what file operations changed in them
-//! on top ([`Changes`]).
+//! Transfer commands go to [`Engine`] (`fixture/transfers.rs`). Its tree (`fixture/tree.rs`:
+//! the fixture's folders with what transfers and file operations changed) is the one this
+//! backend lists and runs file operations on.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
@@ -24,7 +24,7 @@ use secrecy::ExposeSecret;
 use zeroize::Zeroize;
 
 use super::transfers::Engine;
-use super::{Changes, Fixture, Step};
+use super::{Fixture, Step};
 use crate::service::lifecycle::{self, Event, Lifecycle, Phase};
 use crate::state::{Backend, Command, FileOp, OpId, ServiceEvent, TransferCommand};
 
@@ -41,10 +41,9 @@ pub struct FixtureBackend {
     /// Remembered passwords and passphrases, as the service keeps them.
     store: PasswordStore,
     last_prompt: u64,
-    /// Downloads and uploads (`fixture::transfers`); it also owns what uploads add to listings.
+    /// Transfers (`fixture::transfers`); it also owns the folder trees as they are now, which
+    /// listings and file operations use.
     transfers: Engine,
-    /// What new folders, renames and deletes changed, over the engine's listings.
-    changes: Changes,
 }
 
 #[derive(Default)]
@@ -105,7 +104,7 @@ fn first_line(text: &str) -> &str {
 impl FixtureBackend {
     pub fn new(fixture: Arc<Fixture>) -> Self {
         let transfers = Engine::new(fixture.clone());
-        FixtureBackend { fixture, conns: BTreeMap::new(), store: PasswordStore::new(), last_prompt: 0, transfers, changes: Changes::default() }
+        FixtureBackend { fixture, conns: BTreeMap::new(), store: PasswordStore::new(), last_prompt: 0, transfers }
     }
 
     /// Whether `host`'s session is up (ready, its "ssh" running).
@@ -122,11 +121,11 @@ impl FixtureBackend {
             out.push(ServiceEvent::FileOpFailed { id, host, error: Error::ConnectionLost });
             return;
         }
-        let (engine, changes) = (&self.transfers, &mut self.changes);
+        let tree = &mut self.transfers.tree;
         let result = match &op {
-            FileOp::Mkdir { path } => changes.mkdir(engine, &host, path, self.fixture.now),
-            FileOp::Rename { from, to } => changes.rename(engine, &host, from, to),
-            FileOp::Delete { paths } => changes.delete(engine, &host, paths).map(|n| {
+            FileOp::Mkdir { path } => tree.mkdir(&host, path, self.fixture.now),
+            FileOp::Rename { from, to } => tree.rename(&host, from, to),
+            FileOp::Delete { paths } => tree.delete(&host, paths).map(|n| {
                 out.push(ServiceEvent::FileOpProgress { id, host: host.clone(), done: n, total: Some(n) });
             }),
         };
@@ -430,7 +429,7 @@ impl FixtureBackend {
     }
 
     fn list_now(&mut self, host: &HostId, path: RemotePath, out: &mut Vec<ServiceEvent>) {
-        match self.changes.list(&self.transfers, host, &path) {
+        match self.transfers.tree.list(host, &path) {
             Ok(entries) => out.extend(pages(host, &path, entries)),
             Err(Error::ConnectionLost) => self.drive(host, Work::Life(Event::Lost), out),
             Err(error) => out.push(ServiceEvent::ListFailed { host: host.clone(), path, error }),

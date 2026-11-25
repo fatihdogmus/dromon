@@ -11,8 +11,8 @@
 //!   and `DROMON_MOCK=1` run on.
 //! - [`transfers::Engine`] runs transfers on it: the real queue (`dromon_transfer::queue`) with
 //!   fake, instant I/O against the folder trees; finished uploads show in later listings.
-//! - [`Changes`] holds what new folders, renames and deletes did to the trees, on top of the
-//!   engine's listings.
+//! - [`tree::Tree`] is the folder trees now: the fixture's, with what transfers and file
+//!   operations (new folder, rename, delete) changed in them, in one overlay that both use.
 //!
 //! `dromon --fixture <file.json>` runs the app on a fixture: no service thread, no ssh, no ssh
 //! config; the fixture file is the only thing it reads.
@@ -21,6 +21,7 @@ mod backend;
 mod generate;
 mod parse;
 pub mod transfers;
+mod tree;
 
 #[cfg(test)]
 mod backend_tests;
@@ -35,7 +36,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, OnceLock};
 
-use dromon_core::{Entry, EntryKind, Error, HostId, HostSpec, RemotePath};
+use dromon_core::{Entry, EntryKind, Error, HostSpec, RemotePath};
 use dromon_transfer::JobView;
 
 pub use backend::FixtureBackend;
@@ -223,210 +224,6 @@ fn expand(items: &[Item], folder: &RemotePath) -> Vec<Entry> {
         }
     }
     out
-}
-
-/// What file operations (new folder, rename, delete) changed in the servers' folders, over the
-/// listings of the transfer engine ([`transfers::Engine::list`]: the tree plus finished
-/// uploads), which stay the base.
-///
-/// - A folder an operation changes is copied here whole ("changed") and edited; listing it gives
-///   the copy. What the engine changes in it later (an upload finishing) is carried over: each
-///   listing compares the engine's listing with the one the copy was last based on and applies
-///   the difference.
-/// - Below a changed folder, a path is a folder only if its parent lists it as one (so deleted
-///   and renamed-away folders are gone, with everything inside them); otherwise the engine lists
-///   it as before.
-/// - A renamed folder takes its whole subtree along (copied as changed folders, errors kept).
-///
-/// The engine's own lookups (upload name clashes, download scans) don't see these changes.
-#[derive(Debug, Default)]
-pub struct Changes {
-    folders: BTreeMap<(HostId, RemotePath), Changed>,
-}
-
-#[derive(Debug)]
-struct Changed {
-    /// The engine's listing this copy last took in (`None`: the engine couldn't list it).
-    base: Option<Vec<Entry>>,
-    /// The folder now, or what listing it fails with.
-    now: Result<Vec<Entry>, TreeError>,
-}
-
-impl Changed {
-    /// Applies what the engine changed since `base` (entries added, replaced or gone).
-    fn rebase(&mut self, theirs: Option<Vec<Entry>>) {
-        let Some(theirs) = theirs else { return };
-        let Some(base) = self.base.replace(theirs.clone()) else { return };
-        let Ok(now) = &mut self.now else { return };
-        if base == theirs {
-            return;
-        }
-        let before: BTreeMap<&str, &Entry> = base.iter().map(|e| (e.name.as_str(), e)).collect();
-        for e in theirs.iter().filter(|e| before.get(e.name.as_str()) != Some(e)) {
-            match now.iter_mut().find(|x| x.name == e.name) {
-                Some(x) => *x = e.clone(),
-                None => now.push(e.clone()),
-            }
-        }
-        let after: BTreeSet<&str> = theirs.iter().map(|e| e.name.as_str()).collect();
-        now.retain(|x| after.contains(x.name.as_str()) || !before.contains_key(x.name.as_str()));
-    }
-}
-
-/// `e` from looking `path` up through its folder: about `path` itself.
-fn for_path(e: Error, path: &RemotePath) -> Error {
-    match e {
-        Error::NotFound(_) => Error::NotFound(path.clone()),
-        Error::PermissionDenied(_) => Error::PermissionDenied(path.clone()),
-        other => other,
-    }
-}
-
-/// `paths` without repeats and without paths inside another one of them, in order.
-fn outermost(paths: &[RemotePath]) -> Vec<RemotePath> {
-    let mut out: Vec<RemotePath> = Vec::new();
-    for p in paths {
-        if !paths.iter().any(|q| q != p && p.starts_with(q)) && !out.contains(p) {
-            out.push(p.clone());
-        }
-    }
-    out
-}
-
-impl Changes {
-    /// True when `path` is a changed folder or lies inside one.
-    fn covers(&self, host: &HostId, path: &RemotePath) -> bool {
-        self.folders.keys().any(|(h, k)| h == host && path.starts_with(k))
-    }
-
-    /// `path` as the server lists it now.
-    pub fn list(&mut self, engine: &transfers::Engine, host: &HostId, path: &RemotePath) -> Result<Vec<Entry>, Error> {
-        if !self.covers(host, path) {
-            return engine.list(host, path);
-        }
-        if let Some(f) = self.folders.get_mut(&(host.clone(), path.clone())) {
-            f.rebase(engine.list(host, path).ok());
-            return f.now.clone().map_err(|e| e.to_error(path));
-        }
-        let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else { return engine.list(host, path) };
-        let siblings = self.list(engine, host, &parent).map_err(|e| for_path(e, path))?;
-        if !siblings.iter().any(|e| e.name == name && e.kind.is_dir_like()) {
-            return Err(Error::NotFound(path.clone()));
-        }
-        match engine.list(host, path) {
-            // Not the engine's (moved here): empty, as the tree's unlisted folders are.
-            Err(Error::NotFound(_)) => Ok(Vec::new()),
-            other => other,
-        }
-    }
-
-    /// The changed copy of `dir`, made now if it isn't one yet; `dir`'s error if it can't be
-    /// listed.
-    fn edit(&mut self, engine: &transfers::Engine, host: &HostId, dir: &RemotePath) -> Result<&mut Vec<Entry>, Error> {
-        let now = self.list(engine, host, dir);
-        let key = (host.clone(), dir.clone());
-        let f = self.folders.entry(key).or_insert_with(|| Changed { base: engine.list(host, dir).ok(), now: now.map_err(|e| TreeError::of(&e)) });
-        f.now.as_mut().map_err(|e| e.to_error(dir))
-    }
-
-    /// Forgets the changed folders at and below `path` (it's gone, or new).
-    fn forget(&mut self, host: &HostId, path: &RemotePath) {
-        self.folders.retain(|(h, k), _| !(h == host && k.starts_with(path)));
-    }
-
-    /// Every folder at and below `dir` (not through links), relative to it, as listed now.
-    fn subtree(&mut self, engine: &transfers::Engine, host: &HostId, dir: &RemotePath) -> Vec<(String, Result<Vec<Entry>, TreeError>)> {
-        let mut out = Vec::new();
-        let mut stack = vec![dir.clone()];
-        while let Some(d) = stack.pop() {
-            let listed = self.list(engine, host, &d);
-            if let Ok(entries) = &listed {
-                stack.extend(entries.iter().filter(|e| e.kind == EntryKind::Dir).map(|e| d.join(&e.name)));
-            }
-            let rel = d.as_str().get(dir.as_str().len()..).unwrap_or("").trim_start_matches('/').to_owned();
-            out.push((rel, listed.map_err(|e| TreeError::of(&e))));
-        }
-        out
-    }
-
-    /// Creates the folder `path`, stamped `mtime`.
-    pub fn mkdir(&mut self, engine: &transfers::Engine, host: &HostId, path: &RemotePath, mtime: Option<i64>) -> Result<(), Error> {
-        let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else { return Err(Error::AlreadyExists(path.clone())) };
-        let siblings = self.list(engine, host, &parent).map_err(|e| for_path(e, path))?;
-        if siblings.iter().any(|e| e.name == name) {
-            return Err(Error::AlreadyExists(path.clone()));
-        }
-        let kind = EntryKind::Dir;
-        self.edit(engine, host, &parent)?.push(Entry { name: name.to_owned(), kind, size: default_size(kind), mtime, mode: default_mode(kind) });
-        self.forget(host, path);
-        let base = engine.list(host, path).ok();
-        self.folders.insert((host.clone(), path.clone()), Changed { base, now: Ok(Vec::new()) });
-        Ok(())
-    }
-
-    /// Renames `from` to `to` (refusing to replace anything), as OpenSSH's plain rename does.
-    pub fn rename(&mut self, engine: &transfers::Engine, host: &HostId, from: &RemotePath, to: &RemotePath) -> Result<(), Error> {
-        let (Some(from_dir), Some(from_name)) = (from.parent(), from.file_name()) else { return Err(Error::PermissionDenied(from.clone())) };
-        let siblings = self.list(engine, host, &from_dir).map_err(|e| for_path(e, from))?;
-        let Some(mut entry) = siblings.into_iter().find(|e| e.name == from_name) else { return Err(Error::NotFound(from.clone())) };
-        let (Some(to_dir), Some(to_name)) = (to.parent(), to.file_name()) else { return Err(Error::AlreadyExists(to.clone())) };
-        let targets = self.list(engine, host, &to_dir).map_err(|e| for_path(e, from))?;
-        if targets.iter().any(|e| e.name == to_name) {
-            return Err(Error::AlreadyExists(to.clone()));
-        }
-        if to.starts_with(from) {
-            return Err(Error::Io(format!("Couldn't move {from}: Invalid argument")));
-        }
-        let moved = if entry.kind == EntryKind::Dir { self.subtree(engine, host, from) } else { Vec::new() };
-        self.edit(engine, host, &from_dir)?.retain(|e| e.name != from_name);
-        entry.name = to_name.to_owned();
-        self.edit(engine, host, &to_dir)?.push(entry);
-        self.forget(host, from);
-        self.forget(host, to);
-        for (rel, now) in moved {
-            let path = to.join(&rel);
-            let base = engine.list(host, &path).ok();
-            self.folders.insert((host.clone(), path), Changed { base, now });
-        }
-        Ok(())
-    }
-
-    /// Deletes `paths`, folders with everything inside them, links themselves. Everything is
-    /// counted first, as the service does, so a folder that can't be listed stops the delete
-    /// before anything goes. Returns how many entries went.
-    pub fn delete(&mut self, engine: &transfers::Engine, host: &HostId, paths: &[RemotePath]) -> Result<u64, Error> {
-        let roots = outermost(paths);
-        let mut total = 0;
-        for root in &roots {
-            let (Some(dir), Some(name)) = (root.parent(), root.file_name()) else { return Err(Error::PermissionDenied(root.clone())) };
-            let siblings = self.list(engine, host, &dir).map_err(|e| for_path(e, root))?;
-            let entry = siblings.iter().find(|e| e.name == name).ok_or_else(|| Error::NotFound(root.clone()))?;
-            total += if entry.kind == EntryKind::Dir { self.count(engine, host, root)? } else { 1 };
-        }
-        for root in &roots {
-            if let (Some(dir), Some(name)) = (root.parent(), root.file_name()) {
-                self.edit(engine, host, &dir)?.retain(|e| e.name != name);
-                self.forget(host, root);
-            }
-        }
-        Ok(total)
-    }
-
-    /// Entries at and below the folder `dir`, not through links.
-    fn count(&mut self, engine: &transfers::Engine, host: &HostId, dir: &RemotePath) -> Result<u64, Error> {
-        let mut n = 0;
-        let mut stack = vec![dir.clone()];
-        while let Some(d) = stack.pop() {
-            n += 1;
-            for e in self.list(engine, host, &d)? {
-                match e.kind {
-                    EntryKind::Dir => stack.push(d.join(&e.name)),
-                    _ => n += 1,
-                }
-            }
-        }
-        Ok(n)
-    }
 }
 
 /// The built-in demo, parsed once.

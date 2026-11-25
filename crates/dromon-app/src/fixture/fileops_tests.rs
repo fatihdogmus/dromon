@@ -1,12 +1,12 @@
 //! File operations on a fixture: new folder, rename and delete against the folder trees, with
-//! the events the service sends and the errors a real server gives, and later listings
-//! (and finished uploads) on top of what they changed.
+//! the events the service sends and the errors a real server gives, and transfers (uploads,
+//! downloads, copies, moves) and later listings on the one tree they all change.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use dromon_core::{ConnStatus, Error, HostId, RemotePath};
-use dromon_transfer::JobRequest;
+use dromon_transfer::{ConflictChoice, JobRequest, JobView, RemoteItem, Reveal, TaskState};
 
 use super::*;
 use crate::state::{Backend, Command, FileOp, OpId, ServiceEvent, TransferCommand};
@@ -221,19 +221,142 @@ fn uploads_after_a_change_show_on_top_of_it() {
 }
 
 #[test]
-fn rebasing_applies_what_the_engine_changed_since() {
-    let e = |name: &str, size: u64| Entry { name: name.into(), kind: EntryKind::File, size, mtime: None, mode: None };
-    let mut f = Changed { base: Some(vec![e("a", 1), e("b", 1), e("c", 1)]), now: Ok(vec![e("a", 1), e("c", 1), e("mine", 1)]) };
-    // The engine replaced a, dropped c, added d; b (deleted here) is unchanged there.
-    f.rebase(Some(vec![e("a", 2), e("b", 1), e("d", 1)]));
-    assert_eq!(f.now, Ok(vec![e("a", 2), e("mine", 1), e("d", 1)]));
-    assert_eq!(f.base, Some(vec![e("a", 2), e("b", 1), e("d", 1)]));
-    // The engine can't list it: nothing changes.
-    f.rebase(None);
-    assert_eq!(f.now.as_ref().map(Vec::len), Ok(3));
-    // Without a base, the first listing becomes it.
-    let mut g = Changed { base: None, now: Ok(Vec::new()) };
-    g.rebase(Some(vec![e("z", 1)]));
-    assert_eq!((g.base, g.now), (Some(vec![e("z", 1)]), Ok(Vec::new())));
-    assert_eq!(outermost(&[p("a/b"), p("a"), p("a")]), [p("a")]);
+fn repeated_and_nested_delete_paths_collapse_to_the_outermost() {
+    assert_eq!(tree::outermost(&[p("a/b"), p("a"), p("a")]), [p("a")]);
+    assert_eq!(tree::outermost(&[p("b"), p("a/x"), p("b")]), [p("b"), p("a/x")]);
+}
+
+// ---- transfers and file operations see each other's changes --------------------------------
+
+/// The job a transfer command started or moved (the session's newest).
+fn job(evs: &[ServiceEvent]) -> JobView {
+    let views = evs.iter().find_map(|e| if let ServiceEvent::Transfers(v) = e { Some(v.clone()) } else { None });
+    views.and_then(|v| v.into_iter().next()).expect("a Transfers snapshot with a job")
+}
+
+fn start(b: &mut FixtureBackend, req: JobRequest) -> JobView {
+    job(&b.send(Command::Transfer(TransferCommand::Start(req))))
+}
+
+fn upload(name: &str, into: RemotePath) -> JobRequest {
+    JobRequest::Upload { host: prod(), items: vec![PathBuf::from(format!("/Users/me/{name}"))], into }
+}
+
+fn item(path: RemotePath, kind: EntryKind) -> RemoteItem {
+    RemoteItem { path, kind, size: default_size(kind) }
+}
+
+fn download(path: RemotePath, kind: EntryKind) -> JobRequest {
+    JobRequest::Download { host: prod(), items: vec![item(path, kind)], into: PathBuf::from("/dl") }
+}
+
+/// How a download of a folder that isn't there fails.
+fn missing(name: &str, path: &RemotePath) -> TaskState {
+    TaskState::Failed { error: format!("{name}: {}", Error::NotFound(path.clone())) }
+}
+
+#[test]
+fn an_upload_into_a_new_folder_lands_and_lists() {
+    let mut b = connected();
+    op(&mut b, 1, FileOp::Mkdir { path: p("new") });
+    let j = start(&mut b, upload("report.pdf", p("new")));
+    assert_eq!((&j.state, j.conflict.as_ref()), (&TaskState::Done, None));
+    assert_eq!(j.reveal, Some(Reveal::Remote(prod(), p("new/report.pdf"))));
+    assert_eq!(ls(&mut b, &p("new")), Ok(names(&["report.pdf"])));
+    // Deeper too: a folder made inside the new one.
+    op(&mut b, 2, FileOp::Mkdir { path: p("new/inner") });
+    assert_eq!(start(&mut b, upload("a.txt", p("new/inner"))).state, TaskState::Done);
+    assert_eq!(ls(&mut b, &p("new/inner")), Ok(names(&["a.txt"])));
+}
+
+#[test]
+fn a_deleted_folder_downloads_and_lists_like_a_missing_path() {
+    let mut b = connected();
+    assert_eq!(start(&mut b, download(p("never"), EntryKind::Dir)).state, missing("never", &p("never")));
+    op(&mut b, 1, FileOp::Delete { paths: vec![p("tree")] });
+    assert_eq!(start(&mut b, download(p("tree"), EntryKind::Dir)).state, missing("tree", &p("tree")));
+    assert_eq!(start(&mut b, download(p("tree/sub"), EntryKind::Dir)).state, missing("sub", &p("tree/sub")));
+    assert_eq!(ls(&mut b, &p("tree")), Err(Error::NotFound(p("tree"))));
+    // An upload into it can't land either.
+    let j = start(&mut b, upload("a.txt", p("tree")));
+    assert_eq!(j.state, TaskState::Failed { error: format!("a.txt: {}", Error::NotFound(p("tree"))) });
+}
+
+#[test]
+fn an_upload_named_like_a_deleted_file_runs_without_a_conflict() {
+    let mut b = connected();
+    op(&mut b, 1, FileOp::Delete { paths: vec![p("x.txt")] });
+    let evs = b.send(Command::Transfer(TransferCommand::Start(upload("x.txt", p("")))));
+    let j = job(&evs);
+    assert_eq!((&j.state, j.conflict.as_ref()), (&TaskState::Done, None), "no question asked");
+    assert_eq!(j.reveal, Some(Reveal::Remote(prod(), p("x.txt"))), "under its own name");
+    assert_eq!(listed(&evs, &p("")), Some(names(&["flaky", "keep", "locked", "many", "tree", "x.txt"])), "home on screen lists again");
+    // A name still there asks, as before.
+    assert!(start(&mut b, upload("x.txt", p(""))).conflict.is_some());
+}
+
+#[test]
+fn a_renamed_folder_downloads_under_its_new_name_and_its_old_name_is_gone() {
+    let mut b = connected();
+    op(&mut b, 1, FileOp::Rename { from: p("tree"), to: p("moved") });
+    let j = start(&mut b, download(p("moved"), EntryKind::Dir));
+    assert_eq!((&j.state, j.title.as_str()), (&TaskState::Done, "moved"));
+    // a.txt and sub/b.txt; sub/deeper is an empty folder; to-keep is a link to a folder.
+    assert_eq!((j.files_done, j.files_total), (2, 2));
+    assert_eq!(j.skipped, ["to-keep: a link to a folder"]);
+    assert_eq!(j.reveal, Some(Reveal::Local(PathBuf::from("/dl/moved"))));
+    assert_eq!(start(&mut b, download(p("tree"), EntryKind::Dir)).state, missing("tree", &p("tree")));
+    assert_eq!(ls(&mut b, &p("tree")), Err(Error::NotFound(p("tree"))));
+}
+
+#[test]
+fn copies_and_moves_into_a_renamed_folder_land_under_its_new_name() {
+    let mut b = connected();
+    op(&mut b, 1, FileOp::Rename { from: p("keep"), to: p("kept") });
+    let copy = JobRequest::RemoteCopy { host: prod(), items: vec![item(p("x.txt"), EntryKind::File)], into: p("kept") };
+    let j = start(&mut b, copy);
+    assert_eq!((&j.state, j.conflict.as_ref()), (&TaskState::Done, None));
+    assert_eq!(j.reveal, Some(Reveal::Remote(prod(), p("kept/x.txt"))));
+    assert_eq!(ls(&mut b, &p("kept")), Ok(names(&["k.txt", "x.txt"])));
+    assert_eq!(ls(&mut b, &p("keep")), Err(Error::NotFound(p("keep"))));
+
+    // A folder copy makes its folders there.
+    let copy = JobRequest::RemoteCopy { host: prod(), items: vec![item(p("tree"), EntryKind::Dir)], into: p("kept") };
+    assert_eq!(start(&mut b, copy).state, TaskState::Done);
+    assert_eq!(ls(&mut b, &p("kept/tree")), Ok(names(&["a.txt", "sub"])), "links aren't copied");
+    assert_eq!(ls(&mut b, &p("kept/tree/sub")), Ok(names(&["b.txt", "deeper"])));
+
+    // A move into it, onto the copy: Replace merges.
+    let mv = JobRequest::Move { host: prod(), items: vec![item(p("tree"), EntryKind::Dir)], into: p("kept") };
+    let j = start(&mut b, mv);
+    let j = job(&b.send(Command::Transfer(TransferCommand::Resolve { job: j.id, choice: ConflictChoice::Replace, apply_all: false })));
+    assert_eq!(j.state, TaskState::Done);
+    assert_eq!(ls(&mut b, &p("kept/tree")), Ok(names(&["a.txt", "sub", "to-keep"])));
+    assert_eq!(ls(&mut b, &p("tree")), Err(Error::NotFound(p("tree"))));
+}
+
+#[test]
+fn a_delete_after_an_upload_removes_the_uploaded_file_too() {
+    let mut b = connected();
+    start(&mut b, upload("report.pdf", p("keep")));
+    assert_eq!(ls(&mut b, &p("keep")), Ok(names(&["k.txt", "report.pdf"])));
+    // keep, k.txt and report.pdf.
+    let evs = op(&mut b, 1, FileOp::Delete { paths: vec![p("keep")] });
+    assert_eq!(evs[0], ServiceEvent::FileOpProgress { id: OpId(1), host: prod(), done: 3, total: Some(3) });
+    op(&mut b, 2, FileOp::Mkdir { path: p("keep") });
+    assert_eq!(ls(&mut b, &p("keep")), Ok(Vec::new()), "a recreated folder is empty");
+
+    // The uploaded file itself.
+    start(&mut b, upload("notes.txt", p("")));
+    let evs = op(&mut b, 3, FileOp::Delete { paths: vec![p("notes.txt")] });
+    assert_eq!(evs[..2], [ServiceEvent::FileOpProgress { id: OpId(3), host: prod(), done: 1, total: Some(1) }, done(3)]);
+    assert!(!ls(&mut b, &p("")).unwrap().contains(&"notes.txt".to_owned()));
+    // And a renamed upload is found under its new name.
+    start(&mut b, upload("draft.txt", p("")));
+    assert_eq!(op(&mut b, 4, FileOp::Rename { from: p("draft.txt"), to: p("final.txt") })[0], done(4));
+    let entry = b.send(Command::List { host: prod(), path: p("") }).into_iter().find_map(|e| match e {
+        ServiceEvent::ListingPage { entries, .. } => entries.into_iter().find(|e| e.name == "final.txt"),
+        _ => None,
+    });
+    assert_eq!(entry.map(|e| e.size), Some(super::transfers::UPLOAD_SIZE));
 }
