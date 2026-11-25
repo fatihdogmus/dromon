@@ -49,6 +49,10 @@ pub struct UiState {
     pub center_on_mount: Option<String>,
     /// The open sheet, the prompts queued behind it, and notices.
     pub sheets: Sheets,
+    /// "3 transfers in progress. Quit anyway?" is on screen ([`App::close_requested`]).
+    pub confirm_quit: bool,
+    /// The user chose Quit: the next close request goes through.
+    pub quit_approved: bool,
 }
 
 impl Default for UiState {
@@ -60,6 +64,8 @@ impl Default for UiState {
             type_select: TypeSelect::default(),
             center_on_mount: None,
             sheets: Sheets::default(),
+            confirm_quit: false,
+            quit_approved: false,
         }
     }
 }
@@ -151,6 +157,10 @@ pub enum Action {
     /// A file drag from another app came onto a drop target (`over`) or left it; `count` is
     /// how many items it carries.
     DropHover { target: DropTarget, over: bool, count: usize },
+    /// The quit sheet's Quit: close the window although transfers run.
+    QuitAnyway,
+    /// The quit sheet's Cancel (or Escape): keep going.
+    CancelQuit,
 }
 
 /// What an action asks the view layer to do afterwards.
@@ -164,6 +174,8 @@ pub enum Effect {
     Blur,
     /// Show this local file in Finder/Explorer (selected in its folder).
     ShowInFolder(PathBuf),
+    /// Close the window (and so quit): the user confirmed it.
+    CloseWindow,
 }
 
 impl App {
@@ -460,6 +472,9 @@ impl App {
                 }
             }
             Action::DismissSheet => {
+                if std::mem::take(&mut self.ui.confirm_quit) {
+                    return fx;
+                }
                 if let Some((id, answer)) = self.ui.sheets.cancel() {
                     self.send(Command::AnswerPrompt { id, answer });
                 }
@@ -484,14 +499,31 @@ impl App {
             | Action::TransfersTab(_)
             | Action::RevealTransfer(_)
             | Action::DropHover { .. } => self.transfer_action(action, &mut fx),
+            Action::QuitAnyway => {
+                self.ui.confirm_quit = false;
+                self.ui.quit_approved = true;
+                fx.push(Effect::CloseWindow);
+            }
+            Action::CancelQuit => self.ui.confirm_quit = false,
         }
         fx
+    }
+
+    /// The window's close button (⌘W, Alt+F4) was pressed: whether to close now. With
+    /// transfers running it asks first (the quit sheet) and says no; Quit there approves it.
+    /// macOS ⌘Q and logging out don't come through here.
+    pub fn close_requested(&mut self) -> bool {
+        if self.ui.quit_approved || self.transfers.active() == 0 {
+            return true;
+        }
+        self.ui.confirm_quit = true;
+        false
     }
 
     /// Maps a shortcut to its action (`now` is for type-to-select). The conflict sheet is
     /// modal like the prompt sheets: while it's up, the list's shortcuts do nothing.
     pub fn shortcut(&mut self, sc: Shortcut, now: f64) -> Vec<Effect> {
-        if self.conflict_on_screen().is_some() {
+        if self.conflict_on_screen().is_some() || self.ui.confirm_quit {
             return Vec::new();
         }
         let action = match sc {

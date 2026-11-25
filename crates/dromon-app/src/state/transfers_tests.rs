@@ -280,3 +280,33 @@ fn revealing_never_connects_a_host() {
     assert!(s.active.is_none());
     assert!(s.conns.is_empty());
 }
+
+#[test]
+fn closing_with_transfers_running_asks_first() {
+    let (mut s, _) = connected();
+    // Nothing running (a finished job doesn't count): the window just closes.
+    s.apply(ServiceEvent::Transfers(vec![job(1, JobKind::Download, TaskState::Done, 1, 1)]));
+    assert!(s.close_requested());
+    assert!(!s.ui.confirm_quit);
+
+    s.apply(ServiceEvent::Transfers(vec![job(2, JobKind::Upload, TaskState::Running, 1, 9)]));
+    assert!(!s.close_requested(), "held for the question");
+    assert!(s.ui.confirm_quit);
+    // The list's shortcuts sleep behind the sheet.
+    let cursor = s.conn().unwrap().selection.cursor().map(str::to_owned);
+    s.shortcut(crate::state::Shortcut::Move { delta: 1, extend: false }, 0.0);
+    assert_eq!(s.conn().unwrap().selection.cursor().map(str::to_owned), cursor);
+
+    // Cancel (or Escape) keeps going; the next close asks again.
+    s.act(Action::CancelQuit);
+    assert!(!s.ui.confirm_quit);
+    assert!(!s.close_requested());
+    s.act(Action::DismissSheet);
+    assert!(!s.ui.confirm_quit);
+
+    // Quit closes the window, and the close it starts goes through.
+    assert!(!s.close_requested());
+    assert_eq!(s.act(Action::QuitAnyway), [Effect::CloseWindow]);
+    assert!(!s.ui.confirm_quit);
+    assert!(s.close_requested());
+}

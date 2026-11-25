@@ -88,7 +88,10 @@ fn spec() -> AppSpec<App> {
 /// The app with its window chrome: one 44 pt band for title bar and toolbar (§6.2). Its state
 /// starts on the demo fixture; [`run`] gives it the real service or `--fixture`'s instead.
 pub fn app() -> RuneApp<App> {
-    RuneApp::new(spec()).titlebar(Titlebar::new(theme::size::TOOLBAR))
+    RuneApp::new(spec())
+        .titlebar(Titlebar::new(theme::size::TOOLBAR))
+        // Closing the window with transfers running asks first (the quit sheet).
+        .on_close_request(|s, _tx| if s.close_requested() { rune::CloseResponse::Close } else { rune::CloseResponse::Defer })
 }
 
 /// Whether `DROMON_MOCK=1` asks for the built-in demo fixture.

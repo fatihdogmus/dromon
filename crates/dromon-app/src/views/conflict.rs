@@ -63,7 +63,7 @@ pub fn sheet(s: &App, p: Paint) -> Option<El> {
 }
 
 /// A button for what can't be undone: the danger colour on its label and outline.
-fn danger(p: Paint, key: &'static str, label: &'static str, action: Action) -> El {
+pub(super) fn danger(p: Paint, key: &'static str, label: &'static str, action: Action) -> El {
     let t = p.t;
     row()
         .key(key)

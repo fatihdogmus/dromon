@@ -38,7 +38,7 @@ mkdir -p "$out"
 
 scenes=(welcome connecting listing listing-sorted-size big-folder empty-folder permission-denied reconnecting filter light
   auth-password auth-password-error host-key confirm connection-log
-  transfers transfers-uploads transfer-conflict drop-list drop-folder toolbar-ring)
+  transfers transfers-uploads transfer-conflict drop-list drop-folder toolbar-ring quit-confirm)
 
 for scene in "${scenes[@]}"; do
   theme=dark

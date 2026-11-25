@@ -251,6 +251,12 @@ pub fn toolbar_ring(s: &mut App) {
     s.apply(ServiceEvent::Transfers(vec![site, logs, done]));
 }
 
+/// The window's close button with two transfers running: "Quit anyway?".
+pub fn quit_confirm(s: &mut App) {
+    toolbar_ring(s);
+    s.close_requested();
+}
+
 /// A named state: what `AppSpec::scenes` takes.
 pub type Scene = (&'static str, fn(&mut App));
 
@@ -277,4 +283,5 @@ pub const SCENES: &[Scene] = &[
     ("drop-list", drop_list),
     ("drop-folder", drop_folder),
     ("toolbar-ring", toolbar_ring),
+    ("quit-confirm", quit_confirm),
 ];

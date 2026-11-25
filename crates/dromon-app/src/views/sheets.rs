@@ -6,7 +6,7 @@
 use dromon_core::{Prompt, PromptKind};
 use rune::{Beat, El, LoopSpec, ScrollSpec, Sequence, Transition, Tx, col, icon, row, text, text_input};
 
-use super::{Paint, conflict, run};
+use super::{Paint, conflict, quit, run};
 use crate::icons;
 use crate::state::sheets::takes_text;
 use crate::state::{Action, App, Sheet};
@@ -36,12 +36,13 @@ fn host_name(s: &App, host: &dromon_core::HostId) -> String {
 /// The veil and the open sheet, over the whole window below the toolbar band, so the sheet
 /// drops from the toolbar's edge.
 pub fn layer(s: &App, p: Paint) -> Option<El> {
-    // A prompt sheet comes first; an upload's name clash waits behind it.
-    let panel = match s.ui.sheets.open() {
-        Some(Sheet::Ask { prompt, .. }) => prompt_sheet(s, prompt, false, p),
-        Some(Sheet::Sent { prompt }) => prompt_sheet(s, prompt, true, p),
-        Some(Sheet::Log { host }) => log_sheet(s, host, p),
-        None => conflict::sheet(s, p)?,
+    // "Quit anyway?" comes first, then a prompt sheet; an upload's name clash waits behind both.
+    let panel = match (quit::sheet(s, p), s.ui.sheets.open()) {
+        (Some(quit), _) => quit,
+        (None, Some(Sheet::Ask { prompt, .. })) => prompt_sheet(s, prompt, false, p),
+        (None, Some(Sheet::Sent { prompt })) => prompt_sheet(s, prompt, true, p),
+        (None, Some(Sheet::Log { host })) => log_sheet(s, host, p),
+        (None, None) => conflict::sheet(s, p)?,
     };
     Some(
         col()

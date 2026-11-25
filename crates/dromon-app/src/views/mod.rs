@@ -4,6 +4,7 @@
 mod conflict;
 mod drop;
 mod list;
+mod quit;
 mod sheets;
 mod sidebar;
 mod states;
@@ -50,6 +51,7 @@ pub fn effect(fx: Effect, tx: &mut Tx) {
                 crate::reveal::show_in_folder(path);
             }
         }
+        Effect::CloseWindow => tx.close_window(),
     }
 }
 
