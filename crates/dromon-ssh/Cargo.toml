@@ -19,6 +19,17 @@ thiserror.workspace = true
 tokio.workspace = true
 zeroize.workspace = true
 
+# The askpass named pipe: its DACL and the client-user check (`src/askpass/win32.rs`).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
+
 # The askpass helper alone, for integration tests (`CARGO_BIN_EXE_dromon-askpass-test-helper`).
 [[bin]]
 name = "dromon-askpass-test-helper"

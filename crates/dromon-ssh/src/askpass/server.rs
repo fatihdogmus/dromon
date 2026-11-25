@@ -3,15 +3,16 @@
 //!
 //! Each accepted connection carries one request. Unknown tokens and malformed or oversized
 //! requests close the connection without forwarding anything. Answers are never logged.
-
-// The token registry and `serve_connection` are platform-neutral, but only the Unix transport
-// uses them until the Windows named-pipe transport lands.
-#![cfg_attr(not(unix), allow(dead_code))]
+//!
+//! Transports: a Unix domain socket in a 0700 folder (module `unix`), or on Windows a named pipe
+//! whose DACL admits only the current user (module `windows`). Both also check the connecting
+//! process's user before reading a byte; the token stays the primary check.
 
 use std::fmt;
 use std::io;
 #[cfg(unix)]
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -21,7 +22,6 @@ use tokio::sync::{mpsc, oneshot};
 use zeroize::Zeroizing;
 
 use super::protocol::{Reply, decode_request, encode_reply, read_message_async};
-#[cfg(unix)]
 use crate::command::AskpassEnv;
 
 /// How long a helper may take to send its request after connecting.
@@ -141,13 +141,15 @@ async fn hang_up<R: AsyncRead + Unpin>(reader: &mut R) {
     let _ = reader.read(&mut byte).await;
 }
 
-/// The askpass endpoint for this app instance. Removes its socket when dropped.
+/// The askpass endpoint for this app instance. Stops accepting when dropped (and removes its
+/// socket on Unix); connections already accepted are still answered.
 pub struct AskpassServer {
     #[cfg(unix)]
     path: PathBuf,
+    #[cfg(windows)]
+    pipe_name: String,
     registry: Registry,
     requests: Option<mpsc::Receiver<AskpassRequest>>,
-    #[cfg(unix)]
     accept: tokio::task::JoinHandle<()>,
 }
 
@@ -166,6 +168,23 @@ impl AskpassServer {
     /// Forgets a token, so its helper requests are rejected from now on.
     pub fn unregister(&self, token: &str) {
         self.registry.remove(token);
+    }
+
+    /// Issues a fresh token for one connection attempt to `host` and returns the environment
+    /// for its ssh process. `helper_exe` is our own executable (`std::env::current_exe()`).
+    /// Call [`AskpassServer::unregister`] with `env.token` when that ssh process is gone.
+    pub fn register(&self, host: HostId, helper_exe: &Path) -> io::Result<AskpassEnv> {
+        let token = new_token()?;
+        self.registry.insert(token.clone(), host);
+        Ok(AskpassEnv { exe: helper_exe.to_path_buf(), endpoint: self.endpoint(), token })
+    }
+}
+
+impl Drop for AskpassServer {
+    fn drop(&mut self) {
+        self.accept.abort();
+        #[cfg(unix)]
+        let _ = std::fs::remove_file(&self.path);
     }
 }
 
@@ -212,38 +231,101 @@ impl AskpassServer {
     pub fn endpoint(&self) -> String {
         self.path.to_string_lossy().into_owned()
     }
-
-    /// Issues a fresh token for one connection attempt to `host` and returns the environment
-    /// for its ssh process. `helper_exe` is our own executable (`std::env::current_exe()`).
-    /// Call [`AskpassServer::unregister`] with `env.token` when that ssh process is gone.
-    pub fn register(&self, host: HostId, helper_exe: &Path) -> io::Result<AskpassEnv> {
-        let token = new_token()?;
-        self.registry.insert(token.clone(), host);
-        Ok(AskpassEnv { exe: helper_exe.to_path_buf(), endpoint: self.endpoint(), token })
-    }
 }
 
-#[cfg(unix)]
-impl Drop for AskpassServer {
-    fn drop(&mut self) {
-        self.accept.abort();
-        let _ = std::fs::remove_file(&self.path);
-    }
-}
-
-#[cfg(not(unix))]
+#[cfg(windows)]
 impl AskpassServer {
-    /// Not implemented on this platform yet (Windows named pipes are spike S3).
+    /// Creates the named pipe `\\.\pipe\dromon-askpass-<pid>-<16 hex>`: refusing a name that
+    /// already exists, rejecting remote clients, with a DACL for the current user alone. Must be
+    /// called inside a tokio runtime.
     pub fn bind() -> io::Result<Self> {
-        Err(io::Error::new(io::ErrorKind::Unsupported, "askpass is not supported on this platform yet"))
+        let user = super::win32::current_user_sid()?;
+        let pipe_name = format!(r"\\.\pipe\dromon-askpass-{}-{}", std::process::id(), random_hex::<8>()?);
+        let first = windows::create_instance(&pipe_name, &user, true)?;
+
+        let registry = Registry::default();
+        let (tx, rx) = mpsc::channel(REQUEST_QUEUE);
+        let accept = tokio::spawn(windows::accept_loop(first, pipe_name.clone(), user, registry.clone(), tx));
+        Ok(AskpassServer { pipe_name, registry, requests: Some(rx), accept })
     }
 
+    /// What goes in `DROMON_ASKPASS_ENDPOINT`: the pipe name.
     pub fn endpoint(&self) -> String {
-        String::new()
+        self.pipe_name.clone()
+    }
+}
+
+#[cfg(windows)]
+mod windows {
+    use std::io;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use tokio::net::windows::named_pipe::{NamedPipeServer, PipeMode, ServerOptions};
+    use tokio::sync::mpsc;
+
+    use super::super::win32;
+    use super::{AskpassRequest, Registry, serve_connection};
+
+    /// One server instance of `name`. `first` refuses to open an instance of a pipe that already
+    /// exists, so nobody else's pipe is taken over; later instances join ours, which the DACL
+    /// lets only our user do.
+    pub(super) fn create_instance(name: &str, user: &str, first: bool) -> io::Result<NamedPipeServer> {
+        let mut options = ServerOptions::new();
+        options
+            .first_pipe_instance(first)
+            .reject_remote_clients(true)
+            .access_inbound(true)
+            .access_outbound(true)
+            .pipe_mode(PipeMode::Byte);
+        win32::create_pipe_for_user(&options, name, user)
     }
 
-    pub fn register(&self, _host: HostId, _helper_exe: &std::path::Path) -> io::Result<crate::command::AskpassEnv> {
-        Err(io::Error::new(io::ErrorKind::Unsupported, "askpass is not supported on this platform yet"))
+    /// Whether the process on the other end runs as `user`. Fails closed: a client whose user
+    /// can't be read is dropped.
+    pub(super) fn client_is_user(pipe: &NamedPipeServer, user: &str) -> bool {
+        win32::pipe_client_user_sid(pipe).is_ok_and(|sid| sid == user)
+    }
+
+    /// Tokio's documented server loop: once an instance is connected, create the next one
+    /// before handing the connected one off, so a helper always finds an instance to open
+    /// (between the two it gets `ERROR_PIPE_BUSY` and retries). Runs until aborted.
+    pub(super) async fn accept_loop(
+        first: NamedPipeServer,
+        name: String,
+        user: String,
+        registry: Registry,
+        tx: mpsc::Sender<AskpassRequest>,
+    ) {
+        let user: Arc<str> = user.into();
+        let mut listening = Some(first);
+        loop {
+            let server = match listening.take() {
+                Some(server) => server,
+                None => match create_instance(&name, &user, false) {
+                    Ok(server) => server,
+                    // Out of handles and the like: wait a little rather than spin.
+                    Err(_) => {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        continue;
+                    }
+                },
+            };
+            let connected = server.connect().await;
+            listening = create_instance(&name, &user, false).ok();
+            if connected.is_err() {
+                // The client left before we saw it, or the instance broke: drop it and go on.
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                continue;
+            }
+            let (registry, tx, user) = (registry.clone(), tx.clone(), user.clone());
+            tokio::spawn(async move {
+                // The DACL already keeps other users out; this is a second check.
+                if client_is_user(&server, &user) {
+                    let _ = serve_connection(server, registry, tx).await;
+                }
+            });
+        }
     }
 }
 
@@ -427,5 +509,46 @@ mod tests {
         client.write_all(&big).await.unwrap();
         assert!(task.await.unwrap().is_err());
         assert!(rx.try_recv().is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn current_user_sid_is_a_string_sid() {
+        let sid = super::super::win32::current_user_sid().unwrap();
+        assert!(sid.starts_with("S-1-"), "{sid}");
+        assert_eq!(sid, super::super::win32::current_user_sid().unwrap());
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn first_instance_refuses_an_existing_pipe_and_later_ones_join() {
+        let user = super::super::win32::current_user_sid().unwrap();
+        let name = format!(r"\\.\pipe\dromon-askpass-test-{}-{}", std::process::id(), random_hex::<8>().unwrap());
+        let _first = windows::create_instance(&name, &user, true).unwrap();
+        assert!(windows::create_instance(&name, &user, true).is_err(), "a second first instance");
+        let _second = windows::create_instance(&name, &user, false).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn sid_with_sddl_syntax_is_refused() {
+        let name = format!(r"\\.\pipe\dromon-askpass-test-{}-{}", std::process::id(), random_hex::<8>().unwrap());
+        for sid in ["S-1-5-18)(A;;GA;;;WD", "WD", ""] {
+            assert!(windows::create_instance(&name, sid, true).is_err(), "{sid}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn client_in_this_process_is_our_user() {
+        use tokio::net::windows::named_pipe::ClientOptions;
+
+        let user = super::super::win32::current_user_sid().unwrap();
+        let name = format!(r"\\.\pipe\dromon-askpass-test-{}-{}", std::process::id(), random_hex::<8>().unwrap());
+        let server = windows::create_instance(&name, &user, true).unwrap();
+        let _client = ClientOptions::new().open(&name).unwrap();
+        server.connect().await.unwrap();
+        assert!(windows::client_is_user(&server, &user));
+        assert!(!windows::client_is_user(&server, "S-1-5-18"));
     }
 }

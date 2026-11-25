@@ -50,6 +50,8 @@ tempfile = "3"
 testcontainers = { version = "0.28", default-features = false }
 thiserror = "2"
 tokio = { version = "1.54", features = ["rt-multi-thread", "macros", "process", "io-util", "net", "sync", "time", "fs"] }
+# Windows only (dromon-ssh's askpass pipe ACL). The version tokio uses, so it builds once.
+windows-sys = "0.61"
 zeroize = "1"
 
 [workspace.lints.rust]

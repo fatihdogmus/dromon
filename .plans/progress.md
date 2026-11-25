@@ -10,7 +10,7 @@ Tracks where implementation stands against `dromon-plan.md`. Newest first.
 |---|---|---|
 | S1 Rune pinned build + headless `--snap` | ✅ Linux · ⏳ macOS, Windows | `cargo build -p dromon-app`; `scripts/goldens.sh` |
 | S2 `ssh -s host sftp` + russh-sftp over child stdio | ✅ Linux · ⏳ macOS, Windows | `cargo run -p dromon-sftp --example s2_list`; `crates/dromon-sftp/tests/fixture.rs` |
-| S3 Askpass round trip | ✅ Linux (host key, password, wrong password, passphrase, confirm, ProxyJump) · ⏳ Windows inbox OpenSSH | `crates/dromon-ssh/tests/askpass_e2e.rs`; helper start ≈ 2–4 ms |
+| S3 Askpass round trip | ✅ Linux (host key, password, wrong password, passphrase, confirm, ProxyJump) · ◐ Windows: named-pipe transport implemented (`\\.\pipe\dromon-askpass-<pid>-<random>`, user-only DACL, client-user check), to be verified by CI tests only (round trips, cancel, bad token, concurrency, `ssh-keygen -y` passphrase via askpass); not yet with ssh's real password/host-key/2FA prompts | `crates/dromon-ssh/tests/askpass_e2e.rs`, `askpass_transport.rs`; helper start ≈ 2–6 ms |
 | S4 `copy-data` via russh-sftp | ✅ `RawSftpSession::extended`; 1 GiB in ~1.7 s vs ~15 s streaming | `fixture.rs` |
 | S5 Rune features (menus, clipboard files, drop, fonts, badge, notify) | ◐ fonts + tnum + titlebar done; rest pending | |
 | S6 wake / network-change signal | ⏳ | |

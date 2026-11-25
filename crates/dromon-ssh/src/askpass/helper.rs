@@ -88,13 +88,52 @@ mod transport {
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
 mod transport {
-    use std::io;
+    use std::fs::{File, OpenOptions};
+    use std::io::{self, BufReader, Write};
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::time::{Duration, Instant};
 
-    use super::super::protocol::{Reply, Request};
+    use windows_sys::Win32::Foundation::ERROR_PIPE_BUSY;
+    use windows_sys::Win32::Storage::FileSystem::SECURITY_ANONYMOUS;
 
-    pub(super) fn exchange(_endpoint: &str, _request: &Request) -> io::Result<Reply> {
-        Err(io::Error::new(io::ErrorKind::Unsupported, "askpass is not supported on this platform yet"))
+    use super::super::protocol::{Reply, Request, decode_reply, encode_request, read_message};
+
+    /// How long to keep retrying while every pipe instance is busy.
+    const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+    const BUSY_RETRY: Duration = Duration::from_millis(10);
+    const PIPE_PREFIX: &str = r"\\.\pipe\";
+
+    pub(super) fn exchange(endpoint: &str, request: &Request) -> io::Result<Reply> {
+        if endpoint.is_empty() {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "no askpass endpoint"));
+        }
+        // Never write the token anywhere but a local pipe.
+        if !endpoint.starts_with(PIPE_PREFIX) {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, "askpass endpoint is not a local named pipe"));
+        }
+        let mut pipe = open_pipe(endpoint)?;
+        pipe.write_all(&encode_request(request)?)?;
+        pipe.flush()?;
+        // The reply waits for the user, so it has no timeout.
+        let line = read_message(&mut BufReader::new(&pipe))?;
+        decode_reply(&line)
+    }
+
+    /// Opens the client end, retrying for [`BUSY_TIMEOUT`] while all instances are taken (the
+    /// server creates the next one right after each connection). A missing pipe fails at once.
+    fn open_pipe(endpoint: &str) -> io::Result<File> {
+        let deadline = Instant::now() + BUSY_TIMEOUT;
+        loop {
+            // Anonymous: the app needs no right to impersonate us.
+            match OpenOptions::new().read(true).write(true).security_qos_flags(SECURITY_ANONYMOUS).open(endpoint) {
+                Ok(pipe) => return Ok(pipe),
+                Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY as i32) && Instant::now() < deadline => {
+                    std::thread::sleep(BUSY_RETRY);
+                }
+                Err(e) => return Err(e),
+            }
+        }
     }
 }
