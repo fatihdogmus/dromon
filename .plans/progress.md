@@ -45,12 +45,16 @@ Tracks where implementation stands against `dromon-plan.md`. Newest first.
 - M2 UI (transfers, on the app state of `state/transfers.rs`):
   - Works: the toolbar transfers button (`views/transfers.rs`: arrow in a 2 pt ring of the active jobs' bytes, two clipped half rings turned on the `move` spring; count badge; quiet glyph until the session has a job); the popover (380 × ≤480, anchored, modal, Downloads / Uploads with counts, rows with icon, 3 pt bar, `progress_line` or the state's text, pause/resume/cancel/retry on hover, finished rows reveal, errors/skipped as a tooltip, Clear finished, empty tabs); the conflict sheet (`views/conflict.rs`: Replace (danger) / Skip / Keep both (default), "Apply to all N conflicts"); ⌘D (Ctrl+D); file drops on the list or a folder row with outline, row lift and pill (`views/drop.rs`, `Action::DropHover`); ⌘V with files (root `on_paste_content`). The list's shortcuts don't reach behind the conflict sheet. While the popover is open a clash waits in its row ("Resolve…" closes it and the sheet comes up).
   - Faked: fixtures run transfers on the real `Queue` with instant fake I/O (`fixture/transfers.rs`): downloads name against an in-memory set, uploads clash against the tree and land in it (the folder on screen relists); a fixture's `transfers` key adds still pictures of mid-progress jobs (`docs/fixtures.md`). Scenes `transfers`, `transfers-uploads`, `transfer-conflict`, `drop-list`, `drop-folder`, `toolbar-ring`; flows `upload-conflict`, `download`.
-  - Missing: the real engine on the service thread (it ignores `Command::Transfer`); sizes and dates of both items in the conflict sheet (`ConflictView` has neither); the done flourish and the ring's pulse; ⌘⇧J; drag from a real Finder/Explorer window is untested (headless drags only); Quit-with-transfers confirm.
+  - The UI runs on the real engine (`service/transfers.rs`) in the app; closing the window with transfers running asks "N transfers in progress" (Quit / Cancel, `views/quit.rs`, Rune's `on_close_request`; macOS ⌘Q and logout bypass it).
+  - Missing: sizes and dates of both items in the conflict sheet (`ConflictView` has neither); the done flourish and the ring's pulse; ⌘⇧J; drag from a real Finder/Explorer window is untested (headless drags only); Dock badge, taskbar progress and notifications (S5).
+
+- Windows CI can run Linux containers: the `windows-2025` runner has nested virtualisation, so WSL2 (Ubuntu 24.04, `Vampire/setup-wsl`) runs Docker, and Windows reaches it on `127.0.0.1` (Docker API on tcp 2375 via a systemd drop-in, published ports via WSL's localhost forwarding). Probe workflow on branch `probe/windows-ssh`. Plan: point the testkit's `DOCKER_HOST` at it so the Docker tests and the e2e sign-in tests run on Windows too.
 
 **Next**
-1. A first run in a real window on a macOS and a Linux desktop (real GPU, real input, Wayland).
-2. M2: transfer engine (queue + io + engine task on the service thread), downloads, uploads, transfers popover.
-3. Window frames across launches.
+1. Windows CI through WSL2: the Docker tests and real `ssh.exe` prompts (host key, password, passphrase, 2FA) through our named-pipe askpass.
+2. A first run in a real window on a macOS and a Linux desktop (real GPU, real input, Wayland).
+3. M3: file operations (new folder, rename, delete, copy/cut/paste, drag to move), then M4.
+4. Window frames across launches.
 
 **Service-thread caveats**
 - Verified end to end (`crates/dromon-app/tests/e2e.rs`, Docker fixture): the real `App` in a headless `Runtime` + the real service thread + system `ssh` + the `dromon` binary as askpass helper + SFTP, driven by clicks, typing and Return: host-key sheet with the server's real fingerprint, listings incl. dir symlinks, dangling links, dotfiles and permission denied; wrong then right password; keyboard-interactive password + TOTP (code not rememberable); key passphrase; a server-side session kill reconnects silently (password from memory, no sheet, folder relisted); Disconnect forgets the password. No typed secret reaches any event or log line. `dromon-app` is now lib + bin for this (`app()`, `run()`, `pub mod state`, `pub mod service`).
@@ -65,4 +69,4 @@ Tracks where implementation stands against `dromon-plan.md`. Newest first.
 - No keyboard focus ring on rows yet (selection cursor stands in). (Later.)
 - Keyboard-interactive is tested end to end against PAM (`askpass_e2e.rs`): `(kbd@host) Password: ` classifies as `Password` (remembered), `(kbd@host) Verification code: ` as `Other` (never remembered). A wrong code makes the server restart the round at the password; since `AuthAttempt` can't tell which answer failed, that retry shows `WRONG_SIGN_IN` ("Check your password and code") and asks for both again.
 - Passphrase prompts cut key paths at 100 bytes (ssh's own `%.100s`).
-- Task state: `Paused` from `Preparing` resumes to `Running`; the engine must remember whether the scan finished.
+- Task state: `Paused` from `Preparing` resumes to `Running` in `step`; the queue sets `Preparing` itself when the scan isn't finished (`queue.rs`, `resume`).
