@@ -115,6 +115,7 @@ A host without a server can't be resolved: connecting fails like an unknown host
 | `auth` | optional | Sign-in steps, asked in order on every connection attempt (below). None: it connects at once. |
 | `tree` | optional | Folders by absolute path (below). Paths are normalized (`/a//b/` is `/a/b`). |
 | `fail` | optional | ssh's last words: the connection fails with this after the auth steps, as a refused or dropped connection would (`"Connection closed by 10.0.0.7 port 22"`, `"ssh: connect to host x port 22: Connection refused"`). |
+| `changes` | optional | Changes someone else makes on the server, one step per poll or refresh (below, "Changes elsewhere"). |
 
 ## Sign-in steps
 
@@ -202,6 +203,46 @@ Many similar entries from one line, the same on every run:
 | `mtime` | optional | A date, or `{"end", "every", "jitter"?}`: entry `i` (from 0) of `count` is `every × (count − i)` seconds before `end`, and up to `jitter` seconds earlier, in whole minutes. |
 | `mode` | optional | As for entries. |
 | `seed` | optional | Random draws come from this string; default: the folder's path (`<path>#<n>` for its n-th generator after the first). |
+
+## Changes elsewhere
+
+The real app lists the folder on screen again on a schedule while its window shows (§4.5 of the
+plan: every 2 s in a small folder, slower unfocused, never over 20,000 entries), and animates
+what changed. A fixture has no clock, so polls happen when the app asks for one instead:
+
+- **A poll**: the window gaining focus polls the folder on screen at once. In a script that's
+  `{"focus": false}` then `{"focus": true}`; in a test, `Runtime::window_focus(false)` then
+  `(true)`, or `Command::Poll` to the backend. Nothing polls while the window is hidden
+  (`Runtime::set_live_visible(false)`), nor a folder over 20,000 entries or one that failed to
+  list.
+- **A refresh**: ⌘R (F5) on the folder on screen, or the relist after a file operation.
+
+Each poll or refresh first applies the server's next step of `changes`, then lists. A poll answers
+as the service's does: the whole folder (`Refreshed`) when it differs from what the app was last
+sent, `ListFailed` when listing it now fails, and nothing at all when nothing changed (an empty
+step, or no steps left). A refresh answers with its pages as any listing does. Navigating to
+another folder takes no step.
+
+```json
+"changes": [
+  {"add": "/srv/site/build.log", "kind": "file", "size": 2412, "mtime": "2026-11-25T13:59:50Z"},
+  [{"remove": "/srv/site/notes.txt"}, {"modify": "/srv/site/index.html", "size": 15990}],
+  [],
+  {"remove": "/srv/site/old"}
+]
+```
+
+A step is one change or a list of changes made together (`[]`: nothing changes):
+
+| Change | |
+|---|---|
+| `{"add": PATH, "kind": …, …}` | An entry appears at `PATH`, replacing what was there. The other fields are an entry's (`kind` required; `target`, `size`, `mtime`, `mode`), its name is `PATH`'s last part. An added folder is empty. |
+| `{"remove": PATH}` | `PATH` and everything below it go. Removing the folder on screen (or one above it) makes the next poll find it gone: the app goes up to the nearest folder that still exists and says "PATH was removed". |
+| `{"modify": PATH, "size"?: …, "mtime"?: …}` | The entry at `PATH` gets a new size, date or both (a folder keeps what it holds). |
+
+Paths are absolute and never `/`. A change whose folder doesn't exist (any more) is skipped. Like
+everything else here, the same steps give the same pictures on every run (`tests/flows/external-change`,
+`tests/flows/folder-vanished`).
 
 ## Transfers
 

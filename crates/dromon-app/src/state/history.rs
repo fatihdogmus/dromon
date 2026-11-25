@@ -38,6 +38,14 @@ impl NavHistory {
         Some(to)
     }
 
+    /// The view moved to `at` without a visit (the folder it was in vanished): Back no longer
+    /// leads to where it already is.
+    pub fn landed(&mut self, at: &RemotePath) {
+        if self.back.last() == Some(at) {
+            self.back.pop();
+        }
+    }
+
     /// Where Forward goes from `current`, which becomes the way back.
     pub fn forward(&mut self, current: RemotePath) -> Option<RemotePath> {
         let to = self.forward.pop()?;
@@ -77,6 +85,17 @@ mod tests {
         assert!(h.can_forward());
         h.visit(p("/a"));
         assert!(!h.can_forward());
+    }
+
+    #[test]
+    fn landing_where_back_leads_drops_that_step() {
+        let mut h = NavHistory::default();
+        h.visit(p("/a"));
+        h.visit(p("/a/b"));
+        h.landed(&p("/a/c"));
+        assert!(h.can_back(), "elsewhere: kept");
+        h.landed(&p("/a/b"));
+        assert_eq!(h.back(p("/a/b")), Some(p("/a")));
     }
 
     #[test]

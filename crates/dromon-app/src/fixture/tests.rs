@@ -84,7 +84,7 @@ fn errors_name_their_json_path() {
     assert_eq!(error(r#"{"version": 1, "servers": {"ghost": {"home": "/"}}}"#), "servers.ghost: no host has this alias (add it to hosts)");
     assert_eq!(error(&with_server("{}")), "servers.h.home: missing");
     assert_eq!(error(&with_server(r#"{"home": "~"}"#)), r#"servers.h.home: "~" is not an absolute path"#);
-    assert_eq!(error(&with_server(r#"{"home": "/", "hmoe": "/"}"#)), r#"servers.h: unknown field "hmoe" (expected home, auth, tree, fail)"#);
+    assert_eq!(error(&with_server(r#"{"home": "/", "hmoe": "/"}"#)), r#"servers.h: unknown field "hmoe" (expected home, auth, tree, fail, changes)"#);
     assert_eq!(error(&with_server(r#"{"home": "/", "tree": {"var": []}}"#)), r#"servers.h.tree.var: "var" is not an absolute path"#);
     assert_eq!(error(&with_server(r#"{"home": "/", "tree": {"/a": [], "/a/": []}}"#)), "servers.h.tree./a/: lists /a again (paths are normalized)");
     assert_eq!(error(&with_server(r#"{"home": "/", "tree": {"/a": {"error": "gone"}}}"#)), r#"servers.h.tree./a.error: unknown error "gone" (expected permission-denied, not-found or connection-lost)"#);

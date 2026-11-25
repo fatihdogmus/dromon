@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "description": "One host, web; its /srv/site/old folder is deleted elsewhere at the first poll.",
+  "now": "2026-11-25T14:00:00Z",
+  "hosts": [
+    {"alias": "web", "source": "ssh-config", "user": "deploy", "hostname": "web.example.com"}
+  ],
+  "servers": {
+    "web": {
+      "home": "/srv/site",
+      "tree": {
+        "/srv/site": [
+          {"name": "assets", "kind": "dir", "mtime": "2026-11-25T13:30:00Z"},
+          {"name": "old", "kind": "dir", "mtime": "2026-10-02T09:00:00Z"},
+          {"name": "index.html", "kind": "file", "size": 14812, "mtime": "2026-11-24T18:00:00Z"}
+        ],
+        "/srv/site/old": [
+          {"name": "index.html", "kind": "file", "size": 9012, "mtime": "2026-10-02T09:00:00Z"},
+          {"name": "logo.png", "kind": "file", "size": 30211, "mtime": "2026-10-02T09:00:00Z"}
+        ]
+      },
+      "changes": [
+        {"remove": "/srv/site/old"}
+      ]
+    }
+  }
+}

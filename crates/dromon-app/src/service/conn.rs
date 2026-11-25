@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use dromon_core::{Entry, Error, HostId, HostSpec, PromptAnswer, PromptId, RemotePath};
-use dromon_sftp::Sftp;
+use dromon_sftp::{Sftp, Visibility};
 use dromon_ssh::{AskpassEnv, AskpassRequest, AskpassServer, PasswordStore, SshCommand, spawn};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::{JoinError, JoinHandle};
@@ -24,6 +24,7 @@ use zeroize::Zeroizing;
 use super::auth::{self, AttemptPrompts, PromptIds, Routed};
 use super::fileops::{FileOps, Finished};
 use super::lifecycle::{Effect, Event, Lifecycle, Phase, step};
+use super::poll::{Collector, Outcome, Poller};
 use super::transfers::EngineMsg;
 use super::{Config, Sink};
 use crate::state::{FileOp, OpId, ServiceEvent};
@@ -42,6 +43,10 @@ pub enum ConnCmd {
     Answer(PromptId, PromptAnswer),
     Disconnect,
     FileOp(OpId, FileOp),
+    /// How the window shows now (`poll.rs`).
+    Window(Visibility),
+    /// Poll the folder on screen now, if it's polled at all (the window gained focus).
+    PollNow,
 }
 
 /// What the connection tasks share: configuration, the askpass endpoint, the password store,
@@ -76,16 +81,27 @@ pub fn start<S: Sink>(spec: HostSpec, shared: Shared, sink: S) -> ConnHandle {
         path: None,
         ops: FileOps::default(),
         epoch: 0,
+        poll: Poller::default(),
     };
     tokio::spawn(task.run(cmd_rx, ask_rx));
     ConnHandle { cmds, asks }
 }
 
-/// A folder being listed.
+/// A folder being listed: for the UI (pages go on as they come), or a poll (pages collect
+/// quietly and the whole is compared with what the UI has). One per host at a time.
 struct ListRun {
     path: RemotePath,
     pages: mpsc::Receiver<Result<Vec<Entry>, Error>>,
     first: bool,
+    poll: bool,
+    started: Instant,
+    got: Collector,
+}
+
+impl ListRun {
+    fn new(sftp: &Sftp, path: RemotePath, poll: bool) -> ListRun {
+        ListRun { pages: sftp.list_paged(&path, PAGE), path, first: true, poll, started: Instant::now(), got: Collector::default() }
+    }
 }
 
 /// One connection attempt.
@@ -265,12 +281,20 @@ async fn retry_due(retry: &Option<(u32, Instant)>) -> u32 {
     }
 }
 
+async fn sleep_opt(at: Option<Instant>) {
+    match at {
+        Some(at) => tokio::time::sleep_until(at).await,
+        None => pending().await,
+    }
+}
+
 enum Input {
     Cmd(ConnCmd),
     Ask(AskpassRequest),
     Session(SessionEvent),
     Retry(u32),
     OpEnded(Finished),
+    PollDue,
 }
 
 struct Task<S: Sink> {
@@ -289,11 +313,14 @@ struct Task<S: Sink> {
     /// Counts SFTP sessions that came up: an operation's lost connection only ends the
     /// session it ran on.
     epoch: u64,
+    /// Polling the folder on screen (`poll.rs`).
+    poll: Poller,
 }
 
 impl<S: Sink> Task<S> {
     async fn run(mut self, mut cmds: mpsc::UnboundedReceiver<ConnCmd>, mut asks: mpsc::UnboundedReceiver<AskpassRequest>) {
         loop {
+            let poll_at = self.poll_at();
             let input = tokio::select! {
                 cmd = cmds.recv() => match cmd {
                     Some(cmd) => Input::Cmd(cmd),
@@ -303,6 +330,7 @@ impl<S: Sink> Task<S> {
                 ev = session_next(&mut self.session) => Input::Session(ev),
                 attempt = retry_due(&self.retry) => Input::Retry(attempt),
                 ended = self.ops.next() => Input::OpEnded(ended),
+                _ = sleep_opt(poll_at) => Input::PollDue,
             };
             match input {
                 Input::Cmd(cmd) => self.on_command(cmd).await,
@@ -313,6 +341,7 @@ impl<S: Sink> Task<S> {
                     self.drive(Event::RetryDue { attempt }, None).await;
                 }
                 Input::OpEnded(ended) => self.on_op_ended(ended).await,
+                Input::PollDue => self.start_poll(),
             }
         }
         // The app is quitting: the session drops, killing ssh.
@@ -408,6 +437,41 @@ impl<S: Sink> Task<S> {
             }
             ConnCmd::Disconnect => self.drive(Event::Disconnect, None).await,
             ConnCmd::FileOp(id, op) => self.file_op(id, op),
+            ConnCmd::Window(vis) => {
+                self.poll.window(vis, Instant::now());
+                // Hidden: a poll under way is dropped, so nothing arrives unseen.
+                if vis == Visibility::Hidden
+                    && let Some(s) = &mut self.session
+                    && s.listing.as_ref().is_some_and(|r| r.poll)
+                {
+                    s.listing = None;
+                }
+            }
+            ConnCmd::PollNow => {
+                if self.poll.may_poll() {
+                    self.start_poll();
+                }
+            }
+        }
+    }
+
+    /// When the next poll should start: never while the session is down or a listing is
+    /// under way (exactly one per host).
+    fn poll_at(&self) -> Option<Instant> {
+        let s = self.session.as_ref()?;
+        let idle = s.sftp.is_some() && s.listing.is_none() && self.life.phase == Phase::Ready;
+        if idle { self.poll.due() } else { None }
+    }
+
+    /// Starts a poll of the folder on screen, unless something is being listed already.
+    fn start_poll(&mut self) {
+        let Some(path) = self.path.clone() else { return };
+        let Some(s) = &mut self.session else { return };
+        if s.listing.is_some() || self.life.phase != Phase::Ready {
+            return;
+        }
+        if let Some(sftp) = &s.sftp {
+            s.listing = Some(ListRun::new(sftp, path, true));
         }
     }
 
@@ -474,31 +538,53 @@ impl<S: Sink> Task<S> {
         let Some(run) = &mut s.listing else { return };
         let (host, path) = (self.host.clone(), run.path.clone());
         match page {
+            // A poll's pages wait for the whole folder.
+            Some(Ok(entries)) if run.poll => run.got.take(entries),
             Some(Ok(entries)) => {
+                run.got.copy(&entries);
                 let first = std::mem::replace(&mut run.first, false);
                 self.emit(ServiceEvent::ListingPage { host, path, entries, first, done: false });
             }
             None => {
-                let first = run.first;
-                s.listing = None;
-                self.emit(ServiceEvent::ListingPage { host, path, entries: Vec::new(), first, done: true });
+                let Some(run) = s.listing.take() else { return };
+                let (now, first) = (Instant::now(), run.first);
+                let took = now.saturating_duration_since(run.started);
+                if run.poll {
+                    match self.poll.polled(&path, Ok(run.got), took, now) {
+                        Outcome::Changed(entries) => self.emit(ServiceEvent::Refreshed { host, path, entries }),
+                        Outcome::Failed(error) => self.emit(ServiceEvent::ListFailed { host, path, error }),
+                        Outcome::Quiet => {}
+                    }
+                } else {
+                    self.poll.listed(&path, run.got, took, now);
+                    self.emit(ServiceEvent::ListingPage { host, path, entries: Vec::new(), first, done: true });
+                }
             }
             Some(Err(Error::ConnectionLost)) => {
                 s.listing = None;
                 self.drive(Event::Lost, None).await;
             }
             Some(Err(error)) => {
-                s.listing = None;
-                self.emit(ServiceEvent::ListFailed { host, path, error });
+                let Some(run) = s.listing.take() else { return };
+                if run.poll {
+                    let took = run.started.elapsed();
+                    if let Outcome::Failed(error) = self.poll.polled(&path, Err(error), took, Instant::now()) {
+                        self.emit(ServiceEvent::ListFailed { host, path, error });
+                    }
+                } else {
+                    self.poll.list_failed(&path, &error);
+                    self.emit(ServiceEvent::ListFailed { host, path, error });
+                }
             }
         }
     }
 
-    /// Lists `path` if the session is up (a newer listing replaces one in flight).
+    /// Lists `path` for the UI if the session is up (it replaces a listing or poll in flight).
     fn list(&mut self, path: RemotePath) {
         let Some(s) = &mut self.session else { return };
         let Some(sftp) = &s.sftp else { return };
-        s.listing = Some(ListRun { pages: sftp.list_paged(&path, PAGE), path, first: true });
+        self.poll.listing(&path);
+        s.listing = Some(ListRun::new(sftp, path, false));
     }
 
     /// ssh is gone (or SFTP couldn't start): collects its last words and tells the machine.
@@ -552,6 +638,7 @@ impl<S: Sink> Task<S> {
                     Effect::Opened => {
                         let start = self.session.as_ref().map_or_else(RemotePath::root, |s| s.home.clone());
                         self.path = None;
+                        self.poll.forget();
                         self.emit(ServiceEvent::Opened { host: self.host.clone(), start });
                         self.session_up();
                     }

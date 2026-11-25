@@ -1,0 +1,10 @@
+{
+  "description": "Open web, then the old folder. It's deleted elsewhere; the window loses focus and gets it back (a poll): the view goes up to /srv/site, which no longer lists old, and a toast says “/srv/site/old was removed”.",
+  "events": [
+    {"t": 0.5, "type": "tap", "key": "host-web"},
+    {"t": 1.0, "type": "double-click", "key": "rows/old"},
+    {"t": 2.0, "focus": false},
+    {"t": 2.1, "focus": true},
+    {"t": 3.5, "type": "mark", "name": "end"}
+  ]
+}

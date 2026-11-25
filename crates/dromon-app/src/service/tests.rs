@@ -465,3 +465,53 @@ async fn a_prompt_closes_when_ssh_exits_without_its_answer() {
     let log = fx.seen.iter().filter(|ev| matches!(ev, ServiceEvent::Log { .. })).count();
     assert!(log > 0);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_folder_on_screen_is_polled_only_while_shown_and_not_while_reconnecting() {
+    let Some(mut fx) = Fixture::start() else { return };
+    let start = fx.sign_in().await;
+    fx.send(Command::List { host: host("pw"), path: start.clone() });
+    fx.listing(&start).await;
+    let root = fx.root();
+    let about_start = |ev: &ServiceEvent| {
+        matches!(ev, ServiceEvent::ListingPage { path, .. } | ServiceEvent::Refreshed { path, .. } | ServiceEvent::ListFailed { path, .. } if path.starts_with(&root))
+    };
+
+    // Until the window says it shows, nothing polls.
+    std::fs::write(fx.local("early.txt"), "").unwrap();
+    assert!(fx.none_for(Duration::from_secs(3), about_start).await, "no window state yet: no polls");
+
+    // Shown and focused: the change arrives as a refresh, with no command.
+    fx.send(Command::Window { visible: true, focused: true });
+    let names = fx
+        .until("a refresh", |ev| match ev {
+            ServiceEvent::Refreshed { path, entries, .. } if *path == start => Some(entries.iter().map(|e| e.name.clone()).collect::<Vec<_>>()),
+            _ => None,
+        })
+        .await;
+    assert!(names.contains(&"early.txt".to_owned()), "{names:?}");
+    // Nothing new: nothing sent.
+    assert!(fx.none_for(Duration::from_millis(4500), about_start).await, "unchanged polls are quiet");
+
+    // The connection drops: nothing polls until it's back, then the folder lists once.
+    let mark = fx.seen.len();
+    std::fs::write(fx.dir.path().join("drop"), "").unwrap();
+    fx.status("pw", ConnStatus::Reconnecting { attempt: 1 }).await;
+    std::fs::write(fx.local("while-away.txt"), "").unwrap();
+    fx.status("pw", ConnStatus::Ready).await;
+    let between = fx.seen[mark..].iter().filter(|ev| matches!(ev, ServiceEvent::Refreshed { .. })).count();
+    assert_eq!(between, 0, "no polls while reconnecting");
+    assert_eq!(fx.listing(&start).await.iter().filter(|n| *n == "while-away.txt").count(), 1, "relisted once after the reconnect");
+    assert!(fx.none_for(Duration::from_millis(2500), about_start).await, "and not again: the next polls find nothing new");
+
+    // Hidden: changes wait until it shows again.
+    fx.send(Command::Window { visible: false, focused: false });
+    std::fs::write(fx.local("while-hidden.txt"), "").unwrap();
+    assert!(fx.none_for(Duration::from_secs(5), about_start).await, "nothing while hidden");
+    fx.send(Command::Window { visible: true, focused: false });
+    fx.until("the refresh once shown", |ev| match ev {
+        ServiceEvent::Refreshed { entries, .. } if entries.iter().any(|e| e.name == "while-hidden.txt") => Some(()),
+        _ => None,
+    })
+    .await;
+}

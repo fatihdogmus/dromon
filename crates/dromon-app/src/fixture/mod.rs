@@ -13,11 +13,14 @@
 //!   fake, instant I/O against the folder trees; finished uploads show in later listings.
 //! - [`tree::Tree`] is the folder trees now: the fixture's, with what transfers and file
 //!   operations (new folder, rename, delete) changed in them, in one overlay that both use.
+//! - `changes.rs`: a server's scripted changes "made elsewhere", applied one step per poll or
+//!   refresh, which the backend answers as the service's polling would (§4.5).
 //!
 //! `dromon --fixture <file.json>` runs the app on a fixture: no service thread, no ssh, no ssh
 //! config; the fixture file is the only thing it reads.
 
 mod backend;
+mod changes;
 mod generate;
 mod parse;
 pub mod transfers;
@@ -25,6 +28,8 @@ mod tree;
 
 #[cfg(test)]
 mod backend_tests;
+#[cfg(test)]
+mod changes_tests;
 #[cfg(test)]
 mod fileops_tests;
 #[cfg(test)]
@@ -82,6 +87,21 @@ pub struct Server {
     pub tree: BTreeMap<RemotePath, Node>,
     /// ssh's last words when the connection fails after sign-in.
     pub fail: Option<String>,
+    /// Changes made "elsewhere", one step per poll or refresh of the folder on screen, in
+    /// order (`changes.rs`).
+    pub changes: Vec<Vec<Change>>,
+}
+
+/// One change someone else makes on a server, for polling to notice (`docs/fixtures.md`,
+/// "Changes elsewhere").
+#[derive(Clone, Debug, PartialEq)]
+pub enum Change {
+    /// An entry appears at the path (replacing what was there).
+    Add { path: RemotePath, entry: Entry },
+    /// The path and everything below it go.
+    Remove { path: RemotePath },
+    /// The entry at the path gets a new size or date.
+    Modify { path: RemotePath, size: Option<u64>, mtime: Option<i64> },
 }
 
 /// One sign-in step, as ssh would ask it.

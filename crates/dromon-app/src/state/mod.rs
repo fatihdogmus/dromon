@@ -15,6 +15,7 @@ pub mod log;
 pub mod menu;
 pub mod ops;
 pub mod prefs;
+pub mod refresh;
 pub mod selection;
 pub mod service;
 pub mod sheets;
@@ -113,6 +114,8 @@ pub struct App {
     /// Where downloads go (§3.5: Downloads, or the folder set in Settings).
     pub downloads: PathBuf,
     inbox: VecDeque<ServiceEvent>,
+    /// The window's state as the service polls by, and refresh animation (`refresh.rs`).
+    pub poll: refresh::PollUi,
 }
 
 /// What the user did, in the app's terms.
@@ -219,6 +222,7 @@ impl App {
             // `run` puts the user's real Downloads folder here; scenes and tests keep this.
             downloads: PathBuf::from("Downloads"),
             inbox: VecDeque::new(),
+            poll: refresh::PollUi::default(),
         }
     }
 
@@ -335,28 +339,42 @@ impl App {
                 self.remember_folder(&host, &path);
                 self.send(Command::List { host, path });
             }
-            ServiceEvent::Listing { host, path, entries } => {
+            ServiceEvent::Listing { host, path, entries } | ServiceEvent::Refreshed { host, path, entries } => {
                 if let Some(c) = self.conns.get_mut(&host) {
                     if path == c.cwd {
                         c.fallback = None;
                     }
+                    let seq = c.fresh.seq;
                     c.set_listing(&path, entries);
                     if c.filter.is_on() && self.active.as_ref() == Some(&host) {
                         c.set_filter(Filter::On(self.ui.filter_edit.text.clone()));
                     }
+                    if c.fresh.seq != seq {
+                        self.refreshed();
+                    }
                 }
+                self.vanish_landed(&host, &path);
             }
             ServiceEvent::ListingPage { host, path, entries, first, done } => {
                 if let Some(c) = self.conns.get_mut(&host) {
                     if path == c.cwd {
                         c.fallback = None;
                     }
+                    let seq = c.fresh.seq;
                     if c.apply_page(&path, entries, first, done) && c.filter.is_on() && self.active.as_ref() == Some(&host) {
                         c.set_filter(Filter::On(self.ui.filter_edit.text.clone()));
                     }
+                    if c.fresh.seq != seq {
+                        self.refreshed();
+                    }
                 }
+                self.vanish_landed(&host, &path);
             }
             ServiceEvent::ListFailed { host, path, error } => {
+                // The folder on screen is gone: up to the nearest one that exists (§6.8).
+                if self.vanished(&host, &path, &error) {
+                    return;
+                }
                 let Some(c) = self.conns.get_mut(&host) else { return };
                 // The folder remembered from last time is gone or closed now: go home instead.
                 if path == c.cwd
@@ -368,6 +386,7 @@ impl App {
                     return;
                 }
                 c.set_failed(&path, error.into());
+                self.vanish_landed(&host, &path);
             }
             ServiceEvent::Prompt(prompt) => self.ui.sheets.on_prompt(prompt),
             ServiceEvent::PromptClosed(id) => self.ui.sheets.on_closed(id),

@@ -35,6 +35,8 @@ mod ui_file_tests;
 #[cfg(test)]
 mod ui_menu_tests;
 #[cfg(test)]
+mod ui_poll_tests;
+#[cfg(test)]
 mod ui_sheet_tests;
 #[cfg(test)]
 mod ui_tests;
@@ -96,6 +98,8 @@ pub fn app() -> RuneApp<App> {
         .titlebar(Titlebar::new(theme::size::TOOLBAR))
         // Closing the window with transfers running asks first (the quit sheet).
         .on_close_request(|s, _tx| if s.close_requested() { rune::CloseResponse::Close } else { rune::CloseResponse::Defer })
+        // Nothing polls while the window is off screen (§4.5).
+        .on_visibility(views::window_visibility)
 }
 
 /// Whether `DROMON_MOCK=1` asks for the built-in demo fixture.

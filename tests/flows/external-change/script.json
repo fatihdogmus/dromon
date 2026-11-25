@@ -1,0 +1,12 @@
+{
+  "description": "Open web and select index.html. The window loses focus and gets it back (a poll): build.log and the dist folder, made elsewhere, slide in under a mint wash that fades over about 1.2 s; nothing scrolls and index.html stays selected. A second poll: notes.txt, deleted elsewhere, collapses out, and index.html's size and date change in place.",
+  "events": [
+    {"t": 0.5, "type": "tap", "key": "host-web"},
+    {"t": 1.0, "type": "tap", "key": "rows/index.html"},
+    {"t": 1.5, "focus": false},
+    {"t": 1.6, "focus": true},
+    {"t": 3.5, "focus": false},
+    {"t": 3.6, "focus": true},
+    {"t": 5.0, "type": "mark", "name": "end"}
+  ]
+}

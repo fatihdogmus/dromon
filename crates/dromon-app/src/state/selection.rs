@@ -127,6 +127,12 @@ impl Selection {
         }
     }
 
+    /// Puts the keyboard's cursor on `name` without selecting it (its row left; this is the
+    /// neighbour the arrows go on from).
+    pub fn set_cursor(&mut self, name: &str) {
+        self.cursor = Some(name.to_owned());
+    }
+
     /// Drops names that are no longer on screen (after a refresh, a filter or hiding
     /// dotfiles); the cursor and anchor go with them.
     pub fn retain(&mut self, rows: &[&str]) {

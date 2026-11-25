@@ -4,11 +4,12 @@
 use std::borrow::Cow;
 
 use dromon_core::{ConnStatus, Entry, SortDir, SortKey};
-use rune::{Align, Color, El, GrowthSpec, ScrollSpec, Tx, col, el, icon, oklch, row, text};
+use rune::{Align, Anim, AnimExt, Color, Curve, Cx, Easing, El, GrowthSpec, ScrollSpec, Transition, Tx, col, el, icon, oklch, row, text};
 
 use super::{LIST, Paint, ROWS, drag, drop, edit, menu, run, states};
 use crate::fmt;
 use crate::icons;
+use crate::state::refresh::HIGHLIGHT;
 use crate::state::{Action, App, ConnView, FileAction, ListError, Listing, MenuKind, RowTarget};
 use crate::theme::{motion, radius, size, space, type_};
 
@@ -180,7 +181,9 @@ fn file_row(s: &App, c: &ConnView, i: usize, p: Paint) -> El {
     if drop_here {
         cells = cells.border(1.5, t.accent).shadow(2.0, 8.0, t.shadow);
     }
+    let fresh = c.fresh.is_new(&e.name);
     let cells = cells
+        .children(fresh.then(|| highlight(c.fresh.seq, c.fresh.seen, p)))
         .child(file_icon(p, e, selected || drop_here))
         .child(name)
         .child(size_cell)
@@ -201,6 +204,11 @@ fn file_row(s: &App, c: &ConnView, i: usize, p: Paint) -> El {
     if cut {
         r = r.opacity(0.5);
     }
+    if fresh {
+        // A row a refresh brought slides and fades in as its space opens (§4.5); under
+        // Reduce Motion Rune makes that a short fade.
+        r = r.transition(Transition::offset(0.0, 8.0).combined(Transition::opacity())).transition_motion(motion::MOVE, motion::MOVE);
+    }
     if edit::renaming(s, c, e).is_none() {
         r = drag::row(r, &e.name);
     }
@@ -209,6 +217,40 @@ fn file_row(s: &App, c: &ConnView, i: usize, p: Paint) -> El {
         r = drop::folder_row(r, &e.name).data(target);
     }
     r
+}
+
+/// Whether the list's refresh animations take the reduce-motion path (§6.6): no slide or
+/// collapse, the wash holds and then fades quickly. The one place they read the preference:
+/// today the system's (or a test's, `Runtime::set_system_reduced_motion`) through Rune.
+pub(super) fn reduce_motion(_s: &App, cx: &Cx<App>) -> bool {
+    cx.is_reduced_motion()
+}
+
+/// The mint wash under a row the last refresh brought (§4.5): it shows whole as the row
+/// mounts, and once on screen (its `on_mount` marks the refresh seen) decays over
+/// [`HIGHLIGHT`] seconds. Under Reduce Motion it's colour, not motion (§6.6): it holds, then
+/// fades quickly at the end. Pointer input passes through it.
+fn highlight(seq: u64, seen: bool, p: Paint) -> El {
+    let fade: Anim = if p.reduced {
+        Curve::tween(0.15, Easing::EASE_OUT).delay(HIGHLIGHT - 0.15)
+    } else {
+        Curve::tween(HIGHLIGHT, Easing::EASE_OUT).into()
+    };
+    el().key(format!("fresh-{seq}"))
+        .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
+        .radius(radius::ROW)
+        // Lighter than the selection's fill, with an edge, so a new row never reads as selected.
+        .fill(p.t.accent.alpha(0.1))
+        .border(1.0, p.t.accent.alpha(0.55))
+        .opacity(if seen { 0.0 } else { 1.0 })
+        .opacity_motion(fade)
+        .transition(Transition::none())
+        .inert()
+        .on_mount(move |s: &mut App, tx: &mut Tx| {
+            if s.conn_mut().is_some_and(|c| c.fresh.shown(seq)) {
+                tx.animated();
+            }
+        })
 }
 
 /// The glyph for an entry: folders in the accent, file categories in a quiet tint, a link

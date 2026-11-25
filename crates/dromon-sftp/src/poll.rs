@@ -68,6 +68,13 @@ impl PollSchedule {
         self.factor = 1;
     }
 
+    /// The delay the schedule stands at for a folder of `entries` entries, without a poll to
+    /// learn from: the backoff stays as it is. For rescheduling when only the visibility
+    /// changed (the window lost focus, or came back on screen). `None`: don't poll.
+    pub fn current(&self, entries: usize, vis: Visibility) -> Option<Duration> {
+        base_interval(entries, vis).map(|base| base * self.factor)
+    }
+
     /// The delay before the next poll of a folder with `entries` entries, given how long the
     /// last poll took (`Duration::ZERO` before the first). `None`: don't schedule a poll; the
     /// backoff is then left as it is.
@@ -158,6 +165,18 @@ mod tests {
         // Same factor applied to the unfocused, larger-folder base (8 s): 1 s isn't slow there,
         // and it's exactly 1/16 of 16 s, so the backoff decays.
         assert_eq!(s.next_delay(2_000, Visibility::VisibleUnfocused, S(1)), Some(S(8)));
+    }
+
+    #[test]
+    fn current_reads_the_schedule_without_moving_it() {
+        let mut s = PollSchedule::new();
+        assert_eq!(s.current(10, Visibility::Focused), Some(S(2)));
+        s.next_delay(10, Visibility::Focused, S(1)); // backs off to 4 s
+        assert_eq!(s.current(10, Visibility::Focused), Some(S(4)));
+        assert_eq!(s.current(10, Visibility::VisibleUnfocused), Some(S(8)));
+        assert_eq!(s.current(10, Visibility::Hidden), None);
+        assert_eq!(s.current(20_001, Visibility::Focused), None);
+        assert_eq!(s.factor(), 2, "reading it changed nothing");
     }
 
     #[test]

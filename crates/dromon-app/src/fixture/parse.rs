@@ -13,7 +13,7 @@ use dromon_transfer::{ConflictView, JobId, JobKind, JobView, Progress, Reveal, S
 use serde_json::{Map, Value};
 
 use super::generate::{Generator, MAX_COUNT, Mtime, Pattern, Size};
-use super::{FIXTURE_JOBS, Fixture, Item, Node, Server, Step, TreeError, VERSION, default_mode, default_size};
+use super::{Change, FIXTURE_JOBS, Fixture, Item, Node, Server, Step, TreeError, VERSION, default_mode, default_size};
 
 /// A fixture that can't be used, and where.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -424,7 +424,7 @@ fn hosts(v: &Value, at: &At) -> R<Vec<HostSpec>> {
 
 fn server(v: &Value, at: &At) -> R<Server> {
     let m = object(v, at)?;
-    known(m, &["home", "auth", "tree", "fail"], at)?;
+    known(m, &["home", "auth", "tree", "fail", "changes"], at)?;
     let home = absolute(&text(required(m, "home", at)?, &at.key("home"))?, &at.key("home"))?;
     let mut auth = Vec::new();
     if let Some(v) = optional(m, "auth") {
@@ -446,7 +446,56 @@ fn server(v: &Value, at: &At) -> R<Server> {
         }
     }
     let fail = optional(m, "fail").map(|v| text(v, &at.key("fail"))).transpose()?;
-    Ok(Server { home, auth, tree, fail })
+    let mut changes = Vec::new();
+    if let Some(v) = optional(m, "changes") {
+        let at = at.key("changes");
+        for (i, v) in list(v, &at)?.iter().enumerate() {
+            let at = at.item("step", i);
+            // A step is one change, or a list of changes made together.
+            let step = match v.as_array() {
+                Some(all) => all.iter().enumerate().map(|(j, v)| change(v, &at.item("change", j))).collect::<R<Vec<_>>>()?,
+                None => vec![change(v, &at)?],
+            };
+            changes.push(step);
+        }
+    }
+    Ok(Server { home, auth, tree, fail, changes })
+}
+
+/// `{"add": PATH, "kind": …, …entry fields}`, `{"remove": PATH}` or
+/// `{"modify": PATH, "size"?: …, "mtime"?: …}`.
+fn change(v: &Value, at: &At) -> R<Change> {
+    let m = object(v, at)?;
+    let path_at = |k: &str| -> R<RemotePath> {
+        let at = at.key(k);
+        let path = absolute(&text(&m[k], &at)?, &at)?;
+        if path.is_root() { at.err("the root can't change") } else { Ok(path) }
+    };
+    if m.contains_key("add") {
+        let path = path_at("add")?;
+        let mut fields = m.clone();
+        fields.remove("add");
+        if fields.contains_key("name") || fields.contains_key("generate") {
+            return at.err("an added entry takes its name from its path, and can't be a generator");
+        }
+        fields.insert("name".into(), Value::String(path.file_name().unwrap_or_default().to_owned()));
+        let Item::Entry(entry) = item(&Value::Object(fields), at)? else { return at.err("expected an entry") };
+        return Ok(Change::Add { path, entry });
+    }
+    if m.contains_key("remove") {
+        known(m, &["remove"], at)?;
+        return Ok(Change::Remove { path: path_at("remove")? });
+    }
+    if m.contains_key("modify") {
+        known(m, &["modify", "size", "mtime"], at)?;
+        let size = optional(m, "size").map(|v| uint(v, &at.key("size"))).transpose()?;
+        let mtime = optional(m, "mtime").map(|v| time(v, &at.key("mtime"))).transpose()?;
+        if size.is_none() && mtime.is_none() {
+            return at.err("a modify changes a size, an mtime or both");
+        }
+        return Ok(Change::Modify { path: path_at("modify")?, size, mtime });
+    }
+    at.err("a change is {\"add\": path, …}, {\"remove\": path} or {\"modify\": path, …}")
 }
 
 fn step(v: &Value, at: &At) -> R<Step> {

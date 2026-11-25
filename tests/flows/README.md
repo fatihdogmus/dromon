@@ -17,6 +17,11 @@ element's centre; `upload-conflict` drops below the last row). Scripts can't pas
 `paste` events carry text, HTML, RTF and images only): ⌘V with files is covered by
 `ui_transfer_tests.rs`.
 
+Polling: a poll happens when the window gets focus back, `{"focus": false}` then
+`{"focus": true}`; the fixture's `changes` (`docs/fixtures.md`, "Changes elsewhere") land one
+step per poll or ⌘R. A refresh's new rows carry a wash `fresh-<n>` (n counts refreshes that
+changed rows); the vanished-folder toast is `toast-note-<n>` with `toast-note-<n>-text`.
+
 File operations: `new-folder` (the new folder's row), `edit-input` (its name field, and a
 renamed row's), `edit-error-text`, the delete sheet's `delete-confirm` and `delete-cancel`,
 toasts `toast-op-<id>` with `toast-op-<id>-text` and `toast-op-<id>-dismiss`, a row drag's

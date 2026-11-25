@@ -14,6 +14,10 @@
 //! Transfer commands go to [`Engine`] (`fixture/transfers.rs`). Its tree (`fixture/tree.rs`:
 //! the fixture's folders with what transfers and file operations changed) is the one this
 //! backend lists and runs file operations on.
+//!
+//! Polling (§4.5) has no clock either: `Command::Poll` (the window gaining focus) polls at once
+//! through the service's own `Poller`, after the server's next changes made elsewhere
+//! (`changes.rs`); a refresh of the folder on screen (⌘R) takes the next changes too.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
@@ -23,9 +27,14 @@ use dromon_ssh::{AskpassEnv, AuthAttempt, AuthDecision, PasswordStore, SshComman
 use secrecy::ExposeSecret;
 use zeroize::Zeroize;
 
+use dromon_sftp::Visibility;
+use tokio::time::{Duration, Instant};
+
+use super::changes;
 use super::transfers::Engine;
 use super::{Fixture, Step};
 use crate::service::lifecycle::{self, Event, Lifecycle, Phase};
+use crate::service::poll::{Collector, Outcome, Poller};
 use crate::state::{Backend, Command, FileOp, OpId, ServiceEvent, TransferCommand};
 
 /// Entries per listing page, as the service pages them (§4.4).
@@ -44,6 +53,8 @@ pub struct FixtureBackend {
     /// Transfers (`fixture::transfers`); it also owns the folder trees as they are now, which
     /// listings and file operations use.
     transfers: Engine,
+    /// How the window shows (`Command::Window`): polls only while it's on screen.
+    window: Visibility,
 }
 
 #[derive(Default)]
@@ -57,6 +68,10 @@ struct Conn {
     trusted: bool,
     /// The folder on screen, listed again after a reconnect.
     path: Option<RemotePath>,
+    /// Its polling, as the service's (its clock unused: polls happen when asked).
+    poll: Poller,
+    /// The server's next step of changes made elsewhere (`changes.rs`).
+    next_change: usize,
 }
 
 /// One connection attempt, at auth step `step`.
@@ -104,7 +119,7 @@ fn first_line(text: &str) -> &str {
 impl FixtureBackend {
     pub fn new(fixture: Arc<Fixture>) -> Self {
         let transfers = Engine::new(fixture.clone());
-        FixtureBackend { fixture, conns: BTreeMap::new(), store: PasswordStore::new(), last_prompt: 0, transfers }
+        FixtureBackend { fixture, conns: BTreeMap::new(), store: PasswordStore::new(), last_prompt: 0, transfers, window: Visibility::Hidden }
     }
 
     /// Whether `host`'s session is up (ready, its "ssh" running).
@@ -217,6 +232,7 @@ impl FixtureBackend {
                 let start = self.fixture.server(host.as_str()).map_or_else(RemotePath::root, |s| s.home.clone());
                 if let Some(c) = self.conns.get_mut(host) {
                     c.path = None;
+                    c.poll.forget();
                 }
                 out.push(ServiceEvent::Opened { host: host.clone(), start });
             }
@@ -424,15 +440,71 @@ impl FixtureBackend {
         if conn.life.phase != Phase::Ready || conn.attempt.is_none() {
             return;
         }
-        conn.path = Some(path.clone());
+        // Listing the folder already on screen again (⌘R) is a refresh: what changed
+        // elsewhere since shows.
+        if conn.path.as_ref() == Some(&path) {
+            self.change_elsewhere(host);
+        }
+        if let Some(conn) = self.conns.get_mut(host) {
+            conn.path = Some(path.clone());
+        }
         self.list_now(host, path, out);
     }
 
     fn list_now(&mut self, host: &HostId, path: RemotePath, out: &mut Vec<ServiceEvent>) {
-        match self.transfers.tree.list(host, &path) {
+        let listed = self.transfers.tree.list(host, &path);
+        if let Some(c) = self.conns.get_mut(host) {
+            c.poll.listing(&path);
+            match &listed {
+                Ok(entries) => {
+                    let mut got = Collector::default();
+                    got.copy(entries);
+                    c.poll.listed(&path, got, Duration::ZERO, Instant::now());
+                }
+                Err(e) => c.poll.list_failed(&path, e),
+            }
+        }
+        match listed {
             Ok(entries) => out.extend(pages(host, &path, entries)),
             Err(Error::ConnectionLost) => self.drive(host, Work::Life(Event::Lost), out),
             Err(error) => out.push(ServiceEvent::ListFailed { host: host.clone(), path, error }),
+        }
+    }
+
+    /// The server's next step of changes made elsewhere, if any are left.
+    fn change_elsewhere(&mut self, host: &HostId) {
+        let Some(steps) = self.fixture.server(host.as_str()).map(|s| &s.changes) else { return };
+        let Some(c) = self.conns.get_mut(host) else { return };
+        if let Some(step) = steps.get(c.next_change) {
+            c.next_change += 1;
+            changes::apply(&mut self.transfers.tree, host, step);
+        }
+    }
+
+    /// A poll of `host`'s folder on screen, as the service's: only while the window shows and
+    /// the folder is one that's polled; the next changes made elsewhere land first; it answers
+    /// `Refreshed` or `ListFailed` when what the UI has is out of date, else nothing.
+    fn poll(&mut self, host: &HostId, out: &mut Vec<ServiceEvent>) {
+        let window = self.window;
+        let up = self.up(host);
+        let Some(c) = self.conns.get_mut(host) else { return };
+        c.poll.window(window, Instant::now());
+        let Some(path) = c.path.clone().filter(|_| up && c.poll.may_poll()) else { return };
+        self.change_elsewhere(host);
+        let result = match self.transfers.tree.list(host, &path) {
+            Err(Error::ConnectionLost) => return self.drive(host, Work::Life(Event::Lost), out),
+            Ok(entries) => {
+                let mut got = Collector::default();
+                got.take(entries);
+                Ok(got)
+            }
+            Err(e) => Err(e),
+        };
+        let Some(c) = self.conns.get_mut(host) else { return };
+        match c.poll.polled(&path, result, Duration::ZERO, Instant::now()) {
+            Outcome::Changed(entries) => out.push(ServiceEvent::Refreshed { host: host.clone(), path, entries }),
+            Outcome::Failed(error) => out.push(ServiceEvent::ListFailed { host: host.clone(), path, error }),
+            Outcome::Quiet => {}
         }
     }
 
@@ -488,6 +560,14 @@ impl Backend for FixtureBackend {
             },
             Command::Transfer(cmd) => self.transfer(cmd, &mut out),
             Command::FileOp { id, host, op } => self.file_op(id, host, op, &mut out),
+            Command::Window { visible, focused } => {
+                self.window = match (visible, focused) {
+                    (false, _) => Visibility::Hidden,
+                    (true, true) => Visibility::Focused,
+                    (true, false) => Visibility::VisibleUnfocused,
+                };
+            }
+            Command::Poll { host } => self.poll(&host, &mut out),
         }
         out
     }

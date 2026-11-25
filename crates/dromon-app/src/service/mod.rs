@@ -19,6 +19,8 @@ mod fileops;
 pub(crate) mod hosts;
 /// Also drives the fixture backend's connections, so both change status alike.
 pub(crate) mod lifecycle;
+/// Adaptive polling of the folder on screen (§4.5); the fixture backend's polls use it too.
+pub(crate) mod poll;
 mod transfers;
 
 // A shell-script fake ssh and OpenSSH's sftp-server: Unix only.
@@ -32,6 +34,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use dromon_core::{ConnStatus, HostId, HostSpec};
+use dromon_sftp::Visibility;
 use dromon_ssh::{AskpassRequest, AskpassServer, ConfigSources, PasswordStore, ssh_program};
 use tokio::sync::mpsc;
 
@@ -56,8 +59,12 @@ impl Clone for RuneSink {
 
 impl Sink for RuneSink {
     fn emit(&self, ev: ServiceEvent) {
-        self.0.update_if(move |app, _tx| {
+        self.0.update_if(move |app, tx| {
             app.apply(ev);
+            // A refresh that changed rows animates them (§4.5), though no input caused it.
+            if app.take_animate() {
+                tx.animated();
+            }
             true
         });
     }
@@ -164,10 +171,12 @@ pub async fn run<S: Sink>(mut commands: Commands, sink: S, cfg: Config) {
     let engine = transfers::start(sink.clone());
     let shared = Shared { cfg: Arc::new(cfg), askpass, store: store.clone(), ids: PromptIds::default(), engine };
     let mut conns: HashMap<HostId, ConnHandle> = HashMap::new();
+    // Nothing polls until the UI says the window shows.
+    let mut window = Visibility::Hidden;
     loop {
         tokio::select! {
             cmd = commands.recv() => match cmd {
-                Some(cmd) => dispatch(cmd, &known, &mut conns, &shared, &sink),
+                Some(cmd) => dispatch(cmd, &known, &mut conns, &shared, &sink, &mut window),
                 None => break,
             },
             Some(req) = recv_opt(&mut requests) => route(req, &conns),
@@ -182,7 +191,14 @@ pub async fn run<S: Sink>(mut commands: Commands, sink: S, cfg: Config) {
     auth::lock(&store).clear_all();
 }
 
-fn dispatch<S: Sink>(cmd: Command, known: &HashMap<HostId, HostSpec>, conns: &mut HashMap<HostId, ConnHandle>, shared: &Shared, sink: &S) {
+fn dispatch<S: Sink>(
+    cmd: Command,
+    known: &HashMap<HostId, HostSpec>,
+    conns: &mut HashMap<HostId, ConnHandle>,
+    shared: &Shared,
+    sink: &S,
+    window: &mut Visibility,
+) {
     match cmd {
         Command::Connect { host } => {
             let Some(spec) = known.get(&host).cloned() else {
@@ -192,7 +208,9 @@ fn dispatch<S: Sink>(cmd: Command, known: &HashMap<HostId, HostSpec>, conns: &mu
             };
             let alive = conns.get(&host).is_some_and(|c| !c.cmds.is_closed());
             if !alive {
-                conns.insert(host.clone(), conn::start(spec.clone(), shared.clone(), sink.clone()));
+                let c = conn::start(spec.clone(), shared.clone(), sink.clone());
+                let _ = c.cmds.send(ConnCmd::Window(*window));
+                conns.insert(host.clone(), c);
             }
             if let Some(c) = conns.get(&host) {
                 let _ = c.cmds.send(ConnCmd::Connect(spec));
@@ -235,6 +253,21 @@ fn dispatch<S: Sink>(cmd: Command, known: &HashMap<HostId, HostSpec>, conns: &mu
             };
             if unsent {
                 sink.emit(ServiceEvent::FileOpFailed { id, host, error: dromon_core::Error::ConnectionLost });
+            }
+        }
+        Command::Window { visible, focused } => {
+            *window = match (visible, focused) {
+                (false, _) => Visibility::Hidden,
+                (true, true) => Visibility::Focused,
+                (true, false) => Visibility::VisibleUnfocused,
+            };
+            for c in conns.values() {
+                let _ = c.cmds.send(ConnCmd::Window(*window));
+            }
+        }
+        Command::Poll { host } => {
+            if let Some(c) = conns.get(&host) {
+                let _ = c.cmds.send(ConnCmd::PollNow);
             }
         }
     }

@@ -32,6 +32,13 @@ pub enum Command {
     /// screen when the operation changed it ([`FileOp::relists`]). A host that isn't connected
     /// answers `FileOpFailed` with [`Error::ConnectionLost`] at once.
     FileOp { id: OpId, host: HostId, op: FileOp },
+    /// How the window shows (§4.5): the folder on screen of each connected host is polled
+    /// only while `visible`, at the focused or the slower unfocused interval. Until the first
+    /// one arrives the service polls nothing.
+    Window { visible: bool, focused: bool },
+    /// Poll `host`'s folder on screen now (the window just gained focus): answered like any
+    /// poll, with `Refreshed` or `ListFailed` when it changed, else nothing.
+    Poll { host: HostId },
 }
 
 /// Identifies one file operation, chosen by the UI (unique per session).
@@ -135,6 +142,10 @@ pub enum ServiceEvent {
     /// `entries` may be empty).
     ListingPage { host: HostId, path: RemotePath, entries: Vec<Entry>, first: bool, done: bool },
     ListFailed { host: HostId, path: RemotePath, error: Error },
+    /// A poll found the folder on screen changed (§4.5): its whole listing now. Always a
+    /// refresh of a folder already listed, never a navigation; polls that find nothing new
+    /// send nothing.
+    Refreshed { host: HostId, path: RemotePath, entries: Vec<Entry> },
     /// ssh asks something only the user can answer: show a sheet (or, for a notice, a toast).
     Prompt(Prompt),
     /// The prompt went away without an answer from here (ssh hung up, a notice ended).
@@ -186,6 +197,7 @@ pub fn trace_line(ev: &ServiceEvent) -> String {
             format!("ListingPage host={host} entries={} done={done}", entries.len())
         }
         ServiceEvent::ListFailed { host, .. } => format!("ListFailed host={host}"),
+        ServiceEvent::Refreshed { host, entries, .. } => format!("Refreshed host={host} entries={}", entries.len()),
         ServiceEvent::Prompt(p) => format!("Prompt host={} id={}", p.host, p.id.0),
         ServiceEvent::PromptClosed(id) => format!("PromptClosed id={}", id.0),
         ServiceEvent::Log { host, .. } => format!("Log host={host}"),
@@ -292,6 +304,13 @@ mod tests {
         ];
         let lines: Vec<String> = events.iter().map(trace_line).collect();
         assert_eq!(lines, ["FileOpProgress host=prod id=3", "FileOpDone host=prod id=3", "FileOpFailed host=prod id=4"]);
+    }
+
+    #[test]
+    fn a_refresh_trace_line_counts_entries_and_names_none() {
+        let entry = Entry { name: "secret.txt".into(), kind: dromon_core::EntryKind::File, size: 1, mtime: None, mode: None };
+        let ev = ServiceEvent::Refreshed { host: HostId("prod".into()), path: RemotePath::new("/secret"), entries: vec![entry] };
+        assert_eq!(trace_line(&ev), "Refreshed host=prod entries=1");
     }
 
     fn p(s: &str) -> RemotePath {

@@ -397,6 +397,48 @@ pub fn icons(s: &mut App) {
     s.apply(ServiceEvent::Listing { host, path: cwd, entries });
 }
 
+/// The site's entries now, changed by `f`, as a poll would bring them.
+fn polled(s: &mut App, f: impl FnOnce(&mut Vec<dromon_core::Entry>)) {
+    let Some(c) = s.conn() else { return };
+    let (path, mut entries) = (c.cwd.clone(), c.entries().to_vec());
+    f(&mut entries);
+    s.apply(ServiceEvent::Refreshed { host: prod(), path, entries });
+}
+
+/// A poll just brought two files in (mint, at full strength before they fade), took
+/// favicon.ico away and grew server.log in place; index.html stays selected.
+pub fn poll_added(s: &mut App) {
+    listing(s);
+    let at = s.now - 20;
+    polled(s, |entries| {
+        let file = |name: &str, size| dromon_core::Entry { name: name.into(), kind: dromon_core::EntryKind::File, size, mtime: Some(at), mode: Some(0o100_644) };
+        entries.retain(|e| e.name != "favicon.ico");
+        entries.extend([file("deploy.log", 2_412), file("notes.md", 860)]);
+        if let Some(log) = entries.iter_mut().find(|e| e.name == "server.log") {
+            log.size += 48_000;
+            log.mtime = Some(at);
+        }
+    });
+    // The picture is of the wash as it comes in, before it fades.
+    if let Some(c) = s.conn_mut() {
+        c.fresh.hold = true;
+    }
+}
+
+/// releases was on screen when it was deleted elsewhere: the view is in its parent, which no
+/// longer lists it, and the toast says what went (§6.8).
+pub fn folder_vanished(s: &mut App) {
+    listing(s);
+    act(s, Action::Open("releases".into()));
+    s.backend = Box::new(Silent::default());
+    let gone = RemotePath::new("/var/www/site/releases");
+    s.apply(ServiceEvent::ListFailed { host: prod(), path: gone.clone(), error: dromon_core::Error::NotFound(gone) });
+    let Some(c) = s.conn() else { return };
+    let (path, mut entries) = (c.cwd.clone(), fixture::active().server("prod").and_then(|srv| srv.list(&c.cwd).ok()).unwrap_or_default());
+    entries.retain(|e| e.name != "releases");
+    s.apply(ServiceEvent::Listing { host: prod(), path, entries });
+}
+
 /// A named state: what `AppSpec::scenes` takes.
 pub type Scene = (&'static str, fn(&mut App));
 
@@ -435,4 +477,6 @@ pub const SCENES: &[Scene] = &[
     ("menu-empty", menu_empty),
     ("file-ops-light", file_ops_light),
     ("icons", icons),
+    ("poll-added", poll_added),
+    ("folder-vanished", folder_vanished),
 ];

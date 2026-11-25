@@ -36,6 +36,9 @@ pub struct Paint {
     /// The device scale, for picking each icon's 1× or 2× body (`IconPair::at`).
     pub scale: f32,
     pub insets: ChromeInsets,
+    /// Reduced motion (`list::reduce_motion`): what moves fades instead, and the refresh
+    /// highlight holds, then fades quickly (§6.6).
+    pub reduced: bool,
 }
 
 /// Key of the list's scroll viewport, and of the stack of rows in it.
@@ -47,6 +50,28 @@ pub fn run(s: &mut App, action: Action, tx: &mut Tx) {
     for fx in s.act(action) {
         effect(fx, tx);
     }
+    animate_refresh(s, tx);
+}
+
+/// A refresh that changed rows (a fixture answers inside the handler) animates them (§4.5).
+fn animate_refresh(s: &mut App, tx: &mut Tx) {
+    if s.take_animate() {
+        tx.animated();
+    }
+}
+
+/// The window gained or lost focus (the root's `on_window_focus`): the service polls by it,
+/// and gaining it polls the folder on screen at once.
+fn window_focus(s: &mut App, focused: bool, tx: &mut Tx) {
+    s.window_focus(focused);
+    animate_refresh(s, tx);
+}
+
+/// The window went off screen or came back (`App::on_visibility`): nothing polls while it's
+/// away.
+pub fn window_visibility(s: &mut App, visible: bool, tx: &mut Tx) {
+    s.window_visibility(visible);
+    animate_refresh(s, tx);
 }
 
 pub fn effect(fx: Effect, tx: &mut Tx) {
@@ -87,7 +112,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     cx.caption_color(t.text_2);
     cx.foreground(t.text);
     let scale = cx.env().scale;
-    let p = Paint { t, hair: 1.0 / scale, scale, insets: cx.chrome_insets() };
+    let p = Paint { t, hair: 1.0 / scale, scale, insets: cx.chrome_insets(), reduced: list::reduce_motion(s, cx) };
     let main = col()
         .key("main")
         .grow(1.0)
@@ -106,6 +131,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         // ⌘V: files copied in Finder or Explorer upload to the folder on screen; text that's
         // still the clip's pastes the clip (a focused field takes its own pastes).
         .on_paste_content(|s: &mut App, content: &rune::ClipboardContent, tx: &mut Tx| pasted(s, content, false, tx))
+        .on_window_focus(window_focus)
         .child(sidebar::view(s, p))
         .child(main)
         .children(transfers::popover(s, p))

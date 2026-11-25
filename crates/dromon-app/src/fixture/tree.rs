@@ -140,6 +140,27 @@ impl Tree {
         Ok(())
     }
 
+    /// `entry` appears at `path` (a change made elsewhere, `changes.rs`); a folder starts empty.
+    pub fn put_entry(&mut self, host: &HostId, path: &RemotePath, entry: Entry) -> Result<(), Error> {
+        let dir = entry.kind == EntryKind::Dir;
+        self.place(host, path, entry)?;
+        if dir {
+            self.folders.insert((host.clone(), path.clone()), Ok(Vec::new()));
+        }
+        Ok(())
+    }
+
+    /// The entry at `path` is now `entry` (a new size or date); what a folder holds stays.
+    pub fn retouch(&mut self, host: &HostId, path: &RemotePath, entry: Entry) -> Result<(), Error> {
+        let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else { return Err(Error::NotFound(path.clone())) };
+        let entries = self.edit(host, &dir)?;
+        match entries.iter_mut().find(|e| e.name == name) {
+            Some(e) => *e = Entry { name: name.to_owned(), ..entry },
+            None => return Err(Error::NotFound(path.clone())),
+        }
+        Ok(())
+    }
+
     /// A new, empty folder at `path`.
     fn add_dir(&mut self, host: &HostId, path: &RemotePath, mtime: Option<i64>) -> Result<(), Error> {
         self.place(host, path, dir_entry("", mtime))?;

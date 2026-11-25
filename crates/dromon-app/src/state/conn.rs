@@ -8,6 +8,7 @@ use dromon_core::{ConnStatus, Entry, Error, HostId, RemotePath, SortDir, SortKey
 
 use super::history::NavHistory;
 use super::log::LogBuffer;
+use super::refresh::{self, Fresh};
 use super::selection::Selection;
 
 /// The listing of the current folder.
@@ -139,6 +140,11 @@ pub struct ConnView {
     /// Where to go if the folder on screen fails to list: home, while the folder is the one
     /// remembered from last time and hasn't listed yet.
     pub fallback: Option<RemotePath>,
+    /// The rows the last refresh brought, highlighted as they come in (`refresh.rs`).
+    pub fresh: Fresh,
+    /// The folder that was on screen when it turned out to be gone, while the view climbs to
+    /// the nearest folder that exists (`refresh.rs`).
+    pub vanished: Option<RemotePath>,
 }
 
 impl ConnView {
@@ -161,6 +167,8 @@ impl ConnView {
             rows_version: 0,
             reveal: None,
             fallback: None,
+            fresh: Fresh::default(),
+            vanished: None,
         }
     }
 
@@ -224,6 +232,9 @@ impl ConnView {
         self.paging = Paging::Idle;
         self.selection.clear();
         self.filter = Filter::Off;
+        // A new folder never animates in, and a climb out of a vanished one ends here.
+        self.fresh = Fresh { seq: self.fresh.seq, ..Fresh::default() };
+        self.vanished = None;
         self.refresh_rows();
         true
     }
@@ -249,14 +260,48 @@ impl ConnView {
         }
     }
 
-    /// A listing for `path` arrived. Ignored unless it's the folder on screen (a late answer
-    /// for a folder already left). The selection survives a refresh where its names remain.
+    /// A whole listing for `path` arrived: a `Listing` event, or a poll's `Refreshed`. Ignored
+    /// unless it's the folder on screen (a late answer for a folder already left). Over rows
+    /// already listed it's a refresh ([`ConnView::refresh_with`]). Returns whether rows changed.
     pub fn set_listing(&mut self, path: &RemotePath, entries: Vec<Entry>) -> bool {
         if *path != self.cwd {
             return false;
         }
         self.paging = Paging::Idle;
+        if matches!(self.listing, Listing::Ready(_)) {
+            return self.refresh_with(entries);
+        }
         self.show(entries, true);
+        true
+    }
+
+    /// A new listing of the folder on screen replaces the one shown, changing only what
+    /// changed (§4.5): an empty diff changes nothing at all; otherwise the inserted rows become
+    /// [`Fresh`], selected rows that left leave the selection quietly, and a cursor whose row
+    /// left moves to its neighbour (no scrolling: names, not positions, hold the place).
+    /// Returns whether rows changed.
+    fn refresh_with(&mut self, mut entries: Vec<Entry>) -> bool {
+        let changes = dromon_sftp::diff(self.entries(), &entries);
+        if changes.is_empty() {
+            self.take_reveal(true);
+            return false;
+        }
+        sort_entries(&mut entries, self.sort.key, self.sort.dir);
+        let before: Vec<String> = self.row_names().into_iter().map(str::to_owned).collect();
+        let cursor = self.selection.cursor().map(str::to_owned);
+        self.listing = Listing::Ready(entries);
+        self.refresh_rows();
+        if let Some(gone) = cursor.filter(|c| self.selection.cursor() != Some(c.as_str())) {
+            let next = {
+                let now: HashSet<&str> = self.rows().map(|e| e.name.as_str()).collect();
+                refresh::neighbour(&before, &gone, |n| now.contains(n)).map(str::to_owned)
+            };
+            if let Some(next) = next {
+                self.selection.set_cursor(&next);
+            }
+        }
+        self.fresh = self.fresh.next(changes.inserted);
+        self.take_reveal(true);
         true
     }
 
@@ -274,6 +319,7 @@ impl ConnView {
                 self.paging = Paging::Refreshing(entries);
                 false
             }
+            (_, true) if refresh => self.refresh_with(entries),
             (_, true) => {
                 self.paging = if done { Paging::Idle } else { Paging::Streaming };
                 self.show(entries, done);
@@ -292,8 +338,7 @@ impl ConnView {
             (Paging::Refreshing(mut have), false) => {
                 have.extend(entries);
                 if done {
-                    self.show(have, true);
-                    true
+                    self.refresh_with(have)
                 } else {
                     self.paging = Paging::Refreshing(have);
                     false
@@ -310,6 +355,12 @@ impl ConnView {
         sort_entries(&mut entries, self.sort.key, self.sort.dir);
         self.listing = Listing::Ready(entries);
         self.refresh_rows();
+        self.take_reveal(whole);
+    }
+
+    /// Selects the row waiting to be revealed once it's on screen; `whole` when nothing more
+    /// is coming, which is when one that isn't there gives up.
+    fn take_reveal(&mut self, whole: bool) {
         if let Some(name) = self.reveal.take() {
             if self.rows().any(|e| e.name == name) {
                 self.selection.only(&name);
