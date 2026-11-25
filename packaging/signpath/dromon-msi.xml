@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration for Dromon's Windows installers (WINDOWS_SIGNING=signpath).
+  Upload it in SignPath: Project > Artifact configurations > Add (slug: e.g. "msi"), and set it
+  as the default or put its slug in the SIGNPATH_ARTIFACT_CONFIGURATION_SLUG variable.
+
+  The release workflow (sign-windows-msi) uploads one GitHub artifact, a ZIP holding
+  Dromon-<version>-windows-x64.msi, and passes `version`. One signing request, so one manual
+  approval per release, deep-signs the MSI: dromon.exe inside it first, then the MSI.
+
+  Metadata restrictions (SignPath Foundation requires product name and version on every signed
+  binary): dromon.exe must carry ProductName "Dromon" and ProductVersion <version>
+  (packaging/windows/build-exe.ps1 stamps them), and each MSI the summary information
+  Subject "Dromon" and Author "Dromon" (packaging/windows/dromon.wxs, SummaryInformation).
+  Nothing else in the MSI is a program, so nothing else is signed.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <msi-file-set subject="Dromon" author="Dromon">
+      <include path="Dromon-${version}-windows-x64.msi" />
+      <for-each>
+        <pe-file path="**/dromon.exe" product-name="Dromon" product-version="${version}">
+          <authenticode-sign hash-algorithm="sha256" description="Dromon" description-url="https://github.com/fatihdogmus/dromon" />
+        </pe-file>
+        <authenticode-sign hash-algorithm="sha256" description="Dromon" description-url="https://github.com/fatihdogmus/dromon" />
+      </for-each>
+    </msi-file-set>
+  </zip-file>
+</artifact-configuration>

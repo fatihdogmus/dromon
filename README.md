@@ -63,12 +63,12 @@ Releases are published on the [Releases page](https://github.com/fatihdogmus/dro
 
 | Platform | File | Notes |
 |---|---|---|
-| macOS 14+ (Apple silicon and Intel) | `Dromon-<version>-macos-universal.dmg` | Not notarized yet: **System Settings → Privacy & Security → Open Anyway**, or `xattr -dr com.apple.quarantine /Applications/Dromon.app` |
-| Windows 11 | `Dromon-<version>-windows-x64.msi` | Not code-signed yet: SmartScreen → **More info → Run anyway** |
-| Debian 12+, Ubuntu 22.04+ | `Dromon-<version>-linux-<arch>.deb` | `sudo apt install ./Dromon-….deb` (pulls in `openssh-client`) |
-| Arch Linux | `dromon-<version>-<arch>.pkg.tar.zst` | `sudo pacman -U dromon-….pkg.tar.zst` |
+| macOS 14+, Apple silicon | `Dromon-<version>-macos-arm64.dmg` | Not notarized yet: **System Settings → Privacy & Security → Open Anyway**, or `xattr -dr com.apple.quarantine /Applications/Dromon.app` |
+| Windows 11 (x64; Arm runs it emulated) | `Dromon-<version>-windows-x64.msi` | Not code-signed yet: SmartScreen → **More info → Run anyway** |
+| Debian 12+, Ubuntu 22.04+ (x86_64) | `Dromon-<version>-linux-x64.deb` | `sudo apt install ./Dromon-….deb` (pulls in `openssh-client`) |
+| Arch Linux (x86_64) | `Dromon-<version>-linux-x64.pkg.tar.zst` | `sudo pacman -U Dromon-….pkg.tar.zst` |
 
-Dromon uses your system `ssh` (OpenSSH 8.4 or newer; Windows 11's built-in client works).
+Intel Macs and Arm Linux have no release build yet: [build from source](#build-from-source). Dromon uses your system `ssh` (OpenSSH 8.4 or newer; on Windows, the built-in OpenSSH client).
 
 <details>
 <summary><b>Verifying a download</b></summary>

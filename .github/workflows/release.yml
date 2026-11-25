@@ -1,0 +1,697 @@
+name: Release
+
+# Compiles, packages, signs and publishes Dromon (docs/releasing.md). It runs no lint or tests:
+# the tagged commit is tested by ci.yml on main. The only checks here are part of packaging and
+# signing themselves (each package's `dromon --version`, each new signature verified).
+#
+#   Windows  Dromon-<v>-windows-x64.msi          WiX v5; Authenticode (azure | sslcom | signpath)
+#   macOS    Dromon-<v>-macos-arm64.dmg          Apple silicon; Developer ID, notarized, stapled
+#   Linux    Dromon-<v>-linux-x64.deb            + .asc (GPG)
+#            Dromon-<v>-linux-x64.pkg.tar.zst    + .sig (GPG)
+#   all      SHA256SUMS + SHA256SUMS.asc, Sigstore build-provenance attestations
+#
+# Targets for now: Windows x64 (Windows on Arm runs it emulated), macOS Apple silicon only (no
+# Intel Macs), Linux x86_64. The packaging scripts take an --arch / -Arch to add more later.
+#
+# - push of tag vX.Y.Z or vX.Y.Z-rc.N: a draft GitHub release for the tag, which the maintainer
+#   publishes by hand. The tag must equal Cargo.toml's [workspace.package].version.
+# - workflow_dispatch, mode=check: the same builds and packages, signed with whatever
+#   credentials exist; nothing is published, the files stay as this run's artifacts.
+#
+# Security boundary (this file and .github/release/):
+# - build and package jobs run repository code with no environment, secrets or id-token, and
+#   produce unsigned files.
+# - credentials, sign-* and publish jobs run in the `release` environment (which holds every
+#   signing secret and variable), check out only /.github/release/ (plus data files they read),
+#   run only those scripts and SHA-pinned actions, and treat artifacts as data.
+# - every artifact carries an ARTIFACT-SHA256SUMS whose digest the job that made it reports as
+#   an output; every job that downloads it checks that digest (.github/release/download).
+# - each signing job runs only when its credentials exist (credentials job); otherwise the file
+#   ships unsigned, with a warning, unless the release requires it (credentials.sh).
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "check: build, package, sign with the credentials that exist; publish nothing"
+        type: choice
+        options: [check]
+        default: check
+
+run-name: ${{ github.event_name == 'push' && format('Release {0}', github.ref_name) || format('Check {0}', github.ref_name) }}
+
+permissions:
+  contents: read
+
+# One run per tag (or branch, for checks) at a time; a running release is never cancelled.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+      prerelease: ${{ steps.plan.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            /.github/release/
+            /Cargo.toml
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - id: plan
+        run: bash .github/release/plan.sh
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_MODE: ${{ inputs.mode }}
+
+  # Which signing credentials the release environment holds (secrets only as "is it set"), and
+  # whether this run may go on without some (Linux GPG is required for a tag release; Windows
+  # and macOS only when DROMON_REQUIRE_SIGNED_WINDOWS / _MACOS is true).
+  credentials:
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: release
+    outputs:
+      windows: ${{ steps.check.outputs.windows }}
+      macos: ${{ steps.check.outputs.macos }}
+      apple-team-id: ${{ steps.check.outputs.apple-team-id }}
+      gpg: ${{ steps.check.outputs.gpg }}
+      gpg-fingerprint: ${{ steps.check.outputs.gpg-fingerprint }}
+    steps:
+      - &checkout-release
+        name: Check out the release scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: /.github/release/
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - id: check
+        run: bash .github/release/credentials.sh
+        env:
+          MODE: ${{ needs.plan.outputs.mode }}
+          REQUIRE_SIGNED_WINDOWS: ${{ vars.DROMON_REQUIRE_SIGNED_WINDOWS }}
+          REQUIRE_SIGNED_MACOS: ${{ vars.DROMON_REQUIRE_SIGNED_MACOS }}
+          WINDOWS_SIGNING: ${{ vars.WINDOWS_SIGNING }}
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AZURE_ARTIFACT_SIGNING_ENDPOINT: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          AZURE_ARTIFACT_SIGNING_ACCOUNT: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+          AZURE_ARTIFACT_SIGNING_PROFILE: ${{ vars.AZURE_ARTIFACT_SIGNING_PROFILE }}
+          HAS_ESIGNER_USERNAME: ${{ secrets.ESIGNER_USERNAME != '' }}
+          HAS_ESIGNER_PASSWORD: ${{ secrets.ESIGNER_PASSWORD != '' }}
+          HAS_ESIGNER_TOTP_SECRET: ${{ secrets.ESIGNER_TOTP_SECRET != '' }}
+          HAS_ESIGNER_CREDENTIAL_ID: ${{ secrets.ESIGNER_CREDENTIAL_ID != '' }}
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          HAS_SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN != '' }}
+          HAS_APPLE_DEVELOPER_ID_P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 != '' }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          HAS_APPLE_NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY != '' }}
+          APPLE_NOTARY_KEY_ID: ${{ vars.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ vars.APPLE_NOTARY_ISSUER_ID }}
+          HAS_RELEASE_GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY != '' }}
+          RELEASE_GPG_FINGERPRINT: ${{ vars.RELEASE_GPG_FINGERPRINT }}
+
+  # ---- Build: repository code; no environment, secrets or id-token ------------------------
+
+  build-linux:
+    needs: plan
+    # The oldest runner (glibc 2.35): the packages install on Debian 12 and Ubuntu 22.04+.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    outputs:
+      digest: ${{ steps.upload.outputs.digest }}
+    steps:
+      - &checkout-build
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends dpkg-dev pkg-config libxkbcommon-dev libwayland-dev
+      - name: Rust toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: release-linux-x64
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build the binary and the .deb
+        run: bash scripts/package-linux.sh --arch x64 --build host --no-arch --out "$RUNNER_TEMP/linux"
+      - id: upload
+        uses: ./.github/release/upload
+        with:
+          name: build-linux
+          path: ${{ runner.temp }}/linux
+          retention-days: "7"
+
+  # The Arch package, from the .deb (same files): makepkg in archlinux:base-devel.
+  package-arch:
+    needs: [plan, build-linux]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    outputs:
+      digest: ${{ steps.upload.outputs.digest }}
+    steps:
+      - *checkout-build
+      - uses: ./.github/release/download
+        with:
+          pattern: build-linux
+          digests: build-linux=${{ needs.build-linux.outputs.digest }}
+      - name: Build the Arch package
+        run: bash packaging/linux/build-arch.sh "$RUNNER_TEMP/in/build-linux/Dromon-$VERSION-linux-x64.deb" "$VERSION" "$RUNNER_TEMP/arch"
+      - id: upload
+        uses: ./.github/release/upload
+        with:
+          name: package-arch
+          path: ${{ runner.temp }}/arch
+          retention-days: "7"
+
+  build-macos:
+    needs: plan
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    outputs:
+      digest: ${{ steps.upload.outputs.digest }}
+    steps:
+      - *checkout-build
+      - name: Rust toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: release-macos-arm64
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build Dromon.app (Apple silicon) and the unsigned DMG
+        run: |
+          bash packaging/macos/build-app.sh "$RUNNER_TEMP/build"
+          mkdir -p "$RUNNER_TEMP/macos"
+          mv "$RUNNER_TEMP/build/Dromon.app.zip" "$RUNNER_TEMP/build/Dromon-$VERSION-macos-arm64.dmg" "$RUNNER_TEMP/macos/"
+      - id: upload
+        uses: ./.github/release/upload
+        with:
+          name: build-macos
+          path: ${{ runner.temp }}/macos
+          retention-days: "7"
+
+  build-windows:
+    needs: plan
+    runs-on: windows-2025
+    timeout-minutes: 90
+    outputs:
+      digest: ${{ steps.upload.outputs.digest }}
+    steps:
+      - *checkout-build
+      - name: Rust toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: release-windows-x64
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build dromon.exe
+        shell: pwsh
+        run: packaging/windows/build-exe.ps1 -Arch x64 -Out "$env:RUNNER_TEMP/windows"
+      - id: upload
+        uses: ./.github/release/upload
+        with:
+          name: build-windows
+          path: ${{ runner.temp }}/windows
+          retention-days: "7"
+
+  # ---- Windows: sign the exe, package it, sign the MSI ----------------------------------
+  # azure and sslcom sign dromon.exe before it goes into the MSI, then the MSI. signpath signs
+  # both in one request (deep signing, packaging/signpath/dromon-msi.xml), so its MSI is built
+  # around the unsigned exe and sign-windows-exe does not run.
+
+  sign-windows-exe:
+    needs: [plan, credentials, build-windows]
+    if: needs.credentials.outputs.windows == 'azure' || needs.credentials.outputs.windows == 'sslcom'
+    runs-on: windows-2025
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+    outputs:
+      digest: ${{ steps.upload.outputs.digest }}
+    steps:
+      - *checkout-release
+      - uses: ./.github/release/download
+        with:
+          pattern: build-windows
+          digests: build-windows=${{ needs.build-windows.outputs.digest }}
+      - name: Gather the program
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/work" | Out-Null
+          Copy-Item "$env:RUNNER_TEMP/in/build-windows/dromon.exe" "$env:RUNNER_TEMP/work/dromon.exe"
+      - &azure-login
+        name: Sign in to Azure
+        if: needs.credentials.outputs.windows == 'azure'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+      - name: Sign (Azure Artifact Signing)
+        if: needs.credentials.outputs.windows == 'azure'
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2
+        with:
+          endpoint: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_ARTIFACT_SIGNING_PROFILE }}
+          files-folder: ${{ runner.temp }}\work
+          files-folder-filter: exe
+          files-folder-recurse: false
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: Dromon
+          description-url: https://github.com/${{ github.repository }}
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+          # Fetch the signing tools fresh: the Actions cache is shared with jobs that run
+          # repository code.
+          cache-dependencies: false
+      - name: Sign (SSL.com eSigner)
+        if: needs.credentials.outputs.windows == 'sslcom'
+        shell: pwsh
+        run: .github/release/sign-windows-sslcom.ps1 -Files "$env:RUNNER_TEMP/work/dromon.exe"
+        env: &esigner
+          ESIGNER_USERNAME: ${{ secrets.ESIGNER_USERNAME }}
+          ESIGNER_PASSWORD: ${{ secrets.ESIGNER_PASSWORD }}
+          ESIGNER_TOTP_SECRET: ${{ secrets.ESIGNER_TOTP_SECRET }}
+          ESIGNER_CREDENTIAL_ID: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+      - name: Check the signatures
+        shell: pwsh
+        run: .github/release/verify-windows-signatures.ps1 -Files "$env:RUNNER_TEMP/work/dromon.exe"
+      - id: upload
+        uses: ./.github/release/upload
+        with:
+          name: sign-windows-exe
+          path: ${{ runner.temp }}/work
+
+  package-windows:
+    needs: [plan, credentials, build-windows, sign-windows-exe]
+    if: >-
+      ${{ !cancelled()
+      && needs.credentials.result == 'success'
+      && needs.build-windows.result == 'success'
+      && (needs.sign-windows-exe.result == 'success'
+          || (needs.sign-windows-exe.result == 'skipped'
+              && needs.credentials.outputs.windows != 'azure' && needs.credentials.outputs.windows != 'sslcom')) }}
+    runs-on: windows-2025
+    timeout-minutes: 20
+    outputs:
+      digest: ${{ steps.upload.outputs.digest }}
+    steps:
+      - *checkout-build
+      - name: WiX Toolset v5
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version "5.*"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not install WiX.' }
+          Join-Path $env:USERPROFILE '.dotnet\tools' | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Download the signed dromon.exe
+        if: needs.sign-windows-exe.result == 'success'
+        uses: ./.github/release/download
+        with:
+          pattern: sign-windows-exe
+          digests: sign-windows-exe=${{ needs.sign-windows-exe.outputs.digest }}
+      - name: Download the unsigned dromon.exe
+        if: needs.sign-windows-exe.result != 'success'
+        uses: ./.github/release/download
+        with:
+          pattern: build-windows
+          digests: build-windows=${{ needs.build-windows.outputs.digest }}
+      - name: Build the MSI
+        shell: pwsh
+        env:
+          SIGNED: ${{ needs.sign-windows-exe.result == 'success' }}
+        run: |
+          $exe = if ($env:SIGNED -eq 'true') { "$env:RUNNER_TEMP/in/sign-windows-exe/dromon.exe" } else { "$env:RUNNER_TEMP/in/build-windows/dromon.exe" }
+          packaging/windows/build-msi.ps1 -Exe $exe -Arch x64 -Out "$env:RUNNER_TEMP/msi" -RepoUrl "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY"
+      - id: upload
+        uses: ./.github/release/upload
+        with:
+          name: package-windows
+          path: ${{ runner.temp }}/msi
+          retention-days: "7"
+
+  sign-windows-msi:
+    needs: [plan, credentials, package-windows]
+    if: ${{ !cancelled() && needs.package-windows.result == 'success' && needs.credentials.outputs.windows != 'none' }}
+    runs-on: windows-2025
+    # SignPath waits for a person to approve the request in SignPath.
+    timeout-minutes: ${{ needs.credentials.outputs.windows == 'signpath' && 345 || 30 }}
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+      # SignPath's action reads this run's artifact and job details with the workflow token.
+      actions: read
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+    outputs:
+      digest: ${{ steps.upload.outputs.digest }}
+    steps:
+      - *checkout-release
+      - uses: ./.github/release/download
+        with:
+          pattern: package-windows
+          digests: package-windows=${{ needs.package-windows.outputs.digest }}
+      - name: Gather the installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP/work" | Out-Null
+          Copy-Item "$env:RUNNER_TEMP/in/package-windows/Dromon-$env:VERSION-windows-x64.msi" "$env:RUNNER_TEMP/work/"
+      - *azure-login
+      - name: Sign (Azure Artifact Signing)
+        if: needs.credentials.outputs.windows == 'azure'
+        uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2
+        # As in sign-windows-exe, but for the MSI (Actions YAML has anchors, not merge keys).
+        with:
+          endpoint: ${{ vars.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_ARTIFACT_SIGNING_PROFILE }}
+          files-folder: ${{ runner.temp }}\work
+          files-folder-filter: msi
+          files-folder-recurse: false
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: Dromon
+          description-url: https://github.com/${{ github.repository }}
+          exclude-environment-credential: true
+          exclude-workload-identity-credential: true
+          exclude-managed-identity-credential: true
+          exclude-shared-token-cache-credential: true
+          exclude-visual-studio-credential: true
+          exclude-visual-studio-code-credential: true
+          exclude-azure-cli-credential: false
+          exclude-azure-powershell-credential: true
+          exclude-azure-developer-cli-credential: true
+          exclude-interactive-browser-credential: true
+          cache-dependencies: false
+      - name: Sign (SSL.com eSigner)
+        if: needs.credentials.outputs.windows == 'sslcom'
+        shell: pwsh
+        run: .github/release/sign-windows-sslcom.ps1 -Files (Get-ChildItem "$env:RUNNER_TEMP/work/*.msi").FullName
+        env: *esigner
+      # SignPath signs a workflow artifact of this run: the MSI in a ZIP, one request.
+      - id: signpath-upload
+        name: Upload the installer for SignPath
+        if: needs.credentials.outputs.windows == 'signpath'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: signpath-windows-msi
+          path: ${{ runner.temp }}/work/*.msi
+          if-no-files-found: error
+          retention-days: 1
+      - name: Sign (SignPath; waits for approval in SignPath)
+        if: needs.credentials.outputs.windows == 'signpath'
+        uses: signpath/github-action-submit-signing-request@a2c5b60d9c75f073142b653c354b632eedce097b # v3.2
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.signpath-upload.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 20400
+          output-artifact-directory: ${{ runner.temp }}/signpath
+          parameters: |
+            version: ${{ toJSON(needs.plan.outputs.version) }}
+      - name: Take SignPath's signed installer
+        if: needs.credentials.outputs.windows == 'signpath'
+        shell: pwsh
+        run: |
+          $name = "Dromon-$env:VERSION-windows-x64.msi"
+          $signed = Join-Path $env:RUNNER_TEMP "signpath/$name"
+          if (-not (Test-Path -LiteralPath $signed)) { throw "SignPath returned no $name." }
+          Copy-Item -LiteralPath $signed -Destination "$env:RUNNER_TEMP/work/$name" -Force
+      - name: Check the signatures
+        shell: pwsh
+        env:
+          PUBLISHER: ${{ needs.credentials.outputs.windows == 'signpath' && 'SignPath Foundation' || '' }}
+        run: .github/release/verify-windows-signatures.ps1 -Files (Get-ChildItem "$env:RUNNER_TEMP/work/*.msi").FullName -Publisher $env:PUBLISHER
+      - id: upload
+        uses: ./.github/release/upload
+        with:
+          name: sign-windows-msi
+          path: ${{ runner.temp }}/work
+
+  # ---- macOS: Developer ID signing and notarization ---------------------------------------
+
+  sign-macos:
+    needs: [plan, credentials, build-macos]
+    if: needs.credentials.outputs.macos == 'true'
+    runs-on: macos-15
+    timeout-minutes: 120
+    environment: release
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    outputs:
+      digest: ${{ steps.upload.outputs.digest }}
+    steps:
+      - name: Check out the release scripts (and Info.plist, read as data)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            /.github/release/
+            /packaging/macos/Info.plist
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - uses: ./.github/release/download
+        with:
+          pattern: build-macos
+          digests: build-macos=${{ needs.build-macos.outputs.digest }}
+      - name: Import the certificate and notary key
+        run: bash .github/release/macos-credentials.sh "$RUNNER_TEMP/credentials"
+        env:
+          APPLE_DEVELOPER_ID_P12: ${{ secrets.APPLE_DEVELOPER_ID_P12 }}
+          APPLE_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          APPLE_NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+      - name: Sign, notarize and staple the app and the DMG
+        run: bash .github/release/sign-macos.sh "$RUNNER_TEMP/in/build-macos/Dromon.app.zip" "$RUNNER_TEMP/out" "$VERSION" packaging/macos/Info.plist
+        env:
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          APPLE_NOTARY_KEY_ID: ${{ vars.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ vars.APPLE_NOTARY_ISSUER_ID }}
+      - name: Remove the credentials
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/credentials/signing.keychain-db" 2> /dev/null || true
+          rm -rf "$RUNNER_TEMP/credentials"
+      - id: upload
+        uses: ./.github/release/upload
+        with:
+          name: sign-macos
+          path: ${{ runner.temp }}/out
+
+  # ---- Assemble and GPG-sign ---------------------------------------------------------------
+
+  # Every final file in one place, with the release-wide SHA256SUMS and the release notes (each
+  # file's signing state). Runs only .github/release/ scripts on verified artifacts.
+  assemble:
+    needs: [plan, credentials, build-linux, package-arch, build-macos, sign-macos, package-windows, sign-windows-msi]
+    if: >-
+      ${{ !cancelled()
+      && needs.credentials.result == 'success'
+      && needs.build-linux.result == 'success'
+      && needs.package-arch.result == 'success'
+      && needs.build-macos.result == 'success'
+      && needs.package-windows.result == 'success'
+      && (needs.sign-macos.result == 'success'
+          || (needs.sign-macos.result == 'skipped' && needs.credentials.outputs.macos != 'true'))
+      && (needs.sign-windows-msi.result == 'success'
+          || (needs.sign-windows-msi.result == 'skipped' && needs.credentials.outputs.windows == 'none')) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    outputs:
+      digest: ${{ steps.upload.outputs.digest }}
+      notes-digest: ${{ steps.notes-upload.outputs.digest }}
+    steps:
+      - *checkout-release
+      - uses: ./.github/release/download
+        with:
+          pattern: build-linux
+          digests: build-linux=${{ needs.build-linux.outputs.digest }}
+          folder: linux
+      - uses: ./.github/release/download
+        with:
+          pattern: package-arch
+          digests: package-arch=${{ needs.package-arch.outputs.digest }}
+          folder: arch
+      - if: needs.sign-macos.result == 'success'
+        uses: ./.github/release/download
+        with:
+          pattern: sign-macos
+          digests: sign-macos=${{ needs.sign-macos.outputs.digest }}
+          folder: macos
+      - if: needs.sign-macos.result != 'success'
+        uses: ./.github/release/download
+        with:
+          pattern: build-macos
+          digests: build-macos=${{ needs.build-macos.outputs.digest }}
+          folder: macos
+      - if: needs.sign-windows-msi.result == 'success'
+        uses: ./.github/release/download
+        with:
+          pattern: sign-windows-msi
+          digests: sign-windows-msi=${{ needs.sign-windows-msi.outputs.digest }}
+          folder: windows
+      - if: needs.sign-windows-msi.result != 'success'
+        uses: ./.github/release/download
+        with:
+          pattern: package-windows
+          digests: package-windows=${{ needs.package-windows.outputs.digest }}
+          folder: windows
+      - name: Gather the files, write SHA256SUMS and the notes
+        env:
+          MODE: ${{ needs.plan.outputs.mode }}
+          WINDOWS_SIGNING: ${{ needs.credentials.outputs.windows }}
+          MACOS_SIGNED: ${{ needs.sign-macos.result == 'success' }}
+          GPG_SIGNED: ${{ needs.credentials.outputs.gpg }}
+          GPG_FINGERPRINT: ${{ needs.credentials.outputs.gpg-fingerprint }}
+        run: |
+          bash .github/release/assemble.sh "$RUNNER_TEMP/release" "$VERSION" "$RUNNER_TEMP"/{linux,arch,macos,windows}
+          mkdir -p "$RUNNER_TEMP/notes"
+          bash .github/release/release-notes.sh "$RUNNER_TEMP/release" > "$RUNNER_TEMP/notes/RELEASE_NOTES.md"
+          cat "$RUNNER_TEMP/notes/RELEASE_NOTES.md" >> "$GITHUB_STEP_SUMMARY"
+      - id: upload
+        uses: ./.github/release/upload
+        with:
+          name: release-files
+          path: ${{ runner.temp }}/release
+      - id: notes-upload
+        uses: ./.github/release/upload
+        with:
+          name: release-notes
+          path: ${{ runner.temp }}/notes
+
+  sign-linux:
+    needs: [plan, credentials, assemble]
+    if: ${{ !cancelled() && needs.assemble.result == 'success' && needs.credentials.outputs.gpg == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: release
+    outputs:
+      digest: ${{ steps.upload.outputs.digest }}
+    steps:
+      - *checkout-release
+      - uses: ./.github/release/download
+        with:
+          pattern: release-files
+          digests: release-files=${{ needs.assemble.outputs.digest }}
+      - name: GPG-sign the packages and SHA256SUMS
+        run: bash .github/release/sign-linux.sh "$RUNNER_TEMP/in/release-files" "$RUNNER_TEMP/signatures"
+        env:
+          RELEASE_GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
+          RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
+          RELEASE_GPG_FINGERPRINT: ${{ vars.RELEASE_GPG_FINGERPRINT }}
+      - id: upload
+        uses: ./.github/release/upload
+        with:
+          name: sign-linux
+          path: ${{ runner.temp }}/signatures
+
+  # ---- Publish: a draft GitHub release (tag runs only) -------------------------------------
+
+  publish:
+    needs: [plan, credentials, assemble, sign-linux]
+    if: >-
+      ${{ !cancelled()
+      && needs.plan.outputs.mode == 'release'
+      && needs.assemble.result == 'success'
+      && needs.sign-linux.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - *checkout-release
+      - uses: ./.github/release/download
+        with:
+          pattern: release-files
+          digests: release-files=${{ needs.assemble.outputs.digest }}
+          folder: release
+      - uses: ./.github/release/download
+        with:
+          pattern: sign-linux
+          digests: sign-linux=${{ needs.sign-linux.outputs.digest }}
+          folder: signatures
+      - uses: ./.github/release/download
+        with:
+          pattern: release-notes
+          digests: release-notes=${{ needs.assemble.outputs.notes-digest }}
+          folder: notes
+      - name: Attest build provenance (Sigstore)
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            ${{ runner.temp }}/release/release-files/Dromon-*
+            ${{ runner.temp }}/release/release-files/SHA256SUMS
+      - name: Create or update the draft release
+        run: bash .github/release/publish-github-release.sh "$RUNNER_TEMP/notes/release-notes/RELEASE_NOTES.md" "$RUNNER_TEMP/release/release-files" "$RUNNER_TEMP/signatures/sign-linux"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          PRERELEASE: ${{ needs.plan.outputs.prerelease }}
+          SHA: ${{ github.sha }}

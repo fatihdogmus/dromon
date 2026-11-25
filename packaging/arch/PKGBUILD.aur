@@ -1,0 +1,50 @@
+# Maintainer: Muhammed Fatih Doğmuş <fdogmus06@gmail.com>
+#
+# Template for the future `dromon-bin` AUR package (not used by CI). It downloads the release's
+# Debian package and its detached signature from GitHub, checks the sha256 and the release key's
+# signature, and installs the same files as packaging/arch/PKGBUILD.
+#
+# To publish a release to the AUR, copy this to the dromon-bin AUR repository as PKGBUILD, then:
+#   1. set pkgver (0.1.0; an rc: 0.1.0rc.1 with _version=0.1.0-rc.1);
+#   2. validpgpkeys already holds the release key (KEYS); change it only if the key changes;
+#   3. set the sha256sums from the release's SHA256SUMS (verify SHA256SUMS.asc first):
+#        gpg --verify SHA256SUMS.asc SHA256SUMS
+#        grep -E 'linux-x64\.deb$' SHA256SUMS
+#   4. makepkg --printsrcinfo > .SRCINFO; makepkg -si to test; commit; push.
+
+pkgname=dromon-bin
+pkgver=0.0.1
+_version=$pkgver
+pkgrel=1
+pkgdesc='Fast SFTP file browser (release binary)'
+arch=(x86_64)
+url='https://github.com/fatihdogmus/dromon'
+license=(MIT OFL-1.1)
+depends=(glibc gcc-libs openssh vulkan-icd-loader fontconfig wayland libx11 libxcb libxcursor libxi libxkbcommon libxkbcommon-x11)
+optdepends=('vulkan-driver: GPU drawing (vulkan-radeon, vulkan-intel, nvidia-utils, ...)')
+provides=(dromon)
+conflicts=(dromon)
+options=(!strip !debug)
+_release="$url/releases/download/v$_version"
+source_x86_64=("$_release/Dromon-$_version-linux-x64.deb" "$_release/Dromon-$_version-linux-x64.deb.asc")
+# The .deb's sha256 from the release's GPG-signed SHA256SUMS; the .asc is checked by validpgpkeys.
+sha256sums_x86_64=('0000000000000000000000000000000000000000000000000000000000000000' 'SKIP')
+# The Dromon release signing key (full fingerprint, upper case, no spaces).
+validpgpkeys=('61AA20030B8170BE3527E4BA1E548E51E3AD8C38') # Dromon Releases (KEYS)
+
+prepare() {
+  mkdir -p root
+  bsdtar -xf data.tar.* -C root
+}
+
+package() {
+  cd root
+  install -Dm755 usr/bin/dromon "$pkgdir/usr/bin/dromon"
+  install -Dm644 usr/share/applications/dromon.desktop "$pkgdir/usr/share/applications/dromon.desktop"
+  local icon
+  for icon in usr/share/icons/hicolor/*/apps/dromon.*; do
+    install -Dm644 "$icon" "$pkgdir/$icon"
+  done
+  install -Dm644 usr/share/doc/dromon/copyright "$pkgdir/usr/share/licenses/dromon/copyright"
+  install -Dm644 usr/share/doc/dromon/fonts/*.txt -t "$pkgdir/usr/share/licenses/dromon/fonts/"
+}

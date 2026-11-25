@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Dromon's Windows installer (WiX Toolset v5). Built by packaging/windows/build-msi.ps1, which
+  passes:
+    Version         the MSI ProductVersion: the release version's numeric x.y.z
+    DisplayVersion  the full release version (0.1.0-rc.1), shown in the ARP comments
+    Exe             the dromon.exe to install (signed by the release workflow when it can)
+    Icon, License, InterLicense, GeistMonoLicense, RepoUrl
+
+  Per-machine install to Program Files\Dromon, a Start-menu shortcut, and an Add/Remove Programs
+  entry with the icon. No license dialog: MIT asks for no acceptance; the license texts are
+  installed beside the program. No UI extension: the install shows only progress.
+
+  UpgradeCode is fixed for the life of the product: never change it. Every build is a new
+  ProductCode, so installing any version replaces the installed one (MajorUpgrade). Same-version
+  upgrades are allowed because an rc and its final release share the MSI version x.y.z.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="Dromon"
+      Manufacturer="Dromon"
+      Version="$(var.Version)"
+      UpgradeCode="6C1DF9A7-7F49-4721-A013-EE31BC4D818E"
+      Scope="perMachine"
+      Language="1033">
+
+    <!-- SignPath's artifact configuration checks these (packaging/signpath/dromon-msi.xml). -->
+    <SummaryInformation Description="Dromon" Manufacturer="Dromon" />
+
+    <MajorUpgrade
+        AllowSameVersionUpgrades="yes"
+        DowngradeErrorMessage="A newer version of Dromon is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="DromonIcon" SourceFile="$(var.Icon)" />
+    <Property Id="ARPPRODUCTICON" Value="DromonIcon" />
+    <Property Id="ARPURLINFOABOUT" Value="$(var.RepoUrl)" />
+    <Property Id="ARPHELPLINK" Value="$(var.RepoUrl)/issues" />
+    <Property Id="ARPURLUPDATEINFO" Value="$(var.RepoUrl)/releases" />
+    <Property Id="ARPCOMMENTS" Value="Dromon $(var.DisplayVersion): a fast SFTP file browser" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Dromon">
+        <Component Id="DromonExe">
+          <File Id="DromonExe" Name="dromon.exe" Source="$(var.Exe)" KeyPath="yes" />
+        </Component>
+        <Directory Id="LicensesFolder" Name="licenses">
+          <Component Id="Licenses">
+            <File Id="License" Name="LICENSE.txt" Source="$(var.License)" KeyPath="yes" />
+            <File Id="InterLicense" Name="Inter-LICENSE.txt" Source="$(var.InterLicense)" />
+            <File Id="GeistMonoLicense" Name="GeistMono-OFL.txt" Source="$(var.GeistMonoLicense)" />
+          </Component>
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <!-- A plain (not advertised) shortcut; its component needs a registry key path. -->
+      <Component Id="StartMenuShortcut">
+        <Shortcut
+            Id="DromonShortcut"
+            Name="Dromon"
+            Description="Fast SFTP file browser"
+            Target="[INSTALLFOLDER]dromon.exe"
+            WorkingDirectory="INSTALLFOLDER"
+            Icon="DromonIcon" />
+        <RegistryValue Root="HKLM" Key="Software\Dromon" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <Feature Id="Dromon" Title="Dromon">
+      <ComponentRef Id="DromonExe" />
+      <ComponentRef Id="Licenses" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+  </Package>
+</Wix>

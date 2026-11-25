@@ -1,0 +1,20 @@
+# Libraries `dromon` loads at run time with dlopen (Rune: winit, wgpu, xkbcommon, fontconfig), so
+# neither `ldd` nor dpkg-shlibdeps sees them. Each soname maps to the Debian/Ubuntu package and
+# the Arch package that ship it. build-deb.sh adds the Debian column to Depends:, build-arch.sh
+# checks the PKGBUILD's depends=() against the Arch column, and both fail when the binary names
+# a lib*.so.N that is neither linked (NEEDED) nor listed here: add it here, with both packages.
+#
+# Vetted 2026-11-25 against Debian 12, Ubuntu 22.04/24.04 and Arch (package names identical on
+# Debian 12 and Ubuntu 22.04+).
+#
+# soname                  debian                  arch
+libvulkan.so.1            libvulkan1              vulkan-icd-loader
+libfontconfig.so.1        libfontconfig1          fontconfig
+libwayland-client.so.0    libwayland-client0      wayland
+libX11.so.6               libx11-6                libx11
+libX11-xcb.so.1           libx11-xcb1             libx11
+libxcb.so.1               libxcb1                 libxcb
+libXcursor.so.1           libxcursor1             libxcursor
+libXi.so.6                libxi6                  libxi
+libxkbcommon.so.0         libxkbcommon0           libxkbcommon
+libxkbcommon-x11.so.0     libxkbcommon-x11-0      libxkbcommon-x11

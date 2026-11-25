@@ -1,0 +1,45 @@
+# Maintainer: Muhammed Fatih Doğmuş <fdogmus06@gmail.com>
+#
+# Dromon's release package for Arch Linux, as attached to each GitHub release. It installs the
+# prebuilt binary and the files every Linux package ships (desktop file, icons, licenses) out of
+# this release's Dromon-<version>-linux-<arch>.deb, so the .deb and this package carry the same
+# bytes. Nothing is compiled here: the binary is built on Ubuntu 22.04 (glibc 2.35) by CI.
+#
+# Run it through packaging/linux/build-arch.sh, which sets:
+#   DROMON_VERSION   the release version (0.1.0 or 0.1.0-rc.1)
+#   DROMON_DEB       the .deb's file name, beside this PKGBUILD
+#   DROMON_DEB_SHA256
+# packaging/arch/PKGBUILD.aur is the AUR template (dromon-bin) that downloads the same .deb.
+
+pkgname=dromon
+_version=${DROMON_VERSION:?run packaging/linux/build-arch.sh}
+pkgver=${_version//-/}
+pkgrel=1
+pkgdesc='Fast SFTP file browser'
+arch=(x86_64 aarch64)
+url='https://github.com/fatihdogmus/dromon'
+license=(MIT OFL-1.1)
+# Keep in step with packaging/linux/dlopen-libs.txt (build-arch.sh checks it).
+depends=(glibc gcc-libs openssh vulkan-icd-loader fontconfig wayland libx11 libxcb libxcursor libxi libxkbcommon libxkbcommon-x11)
+optdepends=('vulkan-driver: GPU drawing (vulkan-radeon, vulkan-intel, nvidia-utils, ...)')
+# The binary ships as built, byte for byte the one in the .deb.
+options=(!strip !debug)
+source=("${DROMON_DEB:?run packaging/linux/build-arch.sh}")
+sha256sums=("${DROMON_DEB_SHA256:?run packaging/linux/build-arch.sh}")
+
+prepare() {
+  mkdir -p root
+  bsdtar -xf data.tar.* -C root
+}
+
+package() {
+  cd root
+  install -Dm755 usr/bin/dromon "$pkgdir/usr/bin/dromon"
+  install -Dm644 usr/share/applications/dromon.desktop "$pkgdir/usr/share/applications/dromon.desktop"
+  local icon
+  for icon in usr/share/icons/hicolor/*/apps/dromon.*; do
+    install -Dm644 "$icon" "$pkgdir/$icon"
+  done
+  install -Dm644 usr/share/doc/dromon/copyright "$pkgdir/usr/share/licenses/$pkgname/copyright"
+  install -Dm644 usr/share/doc/dromon/fonts/*.txt -t "$pkgdir/usr/share/licenses/$pkgname/fonts/"
+}

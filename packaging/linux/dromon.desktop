@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Dromon
+GenericName=SFTP File Browser
+Comment=Browse and transfer files over SSH
+Exec=dromon
+Icon=dromon
+Terminal=false
+Categories=Network;FileTransfer;Utility;
+Keywords=sftp;ssh;scp;remote;files;server;
+StartupNotify=true
+# The window's Wayland app_id / X11 WM_CLASS (crates/dromon-app/src/lib.rs: rune::set_app_id).
+StartupWMClass=dromon

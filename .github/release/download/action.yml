@@ -1,0 +1,25 @@
+name: Download release artifacts
+description: Downloads artifacts into $RUNNER_TEMP/<folder>/<name> and verifies each against the digest its job reported.
+inputs:
+  pattern:
+    description: Artifact name pattern
+    required: true
+  digests:
+    description: Space-separated name=digest pairs, from the outputs of the jobs that made the artifacts
+    required: true
+  folder:
+    description: Folder under $RUNNER_TEMP to download into; a job that downloads twice uses one per download
+    required: false
+    default: in
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+      with:
+        pattern: ${{ inputs.pattern }}
+        path: ${{ runner.temp }}/${{ inputs.folder }}
+    - shell: bash
+      run: bash "${GITHUB_ACTION_PATH//\\//}/../verify-artifacts.sh" "$RUNNER_TEMP/$DOWNLOAD_FOLDER"
+      env:
+        DROMON_DIGESTS: ${{ inputs.digests }}
+        DOWNLOAD_FOLDER: ${{ inputs.folder }}

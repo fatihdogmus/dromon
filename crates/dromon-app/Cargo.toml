@@ -22,7 +22,9 @@ dromon-core.workspace = true
 dromon-sftp.workspace = true
 dromon-ssh.workspace = true
 dromon-transfer.workspace = true
-rune.workspace = true
+# `tooling`: release builds take Rune's `--snap`, `--script`, `--tree` (debug builds always do), so
+# the release smoke check and issue repros run on the binaries users get.
+rune = { workspace = true, features = ["tooling"] }
 secrecy.workspace = true
 # Fixtures (`--fixture`, the built-in demo).
 serde_json.workspace = true
