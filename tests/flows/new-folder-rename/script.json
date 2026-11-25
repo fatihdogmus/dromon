@@ -1,0 +1,13 @@
+{
+  "description": "Open web, press ⌘⇧N (Ctrl+Shift+N elsewhere): a “New folder” row at the top with its name selected; type “logs” and Return: the folder is made, listed and selected. Then F2 renames it: the whole name is selected (a folder), type “archive” and Return; “archive” replaces “logs” and stays selected.",
+  "events": [
+    {"t": 0.5, "type": "tap", "key": "host-web"},
+    {"t": 1.5, "type": "key", "name": "n", "cmd": true, "shift": true},
+    {"t": 2.5, "type": "type", "text": "logs"},
+    {"t": 3.0, "type": "key", "name": "Enter"},
+    {"t": 4.0, "type": "key", "name": "F2"},
+    {"t": 5.0, "type": "type", "text": "archive"},
+    {"t": 5.6, "type": "key", "name": "Enter"},
+    {"t": 6.5, "type": "mark", "name": "end"}
+  ]
+}

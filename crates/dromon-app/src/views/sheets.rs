@@ -42,6 +42,7 @@ pub fn layer(s: &App, p: Paint) -> Option<El> {
         (None, Some(Sheet::Ask { prompt, .. })) => prompt_sheet(s, prompt, false, p),
         (None, Some(Sheet::Sent { prompt })) => prompt_sheet(s, prompt, true, p),
         (None, Some(Sheet::Log { host })) => log_sheet(s, host, p),
+        (None, Some(Sheet::Delete { names, .. })) => super::delete::sheet(s, names, p),
         (None, None) => conflict::sheet(s, p)?,
     };
     Some(
@@ -256,7 +257,8 @@ fn log_sheet(s: &App, host: &dromon_core::HostId, p: Paint) -> El {
     panel(p, "sheet", format!("Connection log · {name}"), LOG_WIDTH).child(lines).child(buttons(actions))
 }
 
-/// Notices (ssh's "touch your security key"): toasts above the status bar until ssh is done.
+/// Notices (ssh's "touch your security key"): toasts above the status bar until ssh is done,
+/// in the toast stack (`toast::layer`).
 pub fn notices(s: &App, p: Paint) -> Option<El> {
     let t = p.t;
     let list = s.ui.sheets.notices();
@@ -283,12 +285,5 @@ pub fn notices(s: &App, p: Paint) -> Option<El> {
             .child(icon(icons::SERVER.at(p.scale), size::ICON).color(t.text_2))
             .child(text(format!("{host}: {}", n.text.trim())).font(type_::BODY).color(t.text).shrink().wrap())
     });
-    Some(
-        col()
-            .key("notices")
-            .pin(Some(0.0), None, Some(0.0), Some(size::STATUS + space::S3))
-            .items_center()
-            .gap(space::S2)
-            .children(toasts),
-    )
+    Some(col().key("notices").items_center().gap(space::S2).children(toasts))
 }

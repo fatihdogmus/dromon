@@ -8,7 +8,7 @@ use rune::{El, Key, KeyEvent, LoopSpec, Tx, el, icon, row, text, text_input};
 use super::widgets::{chord, icon_button, kbd};
 use super::{Paint, run, transfers};
 use crate::icons;
-use crate::state::{Action, App, ConnView, Filter};
+use crate::state::{Action, App, ConnView, Filter, RowTarget};
 use crate::theme::{radius, size, space, type_};
 
 pub fn view(s: &App, p: Paint) -> El {
@@ -73,14 +73,17 @@ fn path_bar(s: &App, p: Paint) -> El {
         if i > 0 {
             bar = bar.child(icon(icons::CRUMB.at(p.scale), size::ICON).color(t.text_3));
         }
-        bar = bar.child(crumb(p, i, label, path, i == last, c.interactive()));
+        let over = super::drag::over(s, &RowTarget::Crumb(path.clone()));
+        bar = bar.child(crumb(p, i, label, path, i == last, c.interactive(), over));
     }
     bar
 }
 
-fn crumb(p: Paint, i: usize, label: String, path: RemotePath, current: bool, live: bool) -> El {
+/// One breadcrumb. It takes dragged rows (`over`: the drag is on it and it takes them).
+fn crumb(p: Paint, i: usize, label: String, path: RemotePath, current: bool, live: bool, over: bool) -> El {
     let t = p.t;
     let mut e = row()
+        .data(RowTarget::Crumb(path.clone()))
         .key(format!("crumb-{i}"))
         .role("link")
         .label(label.clone())
@@ -96,6 +99,9 @@ fn crumb(p: Paint, i: usize, label: String, path: RemotePath, current: bool, liv
                 .color(if current { t.text } else { t.text_2 })
                 .truncate(),
         );
+    if over {
+        e = e.fill(t.accent.alpha(0.22)).border(1.5, t.accent).shadow(2.0, 8.0, t.shadow);
+    }
     if !current && live {
         e = e.hover(t.hover).press(t.press).on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, Action::GoTo(path.clone()), tx));
     }

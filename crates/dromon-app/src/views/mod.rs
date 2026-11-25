@@ -2,20 +2,29 @@
 //! `&App` and a [`Paint`]; handlers turn input into `state::Action`s and run them with [`run`].
 
 mod conflict;
+mod delete;
+mod drag;
 mod drop;
+mod edit;
 mod list;
+mod menu;
 mod quit;
 mod sheets;
 mod sidebar;
 mod states;
 mod status;
+mod toast;
 mod toolbar;
 mod transfers;
 mod widgets;
 
 use rune::{ChromeInsets, Cx, El, Tx, col, row};
 
-use crate::state::{Action, App, Effect};
+/// The native context menu for a menu's entries (tests read it).
+#[cfg(test)]
+pub use menu::popup as menu_popup;
+
+use crate::state::{Action, App, Effect, FileAction};
 use crate::theme::{self, Tokens};
 
 /// What every part needs to paint itself.
@@ -52,7 +61,24 @@ pub fn effect(fx: Effect, tx: &mut Tx) {
             }
         }
         Effect::CloseWindow => tx.close_window(),
+        Effect::Copy(text) => tx.copy(text),
+        Effect::ReadClipboard { as_move } => {
+            tx.read_clipboard(move |s: &mut App, content: &rune::ClipboardContent, tx: &mut Tx| pasted(s, content, as_move, tx))
+        }
     }
+}
+
+/// What the OS clipboard held for ⌘V (or ⌥⌘V, `as_move`, and the menus' Paste): files copied in
+/// Finder or Explorer upload to the folder on screen (not for Move here); otherwise its text
+/// pastes the in-app clip, if it's still the clip's.
+fn pasted(s: &mut App, content: &rune::ClipboardContent, as_move: bool, tx: &mut Tx) {
+    if !content.files().is_empty() {
+        if !as_move {
+            run(s, Action::Upload { paths: content.files().to_vec(), folder: None }, tx);
+        }
+        return;
+    }
+    run(s, Action::File(FileAction::Paste { text: content.text().to_owned(), as_move }), tx);
 }
 
 pub fn view(s: &App, cx: &mut Cx<App>) -> El {
@@ -71,23 +97,20 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         .children(states::banner(s, p))
         .child(content(s, p))
         .child(status::view(s, p))
-        .children(sheets::notices(s, p));
+        .children(toast::layer(s, p));
     row()
         .key("window")
         .w_full()
         .h_full()
         .fill(t.canvas)
-        // Files copied in Finder or Explorer, pasted with ⌘V: uploaded to the folder on screen.
-        // Text alone pastes nothing here (a focused field takes its own pastes).
-        .on_paste_content(|s: &mut App, content: &rune::ClipboardContent, tx: &mut Tx| {
-            if !content.files().is_empty() {
-                run(s, Action::Upload { paths: content.files().to_vec(), folder: None }, tx);
-            }
-        })
+        // ⌘V: files copied in Finder or Explorer upload to the folder on screen; text that's
+        // still the clip's pastes the clip (a focused field takes its own pastes).
+        .on_paste_content(|s: &mut App, content: &rune::ClipboardContent, tx: &mut Tx| pasted(s, content, false, tx))
         .child(sidebar::view(s, p))
         .child(main)
         .children(transfers::popover(s, p))
         .children(sheets::layer(s, p))
+        .children(menu::layer(s, p))
 }
 
 /// The list area: whichever state the active connection is in.

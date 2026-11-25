@@ -41,7 +41,9 @@ pub fn area(s: &App, c: &ConnView, body: El, p: Paint) -> El {
         .on_drop_hover(|s: &mut App, over, tx| {
             let count = count(tx);
             run(s, Action::DropHover { target: DropTarget::List, over, count }, tx)
-        });
+        })
+        // Rows dragged within the window: where they'd go.
+        .children(super::drag::pill(s, p));
     let Some(hover) = s.transfers.drop.as_ref() else { return area };
     let t = p.t;
     if hover.target == DropTarget::List {
@@ -108,10 +110,15 @@ pub fn short_path(path: &str) -> String {
 }
 
 fn pill(c: &ConnView, hover: &DropHover, p: Paint) -> El {
+    pill_row("drop", pill_text(hover, c.cwd.as_str()), &icons::UPLOAD, p)
+}
+
+/// The floating pill at the bottom of the list that says where a drag would go, keyed
+/// `{key}-pill`, `{key}-pill-text` and `{key}-pill-row`.
+pub fn pill_row(key: &str, label: String, glyph: &'static icons::IconPair, p: Paint) -> El {
     let t = p.t;
-    let label = pill_text(hover, c.cwd.as_str());
     let pill = row()
-        .key("drop-pill")
+        .key(format!("{key}-pill"))
         .role("status")
         .label(label.clone())
         .h(32.0)
@@ -123,10 +130,10 @@ fn pill(c: &ConnView, hover: &DropHover, p: Paint) -> El {
         .fill(t.sheet)
         .border(p.hair, t.accent.alpha(0.5))
         .shadow(8.0, 24.0, t.shadow)
-        .child(icon(icons::UPLOAD.at(p.scale), size::ICON).color(t.accent))
-        .child(text(label).key("drop-pill-text").font(type_::BODY_STRONG).color(t.text));
+        .child(icon(glyph.at(p.scale), size::ICON).color(t.accent))
+        .child(text(label).key(format!("{key}-pill-text")).font(type_::BODY_STRONG).color(t.text));
     row()
-        .key("drop-pill-row")
+        .key(format!("{key}-pill-row"))
         .pin(Some(0.0), None, Some(0.0), Some(space::S6))
         .justify_center()
         .inert()

@@ -3,16 +3,22 @@
 //! [`ServiceEvent`]s through [`App::apply`]. Neither touches Rune, so both are unit-tested
 //! directly (`state/tests.rs`).
 
+pub mod clip;
 pub mod conn;
+pub mod drag;
+pub mod edit;
+pub mod files;
 pub mod history;
 pub mod hosts;
 pub mod keys;
 pub mod log;
+pub mod menu;
 pub mod ops;
 pub mod prefs;
 pub mod selection;
 pub mod service;
 pub mod sheets;
+pub mod toast;
 pub mod transfers;
 
 #[cfg(test)]
@@ -25,6 +31,9 @@ use dromon_core::{ConnStatus, HostId, HostSource, RemotePath, SortKey};
 use rune::TextEdit;
 
 pub use conn::{ConnView, Filter, ListError, Listing, Nav, Sort};
+pub use drag::DragTarget as RowTarget;
+pub use files::{FileAction, FileState};
+pub use menu::MenuKind;
 pub use hosts::{HostDirectory, Section};
 pub use keys::Shortcut;
 pub use ops::{OpView, Ops};
@@ -99,6 +108,8 @@ pub struct App {
     pub transfers: Transfers,
     /// New folder, rename and delete operations and how each is going.
     pub ops: Ops,
+    /// The name field, the clip, a row drag, the drawn menu and the toasts (`files.rs`).
+    pub files: FileState,
     /// Where downloads go (§3.5: Downloads, or the folder set in Settings).
     pub downloads: PathBuf,
     inbox: VecDeque<ServiceEvent>,
@@ -165,6 +176,8 @@ pub enum Action {
     QuitAnyway,
     /// The quit sheet's Cancel (or Escape): keep going.
     CancelQuit,
+    /// New folder, rename, delete, copy path, the clip, row drags and context menus.
+    File(FileAction),
 }
 
 /// What an action asks the view layer to do afterwards.
@@ -180,6 +193,10 @@ pub enum Effect {
     ShowInFolder(PathBuf),
     /// Close the window (and so quit): the user confirmed it.
     CloseWindow,
+    /// Put this text on the OS clipboard.
+    Copy(String),
+    /// Read the OS clipboard, then paste the clip if it still holds it (`FileAction::Paste`).
+    ReadClipboard { as_move: bool },
 }
 
 impl App {
@@ -198,6 +215,7 @@ impl App {
             store: Box::new(NoStore),
             transfers: Transfers::default(),
             ops: Ops::default(),
+            files: FileState::default(),
             // `run` puts the user's real Downloads folder here; scenes and tests keep this.
             downloads: PathBuf::from("Downloads"),
             inbox: VecDeque::new(),
@@ -265,6 +283,7 @@ impl App {
         self.inbox.extend(events);
         while let Some(ev) = self.inbox.pop_front() {
             self.apply_one(ev);
+            self.sync_files();
         }
     }
 
@@ -281,6 +300,7 @@ impl App {
         self.inbox.push_back(ev);
         while let Some(ev) = self.inbox.pop_front() {
             self.apply_one(ev);
+            self.sync_files();
         }
     }
 
@@ -365,6 +385,12 @@ impl App {
 
     /// Carries out `action`; returns what the view should do next.
     pub fn act(&mut self, action: Action) -> Vec<Effect> {
+        let fx = self.act_one(action);
+        self.sync_files();
+        fx
+    }
+
+    fn act_one(&mut self, action: Action) -> Vec<Effect> {
         let mut fx = Vec::new();
         match action {
             Action::SelectHost(host) => self.select_host(host),
@@ -513,6 +539,7 @@ impl App {
                 fx.push(Effect::CloseWindow);
             }
             Action::CancelQuit => self.ui.confirm_quit = false,
+            Action::File(a) => self.file_action(a, &mut fx),
         }
         fx
     }
@@ -548,6 +575,9 @@ impl App {
             Shortcut::Page { down, extend } => Action::Move { delta: if down { keys::PAGE_ROWS } else { -keys::PAGE_ROWS }, extend },
             Shortcut::End { last, extend } => Action::End { last, extend },
             Shortcut::Type(text) => Action::Type { text, now },
+            // A focused text field keeps its keys (§7): these are the list's.
+            Shortcut::File(_) if self.text_focused() => return Vec::new(),
+            Shortcut::File(k) => Action::File(k.action()),
         };
         self.act(action)
     }

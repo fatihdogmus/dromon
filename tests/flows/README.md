@@ -16,3 +16,14 @@ Transfers: `tb-transfers` (the toolbar button), `tr-tab-downloads`, `tr-tab-uplo
 element's centre; `upload-conflict` drops below the last row). Scripts can't paste files (Rune's
 `paste` events carry text, HTML, RTF and images only): ⌘V with files is covered by
 `ui_transfer_tests.rs`.
+
+File operations: `new-folder` (the new folder's row), `edit-input` (its name field, and a
+renamed row's), `edit-error-text`, the delete sheet's `delete-confirm` and `delete-cancel`,
+toasts `toast-op-<id>` with `toast-op-<id>-text` and `toast-op-<id>-dismiss`, a row drag's
+pill (the file drop's: `drop-pill-text`), and the drawn context menu `ctx-menu` with items `ctx-<id>` (`ctx-open`,
+`ctx-download`, `ctx-copy`, `ctx-cut`, `ctx-paste`, `ctx-copy-path`, `ctx-rename`, `ctx-delete`,
+`ctx-new-folder`, `ctx-refresh`, `ctx-hidden`); right-click with `"type": "secondary-click"`.
+Rows drag with `{"type": "drag", "key": "rows/<name>", "dx": 0, "dy": -28}`. ⌘C writes the OS
+clipboard; a script's ⌘V reads it only through a `paste` event, so `copy-paste` pastes the
+copied path text explicitly. The delete key is Delete here; on macOS it's ⌘⌫ (`"name":
+"Backspace", "cmd": true`).

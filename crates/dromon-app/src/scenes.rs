@@ -10,7 +10,7 @@ use rune::TextEdit;
 
 use crate::fixture;
 use crate::state::log::LogBuffer;
-use crate::state::{Action, App, DropTarget, Effect, ServiceEvent, Silent, Tab};
+use crate::state::{Action, App, DropTarget, Effect, FileAction, MenuKind, RowTarget, ServiceEvent, Silent, Tab};
 use crate::theme::Appearance;
 
 /// The demo's big folder: 10,000 photos.
@@ -257,6 +257,99 @@ pub fn quit_confirm(s: &mut App) {
     s.close_requested();
 }
 
+fn file(s: &mut App, a: FileAction) {
+    act(s, Action::File(a));
+}
+
+fn click(s: &mut App, name: &str, toggle: bool) {
+    act(s, Action::Click { name: name.into(), extend: false, toggle });
+}
+
+/// ⌘⇧N: the new folder's field at the top of the list, its free name selected.
+pub fn new_folder(s: &mut App) {
+    listing(s);
+    file(s, FileAction::NewFolder);
+}
+
+/// F2 on package-lock.json, renamed to a name that's taken: the field stays, with the error.
+pub fn rename_error(s: &mut App) {
+    listing(s);
+    click(s, "package-lock.json", false);
+    file(s, FileAction::Rename);
+    s.files.field_edit().replace_text("package.json");
+    s.files.field_edit().mark_edited();
+    file(s, FileAction::EditSubmit);
+}
+
+/// Every row selected, ⌘⌫: "Delete 17 items permanently?", five names, "and 12 more".
+pub fn delete_confirm(s: &mut App) {
+    listing(s);
+    act(s, Action::SelectAll);
+    file(s, FileAction::Delete);
+}
+
+/// Deletes `names` on prod (the service doesn't answer: the scene sets their progress).
+fn deleting(s: &mut App, names: &[&str]) -> crate::state::OpId {
+    for (i, n) in names.iter().enumerate() {
+        click(s, n, i > 0);
+    }
+    file(s, FileAction::Delete);
+    file(s, FileAction::ConfirmDelete);
+    s.ops.ops.last().map(|o| o.id).expect("the delete")
+}
+
+/// Two deletes running: one still counting what's there, one removing it.
+pub fn delete_progress(s: &mut App) {
+    listing(s);
+    s.backend = Box::new(Silent::default());
+    deleting(s, &["releases", "node_modules", "backup-2026-11-01.tar.gz"]);
+    let id = deleting(s, &["assets"]);
+    s.apply(ServiceEvent::FileOpProgress { id, host: prod(), done: 1204, total: Some(5005) });
+}
+
+/// A delete that stopped: its toast stays with the reason and a dismiss button.
+pub fn delete_failed(s: &mut App) {
+    listing(s);
+    s.backend = Box::new(Silent::default());
+    let id = deleting(s, &["uploads"]);
+    let error = dromon_core::Error::PermissionDenied(RemotePath::new("/var/www/site/uploads/2026"));
+    s.apply(ServiceEvent::FileOpFailed { id, host: prod(), error });
+}
+
+/// index.html and robots.txt cut (⌘X): dimmed until they're pasted.
+pub fn cut_rows(s: &mut App) {
+    listing(s);
+    click(s, "robots.txt", true);
+    file(s, FileAction::Cut);
+}
+
+/// index.html dragged over the uploads row: the row lifts, "Move 1 item to uploads".
+pub fn drag_folder(s: &mut App) {
+    listing(s);
+    file(s, FileAction::DragStart("index.html".into()));
+    file(s, FileAction::DragOver { target: Some(RowTarget::Folder("uploads".into())), copy: false });
+}
+
+/// The drawn menu of a right-clicked row (Linux; macOS and Windows show a native one).
+pub fn menu_row(s: &mut App) {
+    listing(s);
+    file(s, FileAction::Copy);
+    file(s, FileAction::OpenMenu { kind: MenuKind::Row("index.html".into()), at: Some((560.0, 330.0)) });
+}
+
+/// The drawn menu of the list's empty area.
+pub fn menu_empty(s: &mut App) {
+    listing(s);
+    file(s, FileAction::OpenMenu { kind: MenuKind::Empty, at: Some((640.0, 560.0)) });
+}
+
+/// The light theme: a cut row (dimmed) with its drawn menu open.
+pub fn file_ops_light(s: &mut App) {
+    menu_row(s);
+    file(s, FileAction::Cut);
+    s.ui.appearance = Appearance::Light;
+}
+
 /// A named state: what `AppSpec::scenes` takes.
 pub type Scene = (&'static str, fn(&mut App));
 
@@ -284,4 +377,14 @@ pub const SCENES: &[Scene] = &[
     ("drop-folder", drop_folder),
     ("toolbar-ring", toolbar_ring),
     ("quit-confirm", quit_confirm),
+    ("new-folder", new_folder),
+    ("rename-error", rename_error),
+    ("delete-confirm", delete_confirm),
+    ("delete-progress", delete_progress),
+    ("delete-failed", delete_failed),
+    ("cut-rows", cut_rows),
+    ("drag-folder", drag_folder),
+    ("menu-row", menu_row),
+    ("menu-empty", menu_empty),
+    ("file-ops-light", file_ops_light),
 ];

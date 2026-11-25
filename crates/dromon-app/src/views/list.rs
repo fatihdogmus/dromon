@@ -6,10 +6,10 @@ use std::borrow::Cow;
 use dromon_core::{ConnStatus, Entry, SortDir, SortKey};
 use rune::{Align, Color, El, GrowthSpec, ScrollSpec, Tx, col, el, icon, oklch, row, text};
 
-use super::{LIST, Paint, ROWS, drop, run, states};
+use super::{LIST, Paint, ROWS, drag, drop, edit, menu, run, states};
 use crate::fmt;
 use crate::icons;
-use crate::state::{Action, App, ConnView, ListError, Listing};
+use crate::state::{Action, App, ConnView, FileAction, ListError, Listing, MenuKind, RowTarget};
 use crate::theme::{motion, radius, size, space, type_};
 
 /// The list area for one connection, in whatever state it's in.
@@ -19,7 +19,11 @@ pub fn view(s: &App, c: &ConnView, p: Paint) -> El {
         Listing::Failed(ListError::PermissionDenied) => states::denied(p, c),
         Listing::Failed(ListError::NotFound) => states::message(p, "This folder no longer exists", c.cwd.as_str(), true),
         Listing::Failed(ListError::Other(e)) => states::message(p, "Couldn't open this folder", e, true),
-        Listing::Ready(entries) if entries.is_empty() => states::empty(p),
+        // A new folder in an empty one: its row, under the header.
+        Listing::Ready(entries) if entries.is_empty() => match edit::new_folder_row(s, c, p) {
+            Some(new) => col().w_full().h_full().child(header(c, p)).child(col().w_full().py(space::S1).child(new)),
+            None => empty_area(states::empty(p)),
+        },
         Listing::Ready(_) if c.row_count() == 0 && c.filter.is_on() => {
             col().w_full().h_full().child(header(c, p)).child(states::no_matches(p, c.filter.query()))
         }
@@ -103,7 +107,15 @@ fn rows(s: &App, c: &ConnView, p: Paint) -> El {
             _ => el().h(size::ROW),
         })
         .virtual_rows_version((c.host.as_str().to_owned(), c.rows_version));
-    let mut viewport = col().key(LIST).w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec::default()).child(col().w_full().py(space::S1).child(stack));
+    let mut content = col().w_full().py(space::S1).children(edit::new_folder_row(s, c, p)).child(stack);
+    if let Some((n, name)) = s.files.scroll.clone() {
+        // The folder just made or the item just renamed: brought into view once it lists.
+        content = content.child(el().key(format!("scroll-req-{n}")).absolute(0.0, 0.0).size(0.0, 0.0).on_mount(move |s: &mut App, tx: &mut Tx| {
+            tx.scroll_into_view_in(ROWS, name.clone());
+            run(s, Action::File(FileAction::Scrolled(n)), tx);
+        }));
+    }
+    let mut viewport = empty_area(col().key(LIST).w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec::default()).child(content));
     if let Some(name) = s.ui.center_on_mount.clone() {
         viewport = viewport.on_mount(move |s: &mut App, tx: &mut Tx| {
             s.ui.center_on_mount = None;
@@ -112,6 +124,11 @@ fn rows(s: &App, c: &ConnView, p: Paint) -> El {
         });
     }
     viewport
+}
+
+/// The list where there's no row: right-click opens New folder, Paste, Refresh, Show hidden.
+fn empty_area(e: El) -> El {
+    e.on_secondary_press(|s: &mut App, at, tx: &mut Tx| menu::open(s, MenuKind::Empty, at, tx))
 }
 
 fn row_key(s: &App, i: usize) -> Cow<'_, str> {
@@ -129,10 +146,16 @@ fn file_row(s: &App, c: &ConnView, i: usize, p: Paint) -> El {
     let name_color = if dim { t.text_3 } else { t.text };
     let meta_color = if dim { t.text_3 } else { t.text_2 };
     let open = e.kind.is_dir_like();
-    // A file drag over this folder row: it lifts with an accent fill.
-    let drop_here = open && drop::over_folder(s, &e.name);
-    let (n1, n2) = (e.name.clone(), e.name.clone());
-    let name = text(e.name.clone()).font(if selected { type_::BODY_STRONG } else { type_::BODY }).color(name_color).truncate().grow(1.0).min_w(0.0);
+    let target = RowTarget::Folder(e.name.clone());
+    // A file drag (or a row drag) over this folder row: it lifts with an accent fill.
+    let drop_here = open && (drop::over_folder(s, &e.name) || drag::over(s, &target));
+    let (n1, n2, n3) = (e.name.clone(), e.name.clone(), e.name.clone());
+    let name = match edit::renaming(s, c, e) {
+        Some(f) => edit::field(f, s.files.edit.is_sending(), p),
+        None => text(e.name.clone()).font(if selected { type_::BODY_STRONG } else { type_::BODY }).color(name_color).truncate().grow(1.0).min_w(0.0),
+    };
+    // Cut rows stay dimmed until they're pasted or the clip changes.
+    let cut = s.files.clip.as_ref().is_some_and(|k| k.is_cut(&c.host, &c.cwd.join(&e.name)));
     let size_cell = text(fmt::entry_size(e)).font(type_::META).color(meta_color).w(size::COL_SIZE).align(Align::End);
     let modified =
         text(fmt::modified(e.mtime, s.now)).font(type_::META).color(meta_color).w(size::COL_MODIFIED).pl(space::S4).truncate();
@@ -173,10 +196,17 @@ fn file_row(s: &App, c: &ConnView, i: usize, p: Paint) -> El {
             let m = tx.mods();
             run(s, Action::Click { name: n1.clone(), extend: m.shift, toggle: m.cmd }, tx);
         })
+        .on_secondary_press(move |s: &mut App, at, tx: &mut Tx| menu::open(s, MenuKind::Row(n3.clone()), at, tx))
         .child(cells);
+    if cut {
+        r = r.opacity(0.5);
+    }
+    if edit::renaming(s, c, e).is_none() {
+        r = drag::row(r, &e.name);
+    }
     if open {
         r = r.on_double_press_tx(move |s: &mut App, tx: &mut Tx| run(s, Action::Open(n2.clone()), tx));
-        r = drop::folder_row(r, &e.name);
+        r = drop::folder_row(r, &e.name).data(target);
     }
     r
 }

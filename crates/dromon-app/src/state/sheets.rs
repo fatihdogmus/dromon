@@ -9,7 +9,7 @@
 
 use std::collections::VecDeque;
 
-use dromon_core::{HostId, Prompt, PromptAnswer, PromptId, PromptKind};
+use dromon_core::{HostId, Prompt, PromptAnswer, PromptId, PromptKind, RemotePath};
 use rune::TextEdit;
 
 /// The sheet on screen.
@@ -22,20 +22,23 @@ pub enum Sheet {
     Sent { prompt: Prompt },
     /// One host's connection log.
     Log { host: HostId },
+    /// "Delete 3 items permanently?": the rows `names` of `folder`. Return doesn't delete;
+    /// only its Delete button does.
+    Delete { host: HostId, folder: RemotePath, names: Vec<String> },
 }
 
 impl Sheet {
     pub fn host(&self) -> &HostId {
         match self {
             Sheet::Ask { prompt, .. } | Sheet::Sent { prompt } => &prompt.host,
-            Sheet::Log { host } => host,
+            Sheet::Log { host } | Sheet::Delete { host, .. } => host,
         }
     }
 
     pub fn prompt(&self) -> Option<&Prompt> {
         match self {
             Sheet::Ask { prompt, .. } | Sheet::Sent { prompt } => Some(prompt),
-            Sheet::Log { .. } => None,
+            Sheet::Log { .. } | Sheet::Delete { .. } => None,
         }
     }
 }
@@ -111,8 +114,10 @@ impl Sheets {
             }
             return;
         }
+        // A question from ssh comes before the log or a delete still being asked about (whose
+        // host can't take it while it signs in anyway).
         let replaces = match &self.open {
-            None | Some(Sheet::Log { .. }) => true,
+            None | Some(Sheet::Log { .. } | Sheet::Delete { .. }) => true,
             Some(Sheet::Sent { prompt }) => prompt.host == p.host,
             Some(Sheet::Ask { .. }) => false,
         };
@@ -177,7 +182,7 @@ impl Sheets {
     pub fn cancel(&mut self) -> Option<(PromptId, PromptAnswer)> {
         let id = match &self.open {
             Some(Sheet::Ask { prompt, .. }) => Some(prompt.id),
-            Some(Sheet::Sent { .. } | Sheet::Log { .. }) => None,
+            Some(Sheet::Sent { .. } | Sheet::Log { .. } | Sheet::Delete { .. }) => None,
             None => return None,
         };
         self.close_and_advance();
@@ -195,11 +200,31 @@ impl Sheets {
         }
     }
 
+    /// Asks whether to delete `names` from `folder`, unless another sheet is up.
+    pub fn open_delete(&mut self, host: HostId, folder: RemotePath, names: Vec<String>) -> bool {
+        if self.open.is_some() || names.is_empty() {
+            return false;
+        }
+        self.open = Some(Sheet::Delete { host, folder, names });
+        true
+    }
+
+    /// The delete sheet's Delete: what to delete, and the sheet closes.
+    pub fn take_delete(&mut self) -> Option<(HostId, RemotePath, Vec<String>)> {
+        if !matches!(self.open, Some(Sheet::Delete { .. })) {
+            return None;
+        }
+        let Some(Sheet::Delete { host, folder, names }) = self.open.take() else { return None };
+        self.open = self.queue.pop_front().map(ask);
+        Some((host, folder, names))
+    }
+
     /// The user disconnected `host`: nothing of it stays on screen.
     pub fn forget_host(&mut self, host: &HostId) {
         self.queue.retain(|p| &p.host != host);
         self.notices.retain(|p| &p.host != host);
-        if self.open.as_ref().and_then(Sheet::prompt).is_some_and(|p| &p.host == host) {
+        let delete = matches!(&self.open, Some(Sheet::Delete { host: h, .. }) if h == host);
+        if delete || self.open.as_ref().and_then(Sheet::prompt).is_some_and(|p| &p.host == host) {
             self.close_and_advance();
         }
     }
@@ -355,6 +380,31 @@ mod tests {
         assert_eq!(open_id(&s), Some(3));
         assert_eq!(s.queued().len(), 0);
         assert!(s.notices().is_empty());
+    }
+
+    #[test]
+    fn the_delete_sheet_asks_once_cancels_quietly_and_gives_way_to_prompts() {
+        let mut s = Sheets::default();
+        let folder = RemotePath::new("/w");
+        assert!(!s.open_delete(host("a"), folder.clone(), Vec::new()), "nothing to delete");
+        assert!(s.open_delete(host("a"), folder.clone(), vec!["x".into()]));
+        assert!(!s.open_delete(host("a"), folder.clone(), vec!["y".into()]), "one sheet at a time");
+        assert_eq!(s.cancel(), None, "nothing to answer");
+        assert!(!s.is_open());
+        assert_eq!(s.take_delete(), None);
+
+        s.open_delete(host("a"), folder.clone(), vec!["x".into(), "y".into()]);
+        assert_eq!(s.take_delete(), Some((host("a"), folder.clone(), vec!["x".into(), "y".into()])));
+        assert!(!s.is_open());
+
+        s.open_delete(host("a"), folder.clone(), vec!["x".into()]);
+        s.on_prompt(prompt(1, "a", PromptKind::Password));
+        assert_eq!(open_id(&s), Some(1), "ssh's question comes first");
+        assert_eq!(s.take_delete(), None);
+        s.cancel();
+        s.open_delete(host("b"), folder, vec!["x".into()]);
+        s.forget_host(&host("b"));
+        assert!(!s.is_open());
     }
 
     #[test]

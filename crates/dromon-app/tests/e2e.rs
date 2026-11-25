@@ -632,6 +632,91 @@ fn disconnect_forgets_the_password() {
     h.assert_no_secrets();
 }
 
+/// ⌘ on macOS, Ctrl elsewhere, as the platform reports the primary modifier.
+fn primary() -> Mods {
+    let mac = cfg!(target_os = "macos");
+    Mods { cmd: true, logo: mac, ctrl: !mac, ..Mods::default() }
+}
+
+/// g. File operations through the UI on the real server: ⌘⇧N + a name + Return makes a folder;
+/// F2 renames it; ⌘C then ⌘V of a file in its own folder makes “name (1)” (a server-side
+/// copy); Delete through the sheet removes the folder. Each checked on the server itself.
+#[test]
+fn file_operations_from_the_keyboard() {
+    let Some(mut h) = Harness::new("file_operations_from_the_keyboard") else { return };
+    let fx = h.fx;
+    let scratch = fx.path(Role::Key, &format!("scratch/e2e-fileops-{}", std::process::id()));
+    let dir = scratch.as_str().to_owned();
+    let make = format!("rm -rf '{dir}' && mkdir -p '{dir}' && printf 'hello' > '{dir}/page.txt' && chown -R {} '{dir}'", fx.owner(Role::Key));
+    fx.exec(&["sh", "-c", &make]).unwrap();
+    let on_server = |test: &str, rel: &str| fx.exec(&["sh", "-c", &format!("test {test} '{dir}/{rel}' && echo yes || echo no")]).unwrap().trim() == "yes";
+    // The OS clipboard: an in-memory one, as a test's.
+    h.rt.use_clipboard(&rune::clipboard::memory());
+
+    h.connect("fx-key");
+    h.trust_host_key("fx-key");
+    h.wait_for_listing(&h.home(Role::Key));
+    let to = scratch.clone();
+    h.rt.update(move |s, _| {
+        s.act(dromon_app::state::Action::GoTo(to));
+    });
+    assert_eq!(h.wait_for_listing(&dir), ["page.txt"]);
+    h.step(&format!("listed {dir}"));
+
+    let mods = |shift: bool| Mods { shift, ..primary() };
+    h.rt.key(KeyEvent { key: Key::Command('n'), mods: mods(true) });
+    h.settle();
+    assert_eq!(h.rt.presented_focus_key(), Some("edit-input"), "the new folder's field has the keyboard");
+    h.type_text("made");
+    h.key(Key::Enter);
+    h.pump_until("the new folder listed and selected", |rt| {
+        rt.state.conn().is_some_and(|c| c.find("made").is_some() && c.selection.contains("made")) && !shown(rt, "edit-input")
+    });
+    assert!(on_server("-d", "made"), "the folder exists on the server");
+    h.step("⌘⇧N made “made”");
+
+    h.key(Key::Function(2));
+    assert_eq!(h.rt.presented_focus_key(), Some("edit-input"));
+    h.type_text("renamed");
+    h.key(Key::Enter);
+    h.pump_until("the renamed folder listed and selected", |rt| {
+        rt.state.conn().is_some_and(|c| c.find("renamed").is_some() && c.find("made").is_none() && c.selection.contains("renamed"))
+    });
+    assert!(on_server("-d", "renamed") && !on_server("-e", "made"), "renamed on the server");
+    h.step("F2 renamed it to “renamed”");
+
+    h.click("rows/page.txt");
+    h.rt.key(KeyEvent { key: Key::Command('c'), mods: mods(false) });
+    h.settle();
+    h.rt.key(KeyEvent { key: Key::Command('v'), mods: mods(false) });
+    h.settle();
+    h.pump_until("the copy job done", |rt| {
+        rt.state.transfers.jobs.iter().any(|j| j.kind == dromon_transfer::JobKind::RemoteCopy && j.state == dromon_transfer::TaskState::Done)
+    });
+    assert!(on_server("-f", "page (1).txt"), "the copy is on the server as “page (1).txt”");
+    assert_eq!(fx.exec(&["cat", &format!("{dir}/page (1).txt")]).unwrap(), "hello");
+    h.rt.update(|s, _| {
+        s.act(dromon_app::state::Action::File(dromon_app::state::FileAction::Refresh));
+    });
+    h.pump_until("the copy listed", |rt| rt.state.conn().is_some_and(|c| c.find("page (1).txt").is_some()));
+    h.step("⌘C ⌘V copied page.txt to “page (1).txt”");
+
+    h.click("rows/renamed");
+    if cfg!(target_os = "macos") {
+        h.rt.key(KeyEvent { key: Key::Backspace, mods: primary() });
+        h.settle();
+    } else {
+        h.key(Key::Delete);
+    }
+    assert_eq!(h.text_of("sheet-title"), "Delete ‘renamed’ permanently?");
+    h.click("delete-confirm");
+    h.pump_until("the folder gone from the listing", |rt| rt.state.conn().is_some_and(|c| c.find("renamed").is_none()));
+    assert!(!on_server("-e", "renamed"), "deleted on the server");
+    assert!(h.rt.state.toasts().is_empty(), "the delete's toast went when it was done");
+    h.step("the delete sheet removed “renamed”");
+    let _ = fx.exec(&["rm", "-rf", &dir]);
+}
+
 #[test]
 fn numbers_are_matched_whole() {
     assert!(contains_number("code 123456 sent", "123456"));

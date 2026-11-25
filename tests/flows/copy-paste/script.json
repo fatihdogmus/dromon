@@ -1,0 +1,10 @@
+{
+  "description": "Open web, select index.html and press ⌘C (Ctrl+C elsewhere): it's on the in-app clip, and its full path on the OS clipboard. Then ⌘V with the OS clipboard still holding that path (scripts paste explicitly: the `paste` event): the copy lands in the same folder as “index (1).html” and the folder lists again with it.",
+  "events": [
+    {"t": 0.5, "type": "tap", "key": "host-web"},
+    {"t": 1.2, "type": "tap", "key": "rows/index.html"},
+    {"t": 1.8, "type": "key", "name": "c", "cmd": true},
+    {"t": 2.6, "paste": "/srv/site/index.html"},
+    {"t": 3.6, "type": "mark", "name": "end"}
+  ]
+}

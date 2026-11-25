@@ -7,7 +7,7 @@ use rune::{Color, Cursor, Drag, El, Phase, ScrollSpec, Tx, col, el, icon, row, t
 use super::Paint;
 use super::widgets::dot;
 use crate::icons;
-use crate::state::{Action, App, Section, hosts};
+use crate::state::{Action, App, RowTarget, Section, hosts};
 use crate::theme::{motion, radius, size, space, type_};
 
 pub fn view(s: &App, p: Paint) -> El {
@@ -60,6 +60,9 @@ fn host_row(s: &App, p: Paint, h: &HostSpec) -> El {
         _ => None,
     };
     let id = h.id.clone();
+    // Rows dragged here copy into this host's folder on screen.
+    let target = RowTarget::Host(h.id.clone());
+    let over = super::drag::over(s, &target);
     let name = text(h.display_name().to_owned())
         .font(if active { type_::BODY_STRONG } else { type_::BODY })
         .color(if active { t.text } else { t.text_2 })
@@ -76,7 +79,14 @@ fn host_row(s: &App, p: Paint, h: &HostSpec) -> El {
         .gap(space::S2)
         .radius(radius::ROW)
         .center_y()
-        .fill(if active { t.active } else { Color::TRANSPARENT })
+        .data(target)
+        .fill(if over {
+            t.accent.alpha(0.22)
+        } else if active {
+            t.active
+        } else {
+            Color::TRANSPARENT
+        })
         .hover(t.hover)
         .press(t.press)
         .motion(motion::SNAP)
@@ -85,6 +95,9 @@ fn host_row(s: &App, p: Paint, h: &HostSpec) -> El {
         .child(name);
     if let Some(c) = dot_color {
         r = r.child(dot(c, 6.0).mr(space::S1));
+    }
+    if over {
+        r = r.border(1.5, t.accent).shadow(2.0, 8.0, t.shadow);
     }
     r
 }

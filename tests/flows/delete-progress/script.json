@@ -1,0 +1,16 @@
+{
+  "description": "Open web, select old-build, a.log and b.log (click, Shift+↓ twice) and press Delete (⌘⌫ on macOS): the sheet asks “Delete 3 items permanently?” with their names; Return doesn't delete, so press it, then the Delete button: the three go (the fixture deletes at once, so its “Deleting…” toast is gone by the next frame). Then delete cache, which can't be read: the toast stays, “Couldn't delete ‘cache’: You don't have access to /srv/site/cache”, with a dismiss button.",
+  "events": [
+    {"t": 0.5, "type": "tap", "key": "host-web"},
+    {"t": 1.2, "type": "tap", "key": "rows/old-build"},
+    {"t": 1.5, "type": "key", "name": "Down", "shift": true},
+    {"t": 1.8, "type": "key", "name": "Down", "shift": true},
+    {"t": 2.3, "type": "key", "name": "Delete"},
+    {"t": 3.0, "type": "key", "name": "Enter"},
+    {"t": 3.8, "type": "tap", "key": "delete-confirm"},
+    {"t": 4.8, "type": "tap", "key": "rows/cache"},
+    {"t": 5.2, "type": "key", "name": "Delete"},
+    {"t": 6.0, "type": "tap", "key": "delete-confirm"},
+    {"t": 7.0, "type": "mark", "name": "end"}
+  ]
+}

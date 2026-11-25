@@ -1,0 +1,9 @@
+{
+  "description": "Open web and drag the index.html row up onto the uploads row: past 4 pt the drag starts (index.html is selected), the uploads row lifts with an accent outline and the pill reads “Move 1 item to uploads”; letting go moves it there (posix-rename on a real server) and the folder lists again without it. Double-click uploads: index.html is inside.",
+  "events": [
+    {"t": 0.5, "type": "tap", "key": "host-web"},
+    {"t": 1.5, "type": "drag", "key": "rows/index.html", "dx": 0, "dy": -28, "dur": 1.0},
+    {"t": 3.2, "type": "double-click", "key": "rows/uploads"},
+    {"t": 4.2, "type": "mark", "name": "end"}
+  ]
+}

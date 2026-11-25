@@ -31,6 +31,10 @@ mod theme;
 mod views;
 
 #[cfg(test)]
+mod ui_file_tests;
+#[cfg(test)]
+mod ui_menu_tests;
+#[cfg(test)]
 mod ui_sheet_tests;
 #[cfg(test)]
 mod ui_tests;
