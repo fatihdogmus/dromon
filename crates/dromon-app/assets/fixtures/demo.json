@@ -1,0 +1,144 @@
+{
+  "version": 1,
+  "description": "Dromon's built-in demo (DROMON_MOCK=1, scenes, goldens, tests): nine hosts that connect at once, a web site on prod, a NAS, and a 10,000-photo folder.",
+  "now": "2026-11-25T14:00:00Z",
+  "hosts": [
+    {"alias": "prod", "source": "ssh-config", "user": "deploy", "hostname": "prod.example.com"},
+    {"alias": "staging", "source": "ssh-config", "user": "deploy", "hostname": "staging.example.com"},
+    {"alias": "nas", "source": "ssh-config", "user": "admin", "hostname": "nas.local", "port": 2222},
+    {"alias": "pi", "source": "ssh-config", "user": "pi", "hostname": "raspberrypi.local"},
+    {"alias": "build-box", "source": "ssh-config", "user": "ci", "hostname": "10.0.0.20"},
+    {"alias": "box", "source": "saved", "user": "fatih", "hostname": "10.0.0.4"},
+    {"alias": "media", "source": "saved", "user": "fatih", "hostname": "media.home.arpa"},
+    {"alias": "203.0.113.7", "source": "recent", "user": "ubuntu", "hostname": "203.0.113.7"},
+    {"alias": "10.0.0.12", "source": "recent", "user": "root", "hostname": "10.0.0.12", "port": 2222}
+  ],
+  "servers": {
+    "prod": {
+      "home": "/var/www/site",
+      "tree": {
+        "/": [
+          {"name": "bin", "kind": "dir", "mtime": "2026-10-16T14:00:00Z"},
+          {"name": "boot", "kind": "dir", "mtime": "2026-10-16T14:00:00Z"},
+          {"name": "etc", "kind": "dir", "mtime": "2026-11-23T14:00:00Z"},
+          {"name": "home", "kind": "dir", "mtime": "2026-08-27T14:00:00Z"},
+          {"name": "opt", "kind": "dir", "mtime": "2026-07-28T14:00:00Z"},
+          {"name": "root", "kind": "dir", "mtime": "2026-10-26T14:00:00Z"},
+          {"name": "srv", "kind": "dir", "mtime": "2026-11-16T14:00:00Z"},
+          {"name": "tmp", "kind": "dir", "mtime": "2026-11-25T13:56:00Z"},
+          {"name": "usr", "kind": "dir", "mtime": "2026-10-16T14:00:00Z"},
+          {"name": "var", "kind": "dir", "mtime": "2026-11-24T11:00:00Z"}
+        ],
+        "/root": {"error": "permission-denied"},
+        "/var": [
+          {"name": "backups", "kind": "dir", "mtime": "2026-11-24T14:00:00Z"},
+          {"name": "cache", "kind": "dir", "mtime": "2026-11-25T09:00:00Z"},
+          {"name": "lib", "kind": "dir", "mtime": "2026-11-22T14:00:00Z"},
+          {"name": "log", "kind": "dir", "mtime": "2026-11-25T13:59:00Z"},
+          {"name": "www", "kind": "dir", "mtime": "2026-11-24T14:00:00Z"}
+        ],
+        "/var/lib/mysql": {"error": "permission-denied"},
+        "/var/www": [
+          {"name": "site", "kind": "dir", "mtime": "2026-11-25T13:58:00Z"},
+          {"name": "staging-site", "kind": "dir", "mtime": "2026-11-19T14:00:00Z"},
+          {"name": "html", "kind": "symlink", "target": "dir", "size": 30, "mtime": "2026-05-09T14:00:00Z"}
+        ],
+        "/var/www/site": [
+          {"name": "assets", "kind": "dir", "mtime": "2026-11-25T13:58:00Z"},
+          {"name": "node_modules", "kind": "dir", "mtime": "2026-11-03T14:00:00Z"},
+          {"name": "releases", "kind": "dir", "mtime": "2026-11-24T18:00:00Z"},
+          {"name": "uploads", "kind": "dir", "mtime": "2026-10-30T14:00:00Z"},
+          {"name": ".well-known", "kind": "dir", "mtime": "2026-10-14T14:00:00Z"},
+          {"name": "current", "kind": "symlink", "target": "dir", "size": 30, "mtime": "2026-11-25T13:48:00Z"},
+          {"name": ".env", "kind": "file", "size": 1204, "mtime": "2026-11-25T13:48:00Z"},
+          {"name": ".gitignore", "kind": "file", "size": 312, "mtime": "2026-09-22T14:00:00Z"},
+          {"name": "index.html", "kind": "file", "size": 14812, "mtime": "2026-11-24T18:00:00Z"},
+          {"name": "favicon.ico", "kind": "file", "size": 4286, "mtime": "2026-10-14T14:00:00Z"},
+          {"name": "robots.txt", "kind": "file", "size": 68, "mtime": "2026-07-28T14:00:00Z"},
+          {"name": "package.json", "kind": "file", "size": 2143, "mtime": "2026-11-22T14:00:00Z"},
+          {"name": "package-lock.json", "kind": "file", "size": 412388, "mtime": "2026-11-22T14:00:00Z"},
+          {"name": "README.md", "kind": "file", "size": 3391, "mtime": "2026-11-16T14:00:00Z"},
+          {"name": "server.log", "kind": "file", "size": 4812331, "mtime": "2026-11-25T13:58:00Z"},
+          {"name": "backup-2026-11-01.tar.gz", "kind": "file", "size": 18204116, "mtime": "2026-11-01T14:00:00Z"},
+          {"name": "app.min.js", "kind": "file", "size": 286410, "mtime": "2026-11-24T18:00:00Z"}
+        ],
+        "/var/www/site/uploads": [],
+        "/var/www/site/releases": [
+          {"name": "20261125-1348", "kind": "dir", "mtime": "2026-11-25T13:48:00Z"},
+          {"name": "20261124-0912", "kind": "dir", "mtime": "2026-11-24T09:00:00Z"},
+          {"name": "20261120-1730", "kind": "dir", "mtime": "2026-11-20T14:00:00Z"}
+        ],
+        "/var/www/site/releases/20261125-1348": [
+          {"name": "assets", "kind": "dir", "mtime": "2026-11-25T13:48:00Z"},
+          {"name": "index.html", "kind": "file", "size": 14812, "mtime": "2026-11-25T13:48:00Z"},
+          {"name": "app.min.js", "kind": "file", "size": 286410, "mtime": "2026-11-25T13:48:00Z"},
+          {"name": "package.json", "kind": "file", "size": 2143, "mtime": "2026-11-25T13:48:00Z"}
+        ],
+        "/var/www/site/current": [
+          {"name": "assets", "kind": "dir", "mtime": "2026-11-25T13:48:00Z"},
+          {"name": "index.html", "kind": "file", "size": 14812, "mtime": "2026-11-25T13:48:00Z"},
+          {"name": "app.min.js", "kind": "file", "size": 286410, "mtime": "2026-11-25T13:48:00Z"},
+          {"name": "package.json", "kind": "file", "size": 2143, "mtime": "2026-11-25T13:48:00Z"}
+        ],
+        "/home": [
+          {"name": "deploy", "kind": "dir", "mtime": "2026-11-24T14:00:00Z"},
+          {"name": "pi", "kind": "dir", "mtime": "2026-11-17T14:00:00Z"},
+          {"name": "ubuntu", "kind": "dir", "mtime": "2026-10-26T14:00:00Z"},
+          {"name": "admin", "kind": "dir", "mtime": "2026-09-26T14:00:00Z"}
+        ],
+        "/srv": [
+          {"name": "media", "kind": "dir", "mtime": "2026-11-16T14:00:00Z"},
+          {"name": "git", "kind": "dir", "mtime": "2026-10-26T14:00:00Z"}
+        ],
+        "/srv/media": [
+          {"name": "photos", "kind": "dir", "mtime": "2026-11-16T14:00:00Z"},
+          {"name": "video", "kind": "dir", "mtime": "2026-09-26T14:00:00Z"}
+        ],
+        "/srv/media/photos": [
+          {"generate": {"pattern": "IMG_{05}.jpg", "count": 10000, "size": [1500000, 6299999],
+                        "mtime": {"end": "2026-11-25T14:00:00Z", "every": 3120, "jitter": 2340}}}
+        ]
+      }
+    },
+    "nas": {
+      "home": "/volume1",
+      "tree": {
+        "/volume1": [
+          {"name": "backups", "kind": "dir", "mtime": "2026-11-25T11:00:00Z"},
+          {"name": "docker", "kind": "dir", "mtime": "2026-11-23T14:00:00Z"},
+          {"name": "homes", "kind": "dir", "mtime": "2026-10-16T14:00:00Z"},
+          {"name": "media", "kind": "dir", "mtime": "2026-11-20T14:00:00Z"},
+          {"name": "photos", "kind": "dir", "mtime": "2026-11-24T14:00:00Z"},
+          {"name": ".DS_Store", "kind": "file", "size": 6148, "mtime": "2026-09-16T14:00:00Z"},
+          {"name": "README.txt", "kind": "file", "size": 1024, "mtime": "2026-01-29T14:00:00Z"}
+        ]
+      }
+    },
+    "staging": {
+      "home": "/home/deploy",
+      "tree": {
+        "/home/deploy": [
+          {"name": "site", "kind": "dir", "mtime": "2026-11-24T18:00:00Z"},
+          {"name": "logs", "kind": "dir", "mtime": "2026-11-25T13:59:00Z"},
+          {"name": ".bashrc", "kind": "file", "size": 3771, "mtime": "2026-01-29T14:00:00Z"},
+          {"name": "deploy.sh", "kind": "file", "size": 1873, "mode": "0755", "mtime": "2026-11-16T14:00:00Z"}
+        ]
+      }
+    },
+    "pi": {
+      "home": "/home/pi",
+      "tree": {
+        "/home/pi": [
+          {"name": "projects", "kind": "dir", "mtime": "2026-11-17T14:00:00Z"},
+          {"name": "camera.py", "kind": "file", "size": 4102, "mtime": "2026-11-20T14:00:00Z"},
+          {"name": "notes.txt", "kind": "file", "size": 812, "mtime": "2026-11-22T14:00:00Z"}
+        ]
+      }
+    },
+    "build-box": {"home": "/home/deploy"},
+    "box": {"home": "/home/deploy"},
+    "media": {"home": "/home/deploy"},
+    "203.0.113.7": {"home": "/home/ubuntu"},
+    "10.0.0.12": {"home": "/"}
+  }
+}

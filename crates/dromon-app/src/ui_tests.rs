@@ -1,5 +1,5 @@
 //! The real app driven headless (Rune's `Runtime`): pointer and keys in, state and elements
-//! out. Same view, handlers and `on_key` as the window, on the mock service and clock.
+//! out. Same view, handlers and `on_key` as the window, on the demo fixture and its clock.
 
 use dromon_core::{HostId, SortDir, SortKey};
 use rune::{Env, Key, KeyEvent, Mods, PhysicalInput, Runtime};

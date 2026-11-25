@@ -1,16 +1,21 @@
 //! Named states for headless snapshots (`--scene NAME`), each reached by the same actions and
-//! events a user and the service would produce, on the mock clock.
+//! events a user and the service would produce. They start from the demo fixture (on its clock),
+//! or from `--fixture`'s when one is given; the goldens are the demo's.
 
 use dromon_core::{ConnStatus, HostId, Prompt, PromptId, PromptKind, RemotePath};
 use rune::TextEdit;
 
-use crate::mock::{self, MockService};
+use crate::fixture;
+use crate::state::log::LogBuffer;
 use crate::state::{Action, App, Effect, ServiceEvent, Silent};
 use crate::theme::Appearance;
 
-/// The app as it launches against the mock: hosts listed, nothing connected.
+/// The demo's big folder: 10,000 photos.
+pub const BIG_FOLDER: &str = "/srv/media/photos";
+
+/// The app as it launches on the active fixture: hosts listed, nothing connected.
 pub fn base() -> App {
-    App::new(mock::hosts(), mock::NOW, Box::new(MockService { now: mock::NOW }))
+    fixture::app(fixture::active())
 }
 
 fn prod() -> HostId {
@@ -47,7 +52,7 @@ pub fn listing_sorted_size(s: &mut App) {
 pub fn big_folder(s: &mut App) {
     *s = base();
     act(s, Action::SelectHost(prod()));
-    act(s, Action::GoTo(RemotePath::new(mock::BIG_FOLDER)));
+    act(s, Action::GoTo(RemotePath::new(BIG_FOLDER)));
     let name = "IMG_05000.jpg".to_owned();
     act(s, Action::Click { name: name.clone(), extend: false, toggle: false });
     s.ui.center_on_mount = Some(name);
@@ -138,8 +143,10 @@ pub fn connection_log(s: &mut App) {
         (1_844_655, "Reconnected.".into()),
         (1_851_230, "debug1: client_input_global_request: rtype keepalive@openssh.com want_reply 1".into()),
     ];
+    let start = (s.now - 3 * 3600) * 1000;
     if let Some(c) = s.conns.get_mut(&prod()) {
-        let start = (mock::NOW - 3 * 3600) * 1000;
+        // Only this script of a session three hours old, not what connecting just logged.
+        c.log = LogBuffer::default();
         for (at, line) in lines {
             c.log.push(start + at, line);
         }

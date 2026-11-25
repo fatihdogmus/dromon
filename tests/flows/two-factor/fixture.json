@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "description": "lab signs in with keyboard-interactive: a password, then a verification code.",
+  "now": "2026-11-25T14:00:00Z",
+  "hosts": [
+    {"alias": "lab", "source": "ssh-config", "user": "kbd", "hostname": "lab.example.com"}
+  ],
+  "servers": {
+    "lab": {
+      "home": "/home/kbd",
+      "auth": [
+        {"password": {"prompt": "(kbd@lab.example.com) Password: ", "accept": "pw"}},
+        {"code": {"prompt": "(kbd@lab.example.com) Verification code: ", "accept": "123456"}}
+      ],
+      "tree": {
+        "/home/kbd": [
+          {"name": "experiments", "kind": "dir", "mtime": "2026-11-24T10:00:00Z"},
+          {"name": "results.csv", "kind": "file", "size": 88213, "mtime": "2026-11-25T12:30:00Z"},
+          {"name": "notes.md", "kind": "file", "size": 2210, "mtime": "2026-11-20T09:15:00Z"}
+        ]
+      }
+    }
+  }
+}

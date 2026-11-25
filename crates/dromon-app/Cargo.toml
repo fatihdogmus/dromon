@@ -24,6 +24,8 @@ dromon-ssh.workspace = true
 dromon-transfer.workspace = true
 rune.workspace = true
 secrecy.workspace = true
+# Fixtures (`--fixture`, the built-in demo).
+serde_json.workspace = true
 tokio.workspace = true
 zeroize.workspace = true
 

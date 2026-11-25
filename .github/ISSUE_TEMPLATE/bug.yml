@@ -1,0 +1,105 @@
+name: Bug report
+description: Something in Dromon doesn't work as it should. A fixture and a script let anyone (and any agent) see it without your servers.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Most bugs that aren't about real networking can be shown without your servers: describe them with a **fixture** (fake hosts, folders, errors and sign-in prompts) and a **script** (the clicks and keys that lead to the bug). Dromon replays them headless, so anyone can see what you saw.
+
+        - **Fixture** (`json fixture` block below): the format is in `docs/fixtures.md` in this repository, with a complete example. Leave the block out (delete it) to use the built-in demo (`crates/dromon-app/assets/fixtures/demo.json`: hosts `prod`, `nas`, … with a web site, a NAS and a 10,000-photo folder). Never put real hostnames, keys or passwords in it: answers in a fixture are test data.
+        - **Script** (`json script` block): Rune's script format: timed `tap`, `double-click`, `type`, `key`, `wheel`, `drag` events at elements by `key` (`host-<alias>`, `rows/<name>`, `sheet-input`, `sheet-submit`, `tb-back`, `col-Size`, `crumb-0`, `state-go-up`, `status-conn`, `log-disconnect`, …), and a `{"type": "mark", "name": "end"}` where the bug shows. `tests/flows/*/script.json` are working examples.
+        - **Args** (`text args` block, optional): only `--scene NAME`, `--size WxH`, `--scale N`, `--theme dark|light`, `--at T|mark:NAME`, `--frames N`, `--every N`.
+
+        Keep the three fences exactly as they are (```` ```json fixture ````, ```` ```json script ````, ```` ```text args ````): `scripts/repro.sh` finds the blocks by them. Check your report locally before sending it:
+
+        ```sh
+        # save the body of this form as issue.md, then
+        bash scripts/repro.sh issue.md          # writes target/repro/issue/{summary.md,end.png,strip.png,tree.json}
+        ```
+
+        If you use an agent, give it this form and `docs/fixtures.md`, and ask it to write a fixture and script that reproduce the bug and to check them with `scripts/repro.sh`.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One or two sentences. The first line becomes the repro's title.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+      description: What should happen.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual
+      description: What happens instead. Screenshots welcome.
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: OS and version, and the desktop on Linux (e.g. "macOS 15.2", "Ubuntu 24.04, GNOME on Wayland", "Windows 11").
+    validations:
+      required: true
+  - type: input
+    id: revision
+    attributes:
+      label: Dromon revision
+      description: "`git rev-parse --short HEAD` in your checkout, or the version you run."
+    validations:
+      required: true
+  - type: textarea
+    id: fixture
+    attributes:
+      label: Fixture
+      description: Fake hosts and servers that show the bug (docs/fixtures.md). Delete the block to use the built-in demo.
+      value: |
+        ```json fixture
+        {
+          "version": 1,
+          "now": "2026-11-25T14:00:00Z",
+          "hosts": [
+            {"alias": "prod", "source": "ssh-config", "user": "deploy", "hostname": "prod.example.com"}
+          ],
+          "servers": {
+            "prod": {
+              "home": "/home/deploy",
+              "auth": [{"password": {"accept": "secret"}}],
+              "tree": {
+                "/home/deploy": [
+                  {"name": "notes.txt", "kind": "file", "size": 120, "mtime": "2026-11-25T13:00:00Z"}
+                ]
+              }
+            }
+          }
+        }
+        ```
+  - type: textarea
+    id: script
+    attributes:
+      label: Script
+      description: The clicks and keys that lead to the bug, ending with a mark named "end".
+      value: |
+        ```json script
+        {"events": [
+          {"t": 0.5, "type": "tap", "key": "host-prod"},
+          {"t": 1.5, "type": "type", "text": "secret"},
+          {"t": 2.0, "type": "key", "name": "Enter"},
+          {"t": 3.0, "type": "mark", "name": "end"}
+        ]}
+        ```
+  - type: textarea
+    id: args
+    attributes:
+      label: Args
+      description: Optional extra flags (one per line or space-separated; lines starting with # are ignored).
+      value: |
+        ```text args
+        # --theme light --at mark:end --every 20
+        ```

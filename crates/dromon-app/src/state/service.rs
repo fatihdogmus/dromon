@@ -1,8 +1,8 @@
 //! The boundary between the UI and whatever does the networking (§4.1): the UI sends
 //! [`Command`]s, and [`ServiceEvent`]s come back and are applied with [`super::App::apply`].
 //!
-//! Two kinds of backend implement it. `mock::MockService` answers synchronously from the
-//! [`Backend::send`] call (scenes, tests, `DROMON_MOCK=1`). `service::ChannelBackend` forwards
+//! Two kinds of backend implement it. `fixture::FixtureBackend` answers synchronously from the
+//! [`Backend::send`] call (scenes, tests, `--fixture`, `DROMON_MOCK=1`). `service::ChannelBackend` forwards
 //! each command to the tokio service thread and returns nothing; the service pushes events
 //! back through `AppHandle::update_if(|app, _| { app.apply(event); true })`, so the UI never
 //! blocks.
@@ -34,7 +34,7 @@ pub enum ServiceEvent {
     Status { host: HostId, status: ConnStatus },
     /// The session is up and its starting folder resolved (home, or the last folder used).
     Opened { host: HostId, start: RemotePath },
-    /// A whole folder at once (the mock).
+    /// A whole folder at once (tests that build listings by hand).
     Listing { host: HostId, path: RemotePath, entries: Vec<Entry> },
     /// One page of a folder as it streams in. `first` starts a new listing of `path` (it
     /// replaces what was there); later pages add to it; `done` marks the last one (its
@@ -87,7 +87,7 @@ pub fn trace_line(ev: &ServiceEvent) -> String {
     }
 }
 
-/// Where commands go. `send` may answer at once with events (the mock does); a threaded
+/// Where commands go. `send` may answer at once with events (a fixture does); a threaded
 /// backend returns an empty list and delivers events later.
 pub trait Backend {
     fn send(&mut self, cmd: Command) -> Vec<ServiceEvent>;

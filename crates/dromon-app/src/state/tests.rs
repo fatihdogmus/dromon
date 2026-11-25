@@ -1,12 +1,12 @@
-//! `App`-level updates against the mock service: actions in, state and effects out.
+//! `App`-level updates against the demo fixture: actions in, state and effects out.
 
 use dromon_core::{ConnStatus, Entry, EntryKind, HostId, RemotePath, SortDir, SortKey};
 
 use super::*;
-use crate::mock::{self, MockService};
+use crate::fixture;
 
 fn app() -> App {
-    App::new(mock::hosts(), mock::NOW, Box::new(MockService { now: mock::NOW }))
+    fixture::app(fixture::demo())
 }
 
 fn prod() -> HostId {
@@ -265,8 +265,8 @@ fn answering_and_disconnecting_send_commands() {
 }
 
 #[test]
-fn every_mock_host_opens() {
-    for h in mock::hosts().hosts {
+fn every_demo_host_opens() {
+    for h in fixture::demo().hosts.clone() {
         let mut s = app();
         s.act(Action::SelectHost(h.id.clone()));
         let c = s.conn().unwrap();

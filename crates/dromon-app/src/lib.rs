@@ -2,23 +2,25 @@
 //! (`main.rs`) runs the askpass helper when ssh starts it as one, and [`run`] otherwise.
 //!
 //! The UI talks to the service thread (`service`), which discovers hosts from the user's ssh
-//! config and connects for real. `DROMON_MOCK=1` runs it against `mock`'s hosts and folders
-//! instead (demos, the goldens script); scenes and tests always use the mock.
+//! config and connects for real. `--fixture <file.json>` runs it on a fixture instead (`fixture`,
+//! `docs/fixtures.md`): hosts, folders, errors and sign-in prompts from the file, no network.
+//! `DROMON_MOCK=1` is the same with the built-in demo (`assets/fixtures/demo.json`), which
+//! scenes and the in-crate tests always use.
 //!
 //! The public surface is what the end-to-end tests (`tests/e2e.rs`) drive the app with:
 //!
 //! - [`app`]: the real app (view, handlers, `on_key`, window chrome), for
-//!   `app().headless_runtime(..)`; its state starts as the mock's, which a test replaces.
+//!   `app().headless_runtime(..)`; its state starts on the demo fixture, which a test replaces.
 //! - [`state`]: `App`, `Action`, `ServiceEvent`, the sheets, and everything a test reads back.
 //! - [`service`]: the service thread (`start`, `channel`, `Config`, `Sink`).
 //! - [`run`]: what the binary does after the helper check.
 
+mod fixture;
 mod fmt;
 // The icon set and the tokens are the spec's whole catalogue (§6.3–6.7); sheets, popovers and
 // transfers use the rest in later milestones.
 #[allow(dead_code)]
 mod icons;
-mod mock;
 mod scenes;
 pub mod service;
 pub mod state;
@@ -42,13 +44,12 @@ const MIN_SIZE: (f32, f32) = (720.0, 420.0);
 fn now_secs() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map_or(mock::NOW, |d| d.as_secs() as i64)
+        .map_or(fixture::DEMO_NOW, |d| d.as_secs() as i64)
 }
 
-/// The mock app: what scenes, tests and `DROMON_MOCK=1` start from.
+/// The app on the active fixture (the demo unless `--fixture` chose one).
 fn init() -> App {
-    let now = now_secs();
-    App::new(mock::hosts(), now, Box::new(mock::MockService { now }))
+    scenes::base()
 }
 
 /// Window keys nothing focused took: the list's shortcuts (§7).
@@ -81,23 +82,64 @@ fn spec() -> AppSpec<App> {
 }
 
 /// The app with its window chrome: one 44 pt band for title bar and toolbar (§6.2). Its state
-/// starts as the mock app; [`run`] gives it the real service instead.
+/// starts on the demo fixture; [`run`] gives it the real service or `--fixture`'s instead.
 pub fn app() -> RuneApp<App> {
     RuneApp::new(spec()).titlebar(Titlebar::new(theme::size::TOOLBAR))
 }
 
-/// Whether `DROMON_MOCK=1` asks for the mock backend.
+/// Whether `DROMON_MOCK=1` asks for the built-in demo fixture.
 fn mock_requested() -> bool {
     std::env::var_os("DROMON_MOCK").is_some_and(|v| v == "1")
 }
 
+/// The value of the app's own `--fixture PATH` (or `--fixture=PATH`) among the arguments Rune
+/// left to the app. Rune's debug builds and its `tooling` feature take their own flags and hand
+/// the rest on; a release build without it hands on everything, so this works in both.
+fn fixture_arg(args: &[String]) -> Result<Option<String>, String> {
+    let mut found = None;
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        let value = if a == "--fixture" {
+            it.next().filter(|v| !v.is_empty()).cloned().ok_or("--fixture needs the path of a fixture JSON file")?
+        } else if let Some(v) = a.strip_prefix("--fixture=") {
+            v.to_owned()
+        } else {
+            continue;
+        };
+        if found.replace(value).is_some() {
+            return Err("--fixture is given twice".into());
+        }
+    }
+    Ok(found)
+}
+
+/// The fixture to run on: `--fixture`'s, else the demo with `DROMON_MOCK=1`, else none (the
+/// real service). A fixture that can't be read or used is the caller's to report.
+fn chosen_fixture() -> Result<Option<std::sync::Arc<fixture::Fixture>>, String> {
+    match fixture_arg(rune::extra_args())? {
+        Some(path) => fixture::load(&path).map(|f| Some(std::sync::Arc::new(f))),
+        None if mock_requested() => Ok(Some(fixture::demo())),
+        None => Ok(None),
+    }
+}
+
 /// Runs the app: a window (or Rune's headless tooling, `--snap` and friends) on the real
-/// service, or on the mock with `DROMON_MOCK=1`. Returns when the app quits.
+/// service, or on a fixture (`--fixture`, `DROMON_MOCK=1`): no service thread, no ssh, no ssh
+/// config. An unusable fixture exits with status 2 and a message naming where it's wrong.
+/// Returns when the app quits.
 pub fn run() {
     rune::set_app_id("dromon");
-    if mock_requested() {
-        app().run();
-        return;
+    match chosen_fixture() {
+        Ok(Some(fx)) => {
+            fixture::activate(fx.clone());
+            app().init(move || fixture::app(fx)).run();
+            return;
+        }
+        Ok(None) => {}
+        Err(msg) => {
+            eprintln!("dromon: {msg}");
+            std::process::exit(2);
+        }
     }
 
     let (backend, commands) = service::channel();

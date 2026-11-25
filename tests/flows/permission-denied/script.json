@@ -1,0 +1,11 @@
+{
+  "description": "On the built-in demo: open prod, go to / with the first breadcrumb, open /root (permission denied), Go up (root is selected), and Return opens it again: denied.",
+  "events": [
+    {"t": 0.5, "type": "tap", "key": "host-prod"},
+    {"t": 1.5, "type": "tap", "key": "crumb-0"},
+    {"t": 2.5, "type": "double-click", "key": "rows/root"},
+    {"t": 4.0, "type": "tap", "key": "state-go-up"},
+    {"t": 5.0, "type": "key", "name": "Enter"},
+    {"t": 6.0, "type": "mark", "name": "end"}
+  ]
+}

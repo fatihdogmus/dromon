@@ -15,9 +15,11 @@
 mod auth;
 mod conn;
 pub(crate) mod hosts;
-mod lifecycle;
+/// Also drives the fixture backend's connections, so both change status alike.
+pub(crate) mod lifecycle;
 
-#[cfg(test)]
+// A shell-script fake ssh and OpenSSH's sftp-server: Unix only.
+#[cfg(all(test, unix))]
 mod tests;
 
 use std::collections::HashMap;

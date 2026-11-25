@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "description": "prod is new to this computer (host key) and signs in with a password.",
+  "now": "2026-11-25T14:00:00Z",
+  "hosts": [
+    {"alias": "prod", "source": "ssh-config", "user": "deploy", "hostname": "prod.example.com"},
+    {"alias": "staging", "source": "ssh-config", "user": "deploy", "hostname": "staging.example.com"}
+  ],
+  "servers": {
+    "prod": {
+      "home": "/var/www/site",
+      "auth": [
+        {"host-key": {"key_type": "ED25519", "fingerprint": "SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU"}},
+        {"password": {"accept": "correct horse"}}
+      ],
+      "tree": {
+        "/var/www/site": [
+          {"name": "assets", "kind": "dir", "mtime": "2026-11-25T13:58:00Z"},
+          {"name": "releases", "kind": "dir", "mtime": "2026-11-24T18:00:00Z"},
+          {"name": ".env", "kind": "file", "size": 1204, "mtime": "2026-11-25T13:48:00Z"},
+          {"name": "index.html", "kind": "file", "size": 14812, "mtime": "2026-11-24T18:00:00Z"},
+          {"name": "server.log", "kind": "file", "size": 4812331, "mtime": "2026-11-25T13:58:00Z"}
+        ]
+      }
+    },
+    "staging": {"home": "/home/deploy"}
+  }
+}

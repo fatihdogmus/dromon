@@ -1,0 +1,14 @@
+{
+  "description": "On the built-in demo: open prod, go into releases and back out, sort by size (largest first), then hide and show dotfiles from the keyboard.",
+  "events": [
+    {"t": 0.5, "type": "tap", "key": "host-prod"},
+    {"t": 1.5, "type": "double-click", "key": "rows/releases"},
+    {"t": 2.5, "type": "double-click", "key": "rows/20261125-1348"},
+    {"t": 3.5, "type": "tap", "key": "tb-back"},
+    {"t": 4.5, "type": "tap", "key": "crumb-3"},
+    {"t": 5.5, "type": "tap", "key": "col-Size"},
+    {"t": 6.5, "type": "key", "name": ".", "cmd": true, "shift": true},
+    {"t": 7.5, "type": "key", "name": ".", "cmd": true, "shift": true},
+    {"t": 8.5, "type": "mark", "name": "end"}
+  ]
+}

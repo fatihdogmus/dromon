@@ -25,8 +25,9 @@ for scene in "${scenes[@]}"; do
   theme=dark
   [[ "$scene" == light ]] && theme=light
   file="$out/$scene-$theme@${scale}x.png"
-  # Rune prints frame timings on stderr; show them only when a render fails. DROMON_MOCK keeps
-  # the binary off the network side and the user's ssh config (scenes are mock-built anyway).
+  # Rune prints frame timings on stderr; show them only when a render fails. DROMON_MOCK runs
+  # the binary on the built-in demo fixture (assets/fixtures/demo.json), off the network side
+  # and the user's ssh config; scenes start from it.
   if ! log="$(DROMON_MOCK=1 "$bin" --snap "$file" --scene "$scene" --size "$size" --scale "$scale" --theme dark 2>&1)"; then
     echo "$log" >&2
     echo "failed: $scene" >&2

@@ -155,9 +155,15 @@ impl App {
         self.conns.get_mut(&host)
     }
 
-    /// Sends `cmd` and applies whatever the backend answers right away.
+    /// Sends `cmd` and applies whatever the backend answers right away (traced like
+    /// [`App::apply`]'s).
     fn send(&mut self, cmd: Command) {
         let events = self.backend.send(cmd);
+        if service::tracing() {
+            for ev in &events {
+                eprintln!("dromon-trace: {}", service::trace_line(ev));
+            }
+        }
         self.inbox.extend(events);
         while let Some(ev) = self.inbox.pop_front() {
             self.apply_one(ev);

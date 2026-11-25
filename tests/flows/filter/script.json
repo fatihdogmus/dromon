@@ -1,0 +1,15 @@
+{
+  "description": "On the built-in demo: open prod, press ⌘F (Ctrl+F elsewhere), type \"json\" (two rows left), clear it and type \"log\", then move the selection with ↓ from inside the field.",
+  "events": [
+    {"t": 0.5, "type": "tap", "key": "host-prod"},
+    {"t": 1.5, "type": "key", "name": "f", "cmd": true},
+    {"t": 2.0, "type": "type", "text": "json"},
+    {"t": 3.0, "type": "key", "name": "Backspace"},
+    {"t": 3.1, "type": "key", "name": "Backspace"},
+    {"t": 3.2, "type": "key", "name": "Backspace"},
+    {"t": 3.3, "type": "key", "name": "Backspace"},
+    {"t": 3.6, "type": "type", "text": "log"},
+    {"t": 4.5, "type": "key", "name": "Down"},
+    {"t": 5.5, "type": "mark", "name": "end"}
+  ]
+}
