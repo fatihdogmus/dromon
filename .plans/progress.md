@@ -21,17 +21,20 @@ Tracks where implementation stands against `dromon-plan.md`. Newest first.
 - `dromon-sftp`: `Sftp` over `RawSftpSession` (capabilities, limits, paged listing, pipelined `read_at`/`write_at`, posix-rename, copy-data + streaming fallback), listing diff, adaptive poll schedule.
 - `dromon-transfer`: Chrome-style naming, part-file names, task state machine, speed EMA/ETA, formatting.
 - `dromon-app`: theme tokens (§6.3), Inter + Geist Mono bundled, sidebar/toolbar/list/status, virtualized rows, navigation/history/selection/sort/filter/hidden toggle, 10 scenes with goldens in `tests/goldens/`, mock `Backend`.
-- Docker fixture `tests/docker/` (users `key`, `pw`, `kbd`, `enc`); run with `bash tests/docker/setup.sh && DROMON_SSH_FIXTURE=1 cargo test --workspace`.
+- Docker fixture `tests/docker/` (Debian trixie, OpenSSH 10.0p2 with PAM; users `key`, `pw`, `kbd` keyboard-interactive password + TOTP, `keypw` publickey,password, `enc`), run by `crates/dromon-testkit` (testcontainers, one container per test binary, removed on exit): plain `cargo test --workspace` runs the fixture tests when Docker is reachable and skips them otherwise (`DROMON_REQUIRE_DOCKER=1` fails instead); the 1 GiB S4 test is `--ignored`. See `tests/docker/README.md`.
+
+**Since then**
+- Icons are pixel-crisp: each has a 1× body (1 pt strokes on half-pixels) and a 2× body (1.5 pt on quarter-pixels), checked by a pixel test (`crates/dromon-app/src/icons/tests.rs`).
+- The Docker fixture runs through testcontainers (`dromon-testkit`) with a PAM image; see the "Done" entry above.
 
 **Next**
-1. Service thread (§4.1): tokio runtime via `rune::task::serve`, real `Backend` for `state::service::{Command, ServiceEvent}`, askpass server + auth sheets, host discovery feeding the sidebar, `main()` helper-mode switch.
+1. Service thread (§4.1): real `Backend` for `state::service::{Command, ServiceEvent}`, askpass server + auth sheets, host discovery feeding the sidebar, `main()` helper-mode switch. (In progress.)
 2. Host-key and password sheets (§6.8), connection log.
 3. Persistence (last host/folder, sort, sidebar width).
 
 **Known issues / decisions to revisit**
-- Icons: 1.5 pt strokes on half-pixels are soft at 2×; quarter-pixel centring would be crisp (`crates/dromon-app/src/icons/mod.rs`).
-- Linux: Rune's `Titlebar` keeps the native frame, so a real window shows a system header above the toolbar.
-- No keyboard focus ring on rows yet (selection cursor stands in).
-- Keyboard-interactive (`PromptKind::Other`) is unit-tested only: Alpine sshd has no PAM.
+- Linux: Rune's `Titlebar` keeps the native frame, so a real window shows a system header above the toolbar. (Accepted.)
+- No keyboard focus ring on rows yet (selection cursor stands in). (Later.)
+- Keyboard-interactive is tested end to end against PAM (`askpass_e2e.rs`): `(kbd@host) Password: ` classifies as `Password` (remembered), `(kbd@host) Verification code: ` as `Other` (never remembered). A wrong code makes the server restart the round at the password; since `AuthAttempt` can't tell which answer failed, that retry shows `WRONG_SIGN_IN` ("Check your password and code") and asks for both again.
 - Passphrase prompts cut key paths at 100 bytes (ssh's own `%.100s`).
 - Task state: `Paused` from `Preparing` resumes to `Running`; the engine must remember whether the scan finished.

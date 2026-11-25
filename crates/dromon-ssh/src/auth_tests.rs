@@ -86,6 +86,22 @@ fn second_password_prompt_after_memory_clears_and_asks_with_error() {
 }
 
 #[test]
+fn password_repeated_after_a_code_blames_neither_answer() {
+    const KBD_PW: &str = "(deploy@10.0.0.4) Password: ";
+    const CODE: &str = "(deploy@10.0.0.4) Verification code: ";
+    let mut store = PasswordStore::new();
+    let mut a = AuthAttempt::new(host());
+    assert_ask(a.on_prompt(&PASSWORD, KBD_PW, &mut store), None);
+    a.on_user_answer(&PASSWORD, KBD_PW, &text("right"), &mut store);
+    assert_ask(a.on_prompt(&PromptKind::Other, CODE, &mut store), None);
+    a.on_user_answer(&PromptKind::Other, CODE, &text("000000"), &mut store);
+    assert_ask(a.on_prompt(&PASSWORD, KBD_PW, &mut store), Some(WRONG_SIGN_IN));
+    // Without a code in between, a repeat blames the password again.
+    a.on_user_answer(&PASSWORD, KBD_PW, &text("typo"), &mut store);
+    assert_ask(a.on_prompt(&PASSWORD, KBD_PW, &mut store), Some(WRONG_PASSWORD));
+}
+
+#[test]
 fn second_password_prompt_after_typing_clears_and_asks_with_error() {
     let mut store = PasswordStore::new();
     let mut a = AuthAttempt::new(host());

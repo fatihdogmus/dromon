@@ -1,29 +1,39 @@
 Port 22
 HostKey /etc/ssh/ssh_host_ed25519_key
+UsePAM yes
 PermitRootLogin no
+# Off by default; enabled per user below so every user has exactly the methods its tests expect.
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PubkeyAuthentication yes
 AuthorizedKeysFile .ssh/authorized_keys
-AllowUsers key pw kbd enc
+AllowUsers key pw kbd keypw enc
 # Integration tests open one connection per test, in parallel.
 MaxStartups 100:30:200
 MaxSessions 50
-Subsystem sftp /usr/lib/ssh/sftp-server
+PrintMotd no
+Subsystem sftp /usr/lib/openssh/sftp-server
 LogLevel INFO
 
-# Alpine's sshd is built without PAM, so it has no keyboard-interactive devices (auth2-chall.c
-# only knows BSD auth and PAM): keyboard-interactive can't work here. The two-factor user uses
-# public key then password instead. `enc` and `key` keep the global public-key-only settings.
+# `key` and `enc` keep the global public-key-only settings.
 
-# Password only. Prompt: "pw@<host>'s password: ".
+# The SSH "password" method only (sshd answers PAM's prompts with it, so the client never sees
+# PAM's text). Prompt: "pw@<host>'s password: ".
 Match User pw
     PasswordAuthentication yes
     PubkeyAuthentication no
     AuthenticationMethods password
 
-# Public key, then password. With the encrypted key the client asks
-# "Enter passphrase for key '<path>': ", then "kbd@<host>'s password: ".
+# Keyboard-interactive through PAM (pam-sshd): pam_unix asks "Password: ", then
+# pam_google_authenticator asks "Verification code: "; ssh shows them as
+# "(kbd@<host>) Password: " and "(kbd@<host>) Verification code: ".
 Match User kbd
+    KbdInteractiveAuthentication yes
+    PubkeyAuthentication no
+    AuthenticationMethods keyboard-interactive
+
+# Two methods: public key, then password. With the encrypted key the client asks
+# "Enter passphrase for key '<path>': ", then "keypw@<host>'s password: ".
+Match User keypw
     PasswordAuthentication yes
     AuthenticationMethods publickey,password

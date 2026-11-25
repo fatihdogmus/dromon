@@ -22,6 +22,7 @@ pub use auth::AuthAttempt;
 pub use auth::AuthDecision;
 pub use auth::WRONG_PASSPHRASE;
 pub use auth::WRONG_PASSWORD;
+pub use auth::WRONG_SIGN_IN;
 pub use backoff::Backoff;
 pub use command::AskpassEnv;
 pub use command::BASE_ARGS;

@@ -1,0 +1,18 @@
+[package]
+name = "dromon-testkit"
+description = "The Docker sshd fixture (testcontainers) for Dromon's integration tests"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+hmac.workspace = true
+sha1.workspace = true
+tempfile.workspace = true
+testcontainers.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

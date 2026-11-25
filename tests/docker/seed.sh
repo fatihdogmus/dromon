@@ -1,7 +1,9 @@
 #!/bin/sh
-# Seed data for the integration tests, run as user `key` at every container start.
-# Idempotent: the mixed and many folders are rebuilt, the big file is kept once generated.
+# Seed data for the integration tests, run as user `key` at container start. The 1 GiB file for
+# the S4 copy-data tests is not made here: the testkit creates it on demand
+# (`Fixture::big_file`, only the `--ignored` tests need it).
 set -eu
+umask 022
 
 root=/home/key/fixture
 mkdir -p "$root" /home/key/scratch
@@ -45,11 +47,3 @@ rm -rf "$many"
 mkdir -p "$many"
 cd "$many"
 seq -w 1 10000 | sed 's/^/f/' | xargs touch
-
-# 1 GiB of random data for the copy-data proof of concept (S4).
-big="$root/big"
-mkdir -p "$big"
-if [ "$(stat -c %s "$big/big.bin" 2>/dev/null || echo 0)" != 1073741824 ]; then
-    head -c 1073741824 /dev/urandom >"$big/big.bin.tmp"
-    mv "$big/big.bin.tmp" "$big/big.bin"
-fi

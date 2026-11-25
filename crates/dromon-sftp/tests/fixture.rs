@@ -1,35 +1,31 @@
-//! Integration tests against the Docker sshd fixture (`tests/docker/`). They run only with
-//! `DROMON_SSH_FIXTURE=1` after `bash tests/docker/setup.sh`; otherwise each test prints a skip
-//! note and passes. Each test opens its own `ssh -s … sftp` child, exactly as the app will.
+//! Integration tests against the Docker sshd fixture (`tests/docker/`, started by
+//! `dromon-testkit`, one container for this test binary). They run whenever Docker is reachable;
+//! otherwise each test prints a skip line and passes (fails with `DROMON_REQUIRE_DOCKER=1`).
+//! Each test opens its own `ssh -s … sftp` child, exactly as the app will. The 1 GiB S4 test is
+//! `#[ignore]`: `cargo test -p dromon-sftp -- --ignored`.
 
 use std::time::{Duration, Instant};
 
 use dromon_core::{Entry, EntryKind, Error, LinkTarget, RemotePath};
 use dromon_sftp::{Sftp, WriteMode};
+use dromon_testkit::{BIG_FILE_SIZE as BIG_SIZE, Fixture, USER_KEY};
 use tokio::process::{Child, Command};
 
-const KEY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/docker/.keys/id_ed25519");
 const HOME: &str = "/home/key";
 const MIXED: &str = "/home/key/fixture/mixed";
 const MANY: &str = "/home/key/fixture/many";
-const BIG: &str = "/home/key/fixture/big/big.bin";
-const BIG_SIZE: u64 = 1 << 30;
 
 struct Conn {
     sftp: Sftp,
+    fixture: &'static Fixture,
     _ssh: Child,
 }
 
 async fn connect(test: &str) -> Option<Conn> {
-    if std::env::var("DROMON_SSH_FIXTURE").as_deref() != Ok("1") {
-        eprintln!("skipping {test}: set DROMON_SSH_FIXTURE=1 after `bash tests/docker/setup.sh`");
-        return None;
-    }
-    let port = std::env::var("DROMON_SSH_FIXTURE_PORT").unwrap_or_else(|_| "2222".into());
+    let fixture = dromon_testkit::fixture(test).await?;
     let mut ssh = Command::new("ssh")
-        .args(["-T", "-x", "-e", "none", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"])
-        .args(["-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR", "-i", KEY])
-        .args(["-p", &port, "-s", "key@127.0.0.1", "sftp"])
+        .args(fixture.ssh_options())
+        .args(["-s", &fixture.destination(USER_KEY), "sftp"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .kill_on_drop(true)
@@ -38,7 +34,7 @@ async fn connect(test: &str) -> Option<Conn> {
     let stdout = ssh.stdout.take().unwrap();
     let stdin = ssh.stdin.take().unwrap();
     let sftp = Sftp::new(tokio::io::join(stdout, stdin)).await.expect("SFTP session");
-    Some(Conn { sftp, _ssh: ssh })
+    Some(Conn { sftp, fixture, _ssh: ssh })
 }
 
 fn p(s: &str) -> RemotePath {
@@ -330,12 +326,14 @@ async fn copy_data_small_file_is_exact() {
     rm_rf(s, &dir).await;
 }
 
-/// Spike S4: server-side copy of a 1 GiB file, against the streaming fallback.
+/// Spike S4: server-side copy of a 1 GiB file, against the streaming fallback. Slow (the file is
+/// made on first use, then copied twice): run with `-- --ignored`.
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "slow: creates and copies 1 GiB; run with `cargo test -p dromon-sftp -- --ignored`"]
 async fn copy_data_big_file() {
     let Some(c) = connect("copy_data_big_file").await else { return };
     let s = &c.sftp;
-    let big = p(BIG);
+    let big = p(c.fixture.big_file().await);
     assert_eq!(s.stat(&big).await.unwrap().size, BIG_SIZE);
     let dir = scratch(s, "copybig").await;
 

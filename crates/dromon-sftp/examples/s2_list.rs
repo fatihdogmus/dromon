@@ -4,8 +4,11 @@
 //! cargo run -p dromon-sftp --example s2_list -- <destination> [path] [-- <extra ssh options…>]
 //! cargo run -p dromon-sftp --example s2_list -- myhost /
 //! cargo run -p dromon-sftp --example s2_list -- key@127.0.0.1 fixture/mixed -- \
-//!     -p 2222 -i tests/docker/.keys/id_ed25519 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+//!     -p <port> -i <key folder>/id_ed25519 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
 //! ```
+//!
+//! Against the test fixture, `DROMON_FIXTURE_KEEP=1 cargo test -p dromon-sftp --test fixture`
+//! prints the port and key folder to use (see `tests/docker/README.md`).
 //!
 //! `path` defaults to the login folder; a relative path is taken relative to it. ssh's prompts
 //! (passphrase, host key) go to the terminal: stderr and the tty are left alone.

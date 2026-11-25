@@ -28,6 +28,7 @@ doc = false
 
 [dev-dependencies]
 dromon-sftp.workspace = true
+dromon-testkit.workspace = true
 tempfile.workspace = true
 
 [lints]

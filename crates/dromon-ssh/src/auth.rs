@@ -29,6 +29,10 @@ use crate::prompt::password_identity;
 pub const WRONG_PASSWORD: &str = "That password didn't work. Try again.";
 /// The inline error when a key passphrase is asked again.
 pub const WRONG_PASSPHRASE: &str = "That passphrase didn't work. Try again.";
+/// The inline error when a password is asked again after a second factor (keyboard-interactive
+/// password, then a verification code): the server restarts the round either way, so we can't
+/// tell which answer it rejected.
+pub const WRONG_SIGN_IN: &str = "That didn't work. Check your password and code, then try again.";
 
 /// What to do with one prompt.
 #[derive(Debug)]
@@ -49,11 +53,19 @@ pub struct AuthAttempt {
     last_password: Option<String>,
     /// Per key path (`None` when ssh didn't name the key).
     passphrase_prompts: HashMap<Option<String>, u32>,
+    /// A challenge (`Other`: verification code, OTP) was asked since the latest password prompt.
+    challenge_since_password: bool,
 }
 
 impl AuthAttempt {
     pub fn new(host: HostId) -> Self {
-        AuthAttempt { host, password_prompts: HashMap::new(), last_password: None, passphrase_prompts: HashMap::new() }
+        AuthAttempt {
+            host,
+            password_prompts: HashMap::new(),
+            last_password: None,
+            passphrase_prompts: HashMap::new(),
+            challenge_since_password: false,
+        }
     }
 
     pub fn host(&self) -> &HostId {
@@ -72,9 +84,11 @@ impl AuthAttempt {
                 *count += 1;
                 let repeated = *count > 1;
                 self.last_password = Some(identity.clone());
+                let after_challenge = std::mem::take(&mut self.challenge_since_password);
                 if repeated {
                     store.clear_password(&self.host, &identity);
-                    return AuthDecision::AskUser { error: Some(WRONG_PASSWORD.to_owned()) };
+                    let error = if after_challenge { WRONG_SIGN_IN } else { WRONG_PASSWORD };
+                    return AuthDecision::AskUser { error: Some(error.to_owned()) };
                 }
                 match store.get(&self.host, &identity) {
                     Some(secret) => AuthDecision::AnswerFromMemory(secret.clone()),
@@ -93,9 +107,11 @@ impl AuthAttempt {
                     None => AuthDecision::AskUser { error: None },
                 }
             }
-            PromptKind::HostKey { .. } | PromptKind::Confirm | PromptKind::Notice | PromptKind::Other => {
+            PromptKind::Other => {
+                self.challenge_since_password = true;
                 AuthDecision::AskUser { error: None }
             }
+            PromptKind::HostKey { .. } | PromptKind::Confirm | PromptKind::Notice => AuthDecision::AskUser { error: None },
         }
     }
 

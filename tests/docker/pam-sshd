@@ -1,0 +1,13 @@
+# /etc/pam.d/sshd for the fixture (replaces Debian's: no pam_loginuid, which fails in
+# unprivileged containers, and no motd/env/limits noise).
+#
+# auth: the account password for everyone (`nodelay`: no 2 s pause after a wrong password, so the
+# wrong-password tests stay fast), then a TOTP code for `kbd` only. Other users skip the TOTP
+# module: with the SSH "password" method sshd would answer its prompt with the password.
+auth    required                        pam_unix.so nodelay
+auth    [success=1 default=ignore]      pam_succeed_if.so quiet user != kbd
+auth    required                        pam_google_authenticator.so
+
+account required                        pam_unix.so
+password required                       pam_unix.so
+session required                        pam_unix.so
