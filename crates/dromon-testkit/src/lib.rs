@@ -279,9 +279,16 @@ async fn start() -> State {
 async fn reachable_docker() -> Result<Docker, String> {
     let docker = docker_client_instance().await.map_err(|e| e.to_string())?;
     match tokio::time::timeout(Duration::from_secs(10), docker.ping()).await {
-        Ok(Ok(_)) => Ok(docker),
-        Ok(Err(e)) => Err(e.to_string()),
-        Err(_) => Err("no answer to a ping within 10 s".into()),
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => return Err(e.to_string()),
+        Err(_) => return Err("no answer to a ping within 10 s".into()),
+    }
+    // A daemon running Windows containers (GitHub's Windows runners) can't run the Linux image:
+    // for the fixture that is no Docker at all.
+    let info = docker.info().await.map_err(|e| e.to_string())?;
+    match info.os_type.as_deref() {
+        Some("linux") | None => Ok(docker),
+        Some(other) => Err(format!("the daemon runs {other} containers, the fixture needs Linux ones")),
     }
 }
 

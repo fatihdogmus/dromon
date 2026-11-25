@@ -144,14 +144,17 @@ run_window() {
   for kv in "${extra_env[@]}"; do names+=("${kv%%=*}"); done
   note "[$name] dromon${1+ $*} in a window for $secs s$how (setting ${names[*]})"
   set +e
+  # The wrapper sends its own stderr (and so the app's) to $name.err itself: some xvfb-run
+  # versions (Ubuntu 24.04's) run the command with 2>&1, which would mix it into stdout.
+  : >"$work/$name.err"
   "${wrap[@]}" "${app_env[@]}" "${extra_env[@]}" \
-    sh -c 'bin="$1" secs="$2"; shift 2; "$bin" "$@" & pid=$!; sleep "$secs"
+    sh -c 'bin="$1" secs="$2" err="$3"; shift 3; exec 2>>"$err"; "$bin" "$@" & pid=$!; sleep "$secs"
       if kill -0 "$pid" 2>/dev/null; then kill "$pid"; wait "$pid"; echo "app: still running after $secs s, stopped (exit $?)" >&2
       else wait "$pid"; echo "app: exited early (exit $?)" >&2; exit 3; fi' \
-    sh "$bin" "$secs" ${1+"$@"} >"$work/$name.out" 2>"$work/$name.err"
+    sh "$bin" "$secs" "$work/$name.err" ${1+"$@"} >"$work/$name.out" 2>"$work/$name.wrap"
   local status=$?
   set -e
-  [[ $status -eq 0 ]] || { cat "$work/$name.out" "$work/$name.err" >&2; fail "[$name] the app exited early or its wrapper failed (status $status)"; }
+  [[ $status -eq 0 ]] || { cat "$work/$name.out" "$work/$name.wrap" "$work/$name.err" >&2; fail "[$name] the app exited early or its wrapper failed (status $status)"; }
   if grep -qiE "panicked|couldn't start the service thread|Library .* could not be loaded" "$work/$name.err"; then
     cat "$work/$name.err" >&2
     fail "[$name] the app reported an error"
