@@ -2,11 +2,15 @@
 # Seed data for the integration tests, run as user `key` at container start. The 1 GiB file for
 # the S4 copy-data tests is not made here: the testkit creates it on demand
 # (`Fixture::big_file`, only the `--ignored` tests need it).
+#
+# $1: the home folder to seed, by default the image's /home/key. The testkit's native backend
+# runs this script as its own key user with that user's home.
 set -eu
 umask 022
 
-root=/home/key/fixture
-mkdir -p "$root" /home/key/scratch
+home=${1:-/home/key}
+root=$home/fixture
+mkdir -p "$root" "$home/scratch"
 
 # ~100 mixed entries: files, folders, symlinks (to a folder, to a file, dangling), dotfiles,
 # a FIFO and an unreadable folder.

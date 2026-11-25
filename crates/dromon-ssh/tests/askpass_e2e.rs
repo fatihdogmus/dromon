@@ -4,11 +4,12 @@
 //! pipe); the test answers them with `classify_prompt` + `AuthAttempt` + `PasswordStore` as the
 //! service thread will, and ends in a working `Sftp` session.
 //!
-//! Uses the Docker sshd fixture (`tests/docker/`, started by `dromon-testkit`, one container for
-//! this test binary; users and credentials: `tests/docker/Dockerfile`). Runs whenever Docker is
-//! reachable; otherwise each test prints a skip line and passes (fails with
+//! Uses the sshd fixture (`dromon-testkit`, one server for this test binary: the Docker image of
+//! `tests/docker/`, or with `DROMON_FIXTURE_BACKEND=native` the machine's own sshd; users and
+//! credentials: `tests/docker/Dockerfile`, names through `Fixture::user`). Runs whenever the
+//! backend can; otherwise each test prints a skip line and passes (fails with
 //! `DROMON_REQUIRE_DOCKER=1`). On Windows that is a Linux Docker named by `DOCKER_HOST` (CI:
-//! Docker in WSL2, `tests/docker/README.md`).
+//! Docker in WSL2, `tests/docker/README.md`). The TOTP tests need the Docker backend.
 //!
 //! Isolation from the developer's own ssh setup, test-only: a per-test ssh config passed with
 //! `-F` (so `~/.ssh/config` and `/etc/ssh/ssh_config` are not read) pointing at a per-test
@@ -25,10 +26,7 @@ use dromon_ssh::{
     AskpassRequest, AskpassServer, AuthAttempt, AuthDecision, PasswordStore, SshChild, SshCommand, WRONG_PASSPHRASE,
     WRONG_PASSWORD, WRONG_SIGN_IN, classify_prompt, password_identity, spawn,
 };
-use dromon_testkit::{
-    NULL_DEVICE, PASSPHRASE, PASSWORD, USER_ENCRYPTED_KEY, USER_KBD, USER_KEY, USER_KEY_THEN_PASSWORD, USER_PASSWORD,
-    totp_now, wrong_totp,
-};
+use dromon_testkit::{Backend, Feature, NULL_DEVICE, PASSPHRASE, PASSWORD, Role, totp_now, wrong_totp};
 use secrecy::ExposeSecret;
 use tokio::sync::mpsc;
 
@@ -132,6 +130,15 @@ impl Fixture {
         self.sshd.port()
     }
 
+    /// `<user of role>@<host>`, as ssh names the identity in prompts.
+    fn at(&self, role: Role, host: &str) -> String {
+        format!("{}@{host}", self.sshd.user(role))
+    }
+
+    fn home(&self, role: Role) -> RemotePath {
+        self.sshd.home(role)
+    }
+
     /// The unencrypted fixture key, as ssh prints it.
     fn plain_key(&self) -> String {
         key_file(&self.sshd.key())
@@ -142,7 +149,8 @@ impl Fixture {
     }
 
     /// A recent quick-connect host on the fixture.
-    fn host(&self, user: &str, identity_file: Option<String>) -> HostSpec {
+    fn host(&self, role: Role, identity_file: Option<String>) -> HostSpec {
+        let user = self.sshd.user(role);
         let id = format!("{user}@127.0.0.1:{}", self.port());
         HostSpec {
             id: HostId(id),
@@ -277,11 +285,11 @@ fn on_stderr_line(line: &str, attempt: &mut AuthAttempt, store: &mut PasswordSto
     }
 }
 
-/// The fixture's host key fingerprint, read from the host key itself inside the container
+/// The fixture's host key fingerprint, read from the host key itself on the server
 /// (`ssh-keygen -l` there). Not `ssh-keyscan` here: Windows' 9.5 offers a key exchange it
 /// can't do (sntrup761x25519) and gives up ("choose_kex: unsupported KEX method").
 fn fixture_fingerprint(sshd: &dromon_testkit::Fixture) -> String {
-    let line = sshd.exec(&["ssh-keygen", "-l", "-E", "sha256", "-f", "/etc/ssh/ssh_host_ed25519_key.pub"]).unwrap();
+    let line = sshd.exec(&["ssh-keygen", "-l", "-E", "sha256", "-f", &sshd.host_public_key()]).unwrap();
     // `256 SHA256:… root@<container> (ED25519)`
     let fp = line.split_whitespace().nth(1).unwrap().to_owned();
     assert!(fp.starts_with("SHA256:"), "{line}");
@@ -305,12 +313,12 @@ const PUBKEY_ONLY: &str = "PubkeyAuthentication yes\nPreferredAuthentications pu
 async fn unknown_host_key_is_asked_once_then_known() {
     let Some(mut f) = Fixture::new("unknown_host_key_is_asked_once_then_known").await else { return };
     let expected = fixture_fingerprint(f.sshd);
-    let host = f.host(USER_KEY, Some(f.plain_key()));
+    let host = f.host(Role::Key, Some(f.plain_key()));
 
     let first = f.connect(&host, PUBKEY_ONLY, None, &mut accept_host_key_only).await;
     let sftp = first.ready();
-    assert_eq!(sftp.home().await.unwrap(), RemotePath::new("/home/key"));
-    assert!(!sftp.list(&RemotePath::new("/home/key/fixture")).await.unwrap().is_empty());
+    assert_eq!(sftp.home().await.unwrap(), f.home(Role::Key));
+    assert!(!sftp.list(&f.home(Role::Key).join("fixture")).await.unwrap().is_empty());
     assert_eq!(first.seen.len(), 1, "{:#?}", first.seen);
     let s = &first.seen[0];
     assert_eq!(s.kind, PromptKind::HostKey { key_type: Some("ED25519".into()), fingerprint: Some(expected.clone()) });
@@ -323,7 +331,7 @@ async fn unknown_host_key_is_asked_once_then_known() {
     assert!(known.starts_with(&format!("[127.0.0.1]:{} ssh-ed25519 ", f.port())), "{known}");
 
     let second = f.connect(&host, PUBKEY_ONLY, None, &mut accept_host_key_only).await;
-    assert_eq!(second.ready().home().await.unwrap(), RemotePath::new("/home/key"));
+    assert_eq!(second.ready().home().await.unwrap(), f.home(Role::Key));
     assert!(second.seen.is_empty(), "{:#?}", second.seen);
     println!("host key {expected} matched ssh-keyscan; second connection had no prompts");
 }
@@ -331,7 +339,7 @@ async fn unknown_host_key_is_asked_once_then_known() {
 #[tokio::test(flavor = "multi_thread")]
 async fn rejected_host_key_ends_the_connection() {
     let Some(mut f) = Fixture::new("rejected_host_key_ends_the_connection").await else { return };
-    let host = f.host(USER_KEY, Some(f.plain_key()));
+    let host = f.host(Role::Key, Some(f.plain_key()));
     let mut user = |kind: &PromptKind, prompt: &str, _: Option<&str>| {
         assert!(host_key(kind), "{prompt:?}");
         PromptAnswer::Cancel
@@ -348,7 +356,8 @@ async fn rejected_host_key_ends_the_connection() {
 #[tokio::test(flavor = "multi_thread")]
 async fn password_first_try_then_from_memory() {
     let Some(mut f) = Fixture::new("password_first_try_then_from_memory").await else { return };
-    let host = f.host(USER_PASSWORD, None);
+    let host = f.host(Role::Password, None);
+    let pw = f.at(Role::Password, "127.0.0.1");
     let mut user = |kind: &PromptKind, prompt: &str, error: Option<&str>| match kind {
         PromptKind::HostKey { .. } => text("yes"),
         PromptKind::Password => {
@@ -358,19 +367,19 @@ async fn password_first_try_then_from_memory() {
         other => panic!("unexpected {other:?}: {prompt:?}"),
     };
     let first = f.connect(&host, PASSWORD_ONLY, None, &mut user).await;
-    assert_eq!(first.ready().home().await.unwrap(), RemotePath::new("/home/pw"));
+    assert_eq!(first.ready().home().await.unwrap(), f.home(Role::Password));
     assert!(host_key(first.kinds()[0]));
     assert_eq!(first.kinds()[1..], [&PromptKind::Password]);
-    assert_eq!(first.seen[1].prompt, "pw@127.0.0.1's password: ");
+    assert_eq!(first.seen[1].prompt, format!("{pw}'s password: "));
     assert_eq!(first.seen[1].hint, None);
-    assert_eq!(f.store.get(&host.id, "pw@127.0.0.1").unwrap().expose_secret(), PASSWORD);
+    assert_eq!(f.store.get(&host.id, &pw).unwrap().expose_secret(), PASSWORD);
 
     // Reconnect: answered from memory, the user is never asked.
     let mut never = |kind: &PromptKind, prompt: &str, _: Option<&str>| -> PromptAnswer {
         panic!("the user was asked {kind:?}: {prompt:?}")
     };
     let second = f.connect(&host, PASSWORD_ONLY, None, &mut never).await;
-    assert_eq!(second.ready().home().await.unwrap(), RemotePath::new("/home/pw"));
+    assert_eq!(second.ready().home().await.unwrap(), f.home(Role::Password));
     assert_eq!(second.kinds(), [&PromptKind::Password]);
     assert_eq!(second.asked(), 0);
 }
@@ -378,7 +387,8 @@ async fn password_first_try_then_from_memory() {
 #[tokio::test(flavor = "multi_thread")]
 async fn wrong_password_then_right() {
     let Some(mut f) = Fixture::new("wrong_password_then_right").await else { return };
-    let host = f.host(USER_PASSWORD, None);
+    let host = f.host(Role::Password, None);
+    let pw = f.at(Role::Password, "127.0.0.1");
     let mut errors = Vec::new();
     let mut user = |kind: &PromptKind, prompt: &str, error: Option<&str>| match kind {
         PromptKind::HostKey { .. } => text("yes"),
@@ -389,15 +399,15 @@ async fn wrong_password_then_right() {
         other => panic!("unexpected {other:?}: {prompt:?}"),
     };
     let out = f.connect(&host, PASSWORD_ONLY, None, &mut user).await;
-    assert_eq!(out.ready().home().await.unwrap(), RemotePath::new("/home/pw"));
+    assert_eq!(out.ready().home().await.unwrap(), f.home(Role::Password));
     assert_eq!(errors, [None, Some(WRONG_PASSWORD.to_owned())]);
     assert_eq!(out.seen[2].asked, Some(Some(WRONG_PASSWORD.to_owned())));
     assert_eq!(out.seen[1].prompt, out.seen[2].prompt);
     assert!(out.stderr.iter().any(|l| l == "Permission denied, please try again."), "{:#?}", out.stderr);
-    assert_eq!(f.store.get(&host.id, "pw@127.0.0.1").unwrap().expose_secret(), PASSWORD);
+    assert_eq!(f.store.get(&host.id, &pw).unwrap().expose_secret(), PASSWORD);
 
     // A stale remembered password: tried silently, then asked with the error, then replaced.
-    f.store.set(host.id.clone(), "pw@127.0.0.1".into(), "stale".into());
+    f.store.set(host.id.clone(), pw.clone(), "stale".into());
     let mut asked = Vec::new();
     let mut user = |kind: &PromptKind, _: &str, error: Option<&str>| {
         asked.push((kind.clone(), error.map(str::to_owned)));
@@ -408,13 +418,14 @@ async fn wrong_password_then_right() {
     assert_eq!(out.kinds(), [&PromptKind::Password, &PromptKind::Password]);
     assert_eq!(out.seen[0].asked, None);
     assert_eq!(asked, [(PromptKind::Password, Some(WRONG_PASSWORD.to_owned()))]);
-    assert_eq!(f.store.get(&host.id, "pw@127.0.0.1").unwrap().expose_secret(), PASSWORD);
+    assert_eq!(f.store.get(&host.id, &pw).unwrap().expose_secret(), PASSWORD);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn password_rejected_until_ssh_gives_up() {
     let Some(mut f) = Fixture::new("password_rejected_until_ssh_gives_up").await else { return };
-    let host = f.host(USER_PASSWORD, None);
+    let host = f.host(Role::Password, None);
+    let pw = f.at(Role::Password, "127.0.0.1");
     let mut user = |kind: &PromptKind, _: &str, _: Option<&str>| match kind {
         PromptKind::HostKey { .. } => text("yes"),
         _ => text("never-right"),
@@ -425,20 +436,28 @@ async fn password_rejected_until_ssh_gives_up() {
     assert_eq!(out.kinds()[1..], [&PromptKind::Password; 3]);
     // With PAM, pam_unix answers the third failure with PAM_MAXTRIES and sshd then offers no
     // method at all ("Authentications that can continue: "), hence the empty list. Without PAM
-    // the line reads "… Permission denied (password).".
-    assert!(out.stderr.iter().any(|l| l == "pw@127.0.0.1: Permission denied ()."), "{:#?}", out.stderr);
-    assert!(f.store.get(&host.id, "pw@127.0.0.1").is_none(), "the rejected password is forgotten");
+    // the line reads "… Permission denied (password).". The native backend uses the platform's
+    // PAM stack (macOS: pam_opendirectory), which may not answer PAM_MAXTRIES: either form.
+    let denied = |methods: &str| format!("{pw}: Permission denied ({methods}).");
+    let expected = match f.sshd.backend() {
+        Backend::Docker => vec![denied("")],
+        Backend::Native => vec![denied(""), denied("password")],
+    };
+    assert!(out.stderr.iter().any(|l| expected.contains(l)), "{expected:?} in {:#?}", out.stderr);
+    assert!(f.store.get(&host.id, &pw).is_none(), "the rejected password is forgotten");
 }
 
 /// Gap 1: the jump host's ssh inherits the askpass token, so both passwords arrive for the same
 /// host. Here the jump is the fixture itself (`pw@localhost:<port>`) and the target is the same
-/// container's sshd as seen from inside it (`127.0.0.1:22`), so the identities differ.
+/// sshd as seen from the server (`127.0.0.1:<port on the server>`: 22 in the container), so the
+/// identities differ.
 #[tokio::test(flavor = "multi_thread")]
 async fn proxy_jump_passwords_are_kept_apart() {
     let Some(mut f) = Fixture::new("proxy_jump_passwords_are_kept_apart").await else { return };
-    let mut host = f.host(USER_PASSWORD, None);
-    host.port = Some(22);
-    host.proxy_jump = Some(format!("pw@localhost:{}", f.port()));
+    let mut host = f.host(Role::Password, None);
+    let (jump, target) = (f.at(Role::Password, "localhost"), f.at(Role::Password, "127.0.0.1"));
+    host.port = Some(f.sshd.port_on_server());
+    host.proxy_jump = Some(format!("{jump}:{}", f.port()));
     let mut user = |kind: &PromptKind, prompt: &str, error: Option<&str>| match kind {
         PromptKind::HostKey { .. } => text("yes"),
         PromptKind::Password => {
@@ -448,12 +467,12 @@ async fn proxy_jump_passwords_are_kept_apart() {
         other => panic!("unexpected {other:?}: {prompt:?}"),
     };
     let first = f.connect(&host, PASSWORD_ONLY, None, &mut user).await;
-    assert_eq!(first.ready().home().await.unwrap(), RemotePath::new("/home/pw"));
+    assert_eq!(first.ready().home().await.unwrap(), f.home(Role::Password));
     let passwords: Vec<_> = first.seen.iter().filter(|s| s.kind == PromptKind::Password).map(|s| s.prompt.as_str()).collect();
-    assert_eq!(passwords, ["pw@localhost's password: ", "pw@127.0.0.1's password: "]);
+    assert_eq!(passwords, [format!("{jump}'s password: "), format!("{target}'s password: ")]);
     assert_eq!(first.seen.iter().filter(|s| host_key(&s.kind)).count(), 2);
-    assert_eq!(f.store.get(&host.id, "pw@localhost").unwrap().expose_secret(), PASSWORD);
-    assert_eq!(f.store.get(&host.id, "pw@127.0.0.1").unwrap().expose_secret(), PASSWORD);
+    assert_eq!(f.store.get(&host.id, &jump).unwrap().expose_secret(), PASSWORD);
+    assert_eq!(f.store.get(&host.id, &target).unwrap().expose_secret(), PASSWORD);
 
     let mut never = |kind: &PromptKind, prompt: &str, _: Option<&str>| -> PromptAnswer {
         panic!("the user was asked {kind:?}: {prompt:?}")
@@ -471,7 +490,8 @@ async fn proxy_jump_passwords_are_kept_apart() {
 async fn second_factor_after_public_key() {
     let Some(mut f) = Fixture::new("second_factor_after_public_key").await else { return };
     let key = f.encrypted_key();
-    let host = f.host(USER_KEY_THEN_PASSWORD, Some(key.clone()));
+    let host = f.host(Role::KeyThenPassword, Some(key.clone()));
+    let keypw = f.at(Role::KeyThenPassword, "127.0.0.1");
     let config = "PubkeyAuthentication yes\nPreferredAuthentications publickey,password";
     let mut user = |kind: &PromptKind, prompt: &str, error: Option<&str>| {
         assert_eq!(error, None);
@@ -483,11 +503,11 @@ async fn second_factor_after_public_key() {
         }
     };
     let out = f.connect(&host, config, None, &mut user).await;
-    assert_eq!(out.ready().home().await.unwrap(), RemotePath::new("/home/keypw"));
+    assert_eq!(out.ready().home().await.unwrap(), f.home(Role::KeyThenPassword));
     assert_eq!(out.kinds()[1..], [&PromptKind::Passphrase { key_path: Some(key.clone()) }, &PromptKind::Password]);
     assert_eq!(out.seen[1].prompt, format!("Enter passphrase for key '{key}': "));
-    assert_eq!(out.seen[2].prompt, "keypw@127.0.0.1's password: ");
-    assert_eq!(password_identity(&out.seen[2].prompt), "keypw@127.0.0.1");
+    assert_eq!(out.seen[2].prompt, format!("{keypw}'s password: "));
+    assert_eq!(password_identity(&out.seen[2].prompt), keypw);
     assert!(out.stderr.iter().any(|l| l.contains("Authenticated using \"publickey\" with partial success.")), "{:#?}", out.stderr);
 
     // The password alone is not enough: the server only offers publickey first.
@@ -495,13 +515,18 @@ async fn second_factor_after_public_key() {
     let out = f.connect(&host, PASSWORD_ONLY, None, &mut user).await;
     assert!(matches!(out.sftp, Err(Error::Connect(_))));
     assert!(out.seen.is_empty());
-    assert!(out.stderr.iter().any(|l| l == "keypw@127.0.0.1: Permission denied (publickey)."), "{:#?}", out.stderr);
+    let denied = format!("{keypw}: Permission denied (publickey).");
+    assert!(out.stderr.contains(&denied), "{:#?}", out.stderr);
 }
 
 const KBD_ONLY: &str = "PubkeyAuthentication no\nPreferredAuthentications keyboard-interactive";
-/// What PAM asks user `kbd` (pam_unix, then pam_google_authenticator), with ssh's prefix.
-const KBD_PASSWORD_PROMPT: &str = "(kbd@127.0.0.1) Password: ";
-const KBD_CODE_PROMPT: &str = "(kbd@127.0.0.1) Verification code: ";
+
+/// What PAM asks user `kbd` (pam_unix, then pam_google_authenticator), with ssh's prefix:
+/// `(kbd@127.0.0.1) Password: ` and `(kbd@127.0.0.1) Verification code: `.
+fn kbd_prompts(f: &Fixture) -> (String, String) {
+    let kbd = f.at(Role::Kbd, "127.0.0.1");
+    (format!("({kbd}) Password: "), format!("({kbd}) Verification code: "))
+}
 
 /// Keyboard-interactive through PAM with a real second factor: the account password, then a
 /// TOTP code, each its own round trip. `(user@host) Password: ` is a password prompt
@@ -509,7 +534,12 @@ const KBD_CODE_PROMPT: &str = "(kbd@127.0.0.1) Verification code: ";
 #[tokio::test(flavor = "multi_thread")]
 async fn keyboard_interactive_password_then_verification_code() {
     let Some(mut f) = Fixture::new("keyboard_interactive_password_then_verification_code").await else { return };
-    let host = f.host(USER_KBD, None);
+    if !f.sshd.supports(Feature::Totp, f.name) {
+        return;
+    }
+    let host = f.host(Role::Kbd, None);
+    let (password_prompt, code_prompt) = kbd_prompts(&f);
+    let kbd = f.at(Role::Kbd, "127.0.0.1");
     let mut user = |kind: &PromptKind, prompt: &str, error: Option<&str>| {
         assert_eq!(error, None, "{prompt:?}");
         match kind {
@@ -520,19 +550,19 @@ async fn keyboard_interactive_password_then_verification_code() {
         }
     };
     let first = f.connect(&host, KBD_ONLY, None, &mut user).await;
-    assert_eq!(first.ready().home().await.unwrap(), RemotePath::new("/home/kbd"));
+    assert_eq!(first.ready().home().await.unwrap(), f.home(Role::Kbd));
     assert!(host_key(first.kinds()[0]));
     assert_eq!(first.kinds()[1..], [&PromptKind::Password, &PromptKind::Other]);
-    assert_eq!(first.seen[1].prompt, KBD_PASSWORD_PROMPT);
-    assert_eq!(first.seen[2].prompt, KBD_CODE_PROMPT);
+    assert_eq!(first.seen[1].prompt, password_prompt);
+    assert_eq!(first.seen[2].prompt, code_prompt);
     assert!(first.seen.iter().all(|s| s.hint.is_none()), "{:#?}", first.seen);
-    assert_eq!(password_identity(KBD_PASSWORD_PROMPT), "kbd@127.0.0.1");
+    assert_eq!(password_identity(&password_prompt), kbd);
     assert!(
         first.stderr.iter().any(|l| l.contains("using \"keyboard-interactive\"")),
         "{:#?}",
         first.stderr
     );
-    assert_eq!(f.store.get(&host.id, "kbd@127.0.0.1").unwrap().expose_secret(), PASSWORD);
+    assert_eq!(f.store.get(&host.id, &kbd).unwrap().expose_secret(), PASSWORD);
 
     // Reconnect: the password is answered from memory, the code is asked again.
     let mut asked = Vec::new();
@@ -542,12 +572,12 @@ async fn keyboard_interactive_password_then_verification_code() {
         text(&totp_now())
     };
     let second = f.connect(&host, KBD_ONLY, None, &mut user).await;
-    assert_eq!(second.ready().home().await.unwrap(), RemotePath::new("/home/kbd"));
+    assert_eq!(second.ready().home().await.unwrap(), f.home(Role::Kbd));
     assert_eq!(second.kinds(), [&PromptKind::Password, &PromptKind::Other]);
     assert_eq!(second.seen[0].asked, None, "password from memory");
-    assert_eq!(asked, [KBD_CODE_PROMPT]);
+    assert_eq!(asked, [code_prompt]);
     // The password is the only secret held: no code was stored.
-    f.store.clear_password(&host.id, "kbd@127.0.0.1");
+    f.store.clear_password(&host.id, &kbd);
     assert!(f.store.is_empty());
 }
 
@@ -557,7 +587,12 @@ async fn keyboard_interactive_password_then_verification_code() {
 #[tokio::test(flavor = "multi_thread")]
 async fn keyboard_interactive_wrong_code_fails_cleanly() {
     let Some(mut f) = Fixture::new("keyboard_interactive_wrong_code_fails_cleanly").await else { return };
-    let host = f.host(USER_KBD, None);
+    if !f.sshd.supports(Feature::Totp, f.name) {
+        return;
+    }
+    let host = f.host(Role::Kbd, None);
+    let (password_prompt, code_prompt) = kbd_prompts(&f);
+    let kbd = f.at(Role::Kbd, "127.0.0.1");
     let mut errors = Vec::new();
     let mut user = |kind: &PromptKind, prompt: &str, error: Option<&str>| match kind {
         PromptKind::HostKey { .. } => text("yes"),
@@ -578,13 +613,10 @@ async fn keyboard_interactive_wrong_code_fails_cleanly() {
     let round = [&PromptKind::Password, &PromptKind::Other];
     assert_eq!(out.kinds()[1..], [round, round, round].concat());
     let prompts: Vec<_> = out.seen[1..].iter().map(|s| s.prompt.as_str()).collect();
-    assert_eq!(prompts, [KBD_PASSWORD_PROMPT, KBD_CODE_PROMPT].repeat(3));
+    assert_eq!(prompts, [password_prompt.as_str(), code_prompt.as_str()].repeat(3));
     assert_eq!(errors, [None, Some(WRONG_SIGN_IN.to_owned()), Some(WRONG_SIGN_IN.to_owned())]);
-    assert!(
-        out.stderr.iter().any(|l| l == "kbd@127.0.0.1: Permission denied (keyboard-interactive)."),
-        "{:#?}",
-        out.stderr
-    );
+    let denied = format!("{kbd}: Permission denied (keyboard-interactive).");
+    assert!(out.stderr.contains(&denied), "{:#?}", out.stderr);
     // The last password is forgotten when ssh gives up, and no code was ever stored.
     assert!(f.store.is_empty());
     println!("wrong code: {:?}", out.sftp.as_ref().err().unwrap());
@@ -594,7 +626,7 @@ async fn keyboard_interactive_wrong_code_fails_cleanly() {
 async fn encrypted_key_wrong_passphrase_then_right() {
     let Some(mut f) = Fixture::new("encrypted_key_wrong_passphrase_then_right").await else { return };
     let key = f.encrypted_key();
-    let host = f.host(USER_ENCRYPTED_KEY, Some(key.clone()));
+    let host = f.host(Role::EncryptedKey, Some(key.clone()));
     let mut errors = Vec::new();
     let mut user = |kind: &PromptKind, prompt: &str, error: Option<&str>| match kind {
         PromptKind::HostKey { .. } => text("yes"),
@@ -605,7 +637,7 @@ async fn encrypted_key_wrong_passphrase_then_right() {
         other => panic!("unexpected {other:?}: {prompt:?}"),
     };
     let out = f.connect(&host, PUBKEY_ONLY, None, &mut user).await;
-    assert_eq!(out.ready().home().await.unwrap(), RemotePath::new("/home/enc"));
+    assert_eq!(out.ready().home().await.unwrap(), f.home(Role::EncryptedKey));
     let passphrase = PromptKind::Passphrase { key_path: Some(key.clone()) };
     assert_eq!(out.kinds()[1..], [&passphrase, &passphrase]);
     assert_eq!(errors, [None, Some(WRONG_PASSPHRASE.to_owned())]);
@@ -651,7 +683,7 @@ async fn add_key_to_agent_is_a_confirm_prompt() {
     assert!(sock.exists(), "ssh-agent didn't start");
 
     let key = f.encrypted_key();
-    let host = f.host(USER_ENCRYPTED_KEY, Some(key.clone()));
+    let host = f.host(Role::EncryptedKey, Some(key.clone()));
     let mut user = |kind: &PromptKind, prompt: &str, _: Option<&str>| match kind {
         PromptKind::HostKey { .. } | PromptKind::Confirm => text("yes"),
         PromptKind::Passphrase { .. } => text(PASSPHRASE),

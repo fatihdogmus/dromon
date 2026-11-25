@@ -1,9 +1,10 @@
-//! `dromon_transfer::io` against the Docker sshd fixture (`tests/docker/`, started by
-//! `dromon-testkit`): scans, downloads and uploads with part files, resume, cancel, mtimes and
-//! name clashes. Each test opens its own `ssh -s … sftp` child (`openssh("ssh")`, on Windows
-//! the inbox OpenSSH), uses its own scratch folder on the server and a temp folder locally.
-//! Without Docker each test prints a skip line and passes (fails with
-//! `DROMON_REQUIRE_DOCKER=1`). The 256 MiB throughput test is `#[ignore]`:
+//! `dromon_transfer::io` against the sshd fixture (`dromon-testkit`: the Docker image of
+//! `tests/docker/`, or the native sshd): scans, downloads and uploads with part files, resume,
+//! cancel, mtimes and name clashes. Each test opens its own `ssh -s … sftp` child
+//! (`openssh("ssh")`, on Windows the inbox OpenSSH) as the key user, uses its own scratch folder
+//! in that user's home on the server and a temp folder locally. When the backend can't run each
+//! test prints a skip line and passes (fails with `DROMON_REQUIRE_DOCKER=1`). The 256 MiB
+//! throughput test is `#[ignore]`:
 //! `cargo test -p dromon-transfer --test io -- --ignored --nocapture`.
 
 use std::path::{Path, PathBuf};
@@ -11,7 +12,7 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use dromon_core::{EntryKind, Error, RemotePath};
 use dromon_sftp::{Sftp, WriteMode};
-use dromon_testkit::{Fixture, USER_KEY, file_sha1, openssh};
+use dromon_testkit::{Fixture, Role, file_sha1, openssh};
 use dromon_transfer::io::{
     CopyOptions, create_dirs, download, free_remote_name, remote_kind, remove_part, scan_local, scan_remote,
     upload,
@@ -20,8 +21,6 @@ use dromon_transfer::{DirPlan, FilePlan, Scan, is_part_file};
 use tokio::process::{Child, Command};
 use tokio::sync::mpsc;
 
-const HOME: &str = "/home/key";
-const MIXED: &str = "/home/key/fixture/mixed";
 const MIB: u64 = 1024 * 1024;
 
 struct Conn {
@@ -30,11 +29,18 @@ struct Conn {
     _ssh: Child,
 }
 
+impl Conn {
+    /// The seed's mixed folder in the key user's home.
+    fn mixed(&self) -> String {
+        self.fixture.path(Role::Key, "fixture/mixed").as_str().to_owned()
+    }
+}
+
 async fn connect(test: &str) -> Option<Conn> {
     let fixture = dromon_testkit::fixture(test).await?;
     let mut ssh = Command::new(openssh("ssh"))
         .args(fixture.ssh_options())
-        .args(["-s", &fixture.destination(USER_KEY), "sftp"])
+        .args(["-s", &fixture.destination(Role::Key), "sftp"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .kill_on_drop(true)
@@ -51,10 +57,10 @@ fn p(s: &str) -> RemotePath {
 }
 
 /// A fresh, empty scratch folder for one test.
-async fn scratch(sftp: &Sftp, name: &str) -> RemotePath {
-    let dir = p(&format!("{HOME}/scratch/xfer-{name}-{}", std::process::id()));
-    rm_rf(sftp, &dir).await;
-    sftp.mkdir(&dir).await.unwrap();
+async fn scratch(c: &Conn, name: &str) -> RemotePath {
+    let dir = c.fixture.path(Role::Key, &format!("scratch/xfer-{name}-{}", std::process::id()));
+    rm_rf(&c.sftp, &dir).await;
+    c.sftp.mkdir(&dir).await.unwrap();
     dir
 }
 
@@ -98,16 +104,16 @@ async fn write_remote(sftp: &Sftp, path: &RemotePath, data: &[u8]) {
     file.close().await.unwrap();
 }
 
-/// `len` random bytes at `path` on the server, owned by `key`.
+/// `len` random bytes at `path` on the server, owned by the key user.
 fn random_remote(fixture: &Fixture, path: &RemotePath, len: u64) {
-    let script = format!("head -c {len} /dev/urandom >'{path}' && chown key:key '{path}'");
+    let script = format!("head -c {len} /dev/urandom >'{path}' && chown {} '{path}'", fixture.owner(Role::Key));
     fixture.exec(&["sh", "-c", &script]).unwrap();
 }
 
-/// SHA-1 from `sha1sum` in the container, so the check doesn't go through SFTP.
+/// SHA-1 computed on the server (`Fixture::sha1`: `sha1sum` in the container), so the check
+/// doesn't go through SFTP.
 fn sha_remote(fixture: &Fixture, path: &RemotePath) -> String {
-    let out = fixture.exec(&["sha1sum", path.as_str()]).unwrap();
-    out.split_whitespace().next().unwrap().to_owned()
+    fixture.sha1(path.as_str()).unwrap()
 }
 
 /// SHA-1 computed here (no hashing tool needed on the host, Windows included).
@@ -201,8 +207,9 @@ where
 async fn download_a_file_keeps_bytes_and_mtime() {
     let Some(c) = connect("download_a_file_keeps_bytes_and_mtime").await else { return };
     let s = &c.sftp;
+    let mixed = c.mixed();
     let tmp = tempfile::tempdir().unwrap();
-    let src = p(&format!("{MIXED}/file-001.txt"));
+    let src = p(&format!("{mixed}/file-001.txt"));
     let dst = tmp.path().join("file-001.txt");
     let mut counts = Vec::new();
     let plan = the_plan(scan_remote(s, &src, &dst, |n| counts.push(n)).await.unwrap());
@@ -220,11 +227,11 @@ async fn download_a_file_keeps_bytes_and_mtime() {
 
     // An empty file, and a link the user picked (followed: planned as its target).
     let empty = tmp.path().join("empty.txt");
-    let plan = the_plan(scan_remote(s, &p(&format!("{MIXED}/empty.txt")), &empty, |_| {}).await.unwrap());
+    let plan = the_plan(scan_remote(s, &p(&format!("{mixed}/empty.txt")), &empty, |_| {}).await.unwrap());
     assert_eq!(download(s, &plan, CopyOptions::default(), |_| {}).await.unwrap(), empty);
     assert_eq!(std::fs::metadata(&empty).unwrap().len(), 0);
     let link = tmp.path().join("link-file");
-    let plan = the_plan(scan_remote(s, &p(&format!("{MIXED}/link-file")), &link, |_| {}).await.unwrap());
+    let plan = the_plan(scan_remote(s, &p(&format!("{mixed}/link-file")), &link, |_| {}).await.unwrap());
     assert!(matches!(plan, FilePlan::Download { size: 100, mtime: Some(1_577_934_245), .. }));
     download(s, &plan, CopyOptions { in_flight: 1 }, |_| {}).await.unwrap();
     assert_eq!(std::fs::read(&link).unwrap(), vec![0u8; 100]);
@@ -239,10 +246,11 @@ async fn download_a_file_keeps_bytes_and_mtime() {
 async fn download_mixed_folder_recursively() {
     let Some(c) = connect("download_mixed_folder_recursively").await else { return };
     let s = &c.sftp;
+    let mixed = c.mixed();
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("mixed");
     let mut counts = Vec::new();
-    let scan = scan_remote(s, &p(MIXED), &root, |n| counts.push(n)).await.unwrap();
+    let scan = scan_remote(s, &p(&mixed), &root, |n| counts.push(n)).await.unwrap();
 
     assert_eq!(
         scan.skipped,
@@ -264,7 +272,7 @@ async fn download_mixed_folder_recursively() {
         .files
         .iter()
         .map(|f| match f {
-            FilePlan::Download { src, .. } => src.as_str().strip_prefix(&format!("{MIXED}/")).unwrap().to_owned(),
+            FilePlan::Download { src, .. } => src.as_str().strip_prefix(&format!("{mixed}/")).unwrap().to_owned(),
             FilePlan::Upload { .. } => panic!("an upload plan in a remote scan"),
         })
         .collect();
@@ -289,14 +297,14 @@ async fn download_mixed_folder_recursively() {
     assert!(local_parts(&root).is_empty());
 
     // Errors on the picked item itself are returned.
-    let locked = p(&format!("{MIXED}/locked"));
+    let locked = p(&format!("{mixed}/locked"));
     assert_eq!(scan_remote(s, &locked, &root, |_| {}).await, Err(Error::PermissionDenied(locked)));
-    let missing = p(&format!("{MIXED}/nope"));
+    let missing = p(&format!("{mixed}/nope"));
     assert_eq!(scan_remote(s, &missing, &root, |_| {}).await, Err(Error::NotFound(missing)));
-    let dangling = p(&format!("{MIXED}/dangling"));
+    let dangling = p(&format!("{mixed}/dangling"));
     assert_eq!(scan_remote(s, &dangling, &root, |_| {}).await, Err(Error::NotFound(dangling)));
     // A picked link to a folder is followed.
-    let via_link = scan_remote(s, &p(&format!("{MIXED}/link-dir")), &tmp.path().join("ld"), |_| {}).await.unwrap();
+    let via_link = scan_remote(s, &p(&format!("{mixed}/link-dir")), &tmp.path().join("ld"), |_| {}).await.unwrap();
     assert_eq!(via_link.dirs, [DirPlan::Local(tmp.path().join("ld"))]);
     assert_eq!(via_link.files.len(), 1);
 }
@@ -305,7 +313,7 @@ async fn download_mixed_folder_recursively() {
 async fn download_resumes_from_the_part_file() {
     let Some(c) = connect("download_resumes_from_the_part_file").await else { return };
     let s = &c.sftp;
-    let dir = scratch(s, "dl-resume").await;
+    let dir = scratch(&c, "dl-resume").await;
     let src = dir.join("big.bin");
     random_remote(c.fixture, &src, 8 * MIB);
     let data = read_remote(s, &src).await;
@@ -353,7 +361,7 @@ async fn download_resumes_from_the_part_file() {
 async fn cancelled_download_leaves_a_part_and_resumes() {
     let Some(c) = connect("cancelled_download_leaves_a_part_and_resumes").await else { return };
     let s = &c.sftp;
-    let dir = scratch(s, "dl-cancel").await;
+    let dir = scratch(&c, "dl-cancel").await;
     let src = dir.join("big.bin");
     random_remote(c.fixture, &src, 32 * MIB);
     let tmp = tempfile::tempdir().unwrap();
@@ -395,9 +403,10 @@ async fn cancelled_download_leaves_a_part_and_resumes() {
 async fn download_to_a_name_taken_meanwhile_keeps_both() {
     let Some(c) = connect("download_to_a_name_taken_meanwhile_keeps_both").await else { return };
     let s = &c.sftp;
+    let mixed = c.mixed();
     let tmp = tempfile::tempdir().unwrap();
     let dst = tmp.path().join("file-002.txt");
-    let plan = the_plan(scan_remote(s, &p(&format!("{MIXED}/file-002.txt")), &dst, |_| {}).await.unwrap());
+    let plan = the_plan(scan_remote(s, &p(&format!("{mixed}/file-002.txt")), &dst, |_| {}).await.unwrap());
     std::fs::write(&dst, b"mine").unwrap();
     let got = download(s, &plan, CopyOptions::default(), |_| {}).await.unwrap();
     assert_eq!(got, tmp.path().join("file-002 (1).txt"));
@@ -416,7 +425,7 @@ async fn download_to_a_name_taken_meanwhile_keeps_both() {
 async fn upload_a_file_and_a_folder_tree() {
     let Some(c) = connect("upload_a_file_and_a_folder_tree").await else { return };
     let s = &c.sftp;
-    let dir = scratch(s, "up-tree").await;
+    let dir = scratch(&c, "up-tree").await;
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("site");
     std::fs::create_dir_all(root.join("assets/img")).unwrap();
@@ -466,7 +475,7 @@ async fn upload_a_file_and_a_folder_tree() {
 async fn upload_resumes_and_survives_a_cancel() {
     let Some(c) = connect("upload_resumes_and_survives_a_cancel").await else { return };
     let s = &c.sftp;
-    let dir = scratch(s, "up-resume").await;
+    let dir = scratch(&c, "up-resume").await;
     let tmp = tempfile::tempdir().unwrap();
 
     // Resume from a part the server already has.
@@ -529,7 +538,7 @@ async fn upload_resumes_and_survives_a_cancel() {
 async fn upload_replace_and_keep_both() {
     let Some(c) = connect("upload_replace_and_keep_both").await else { return };
     let s = &c.sftp;
-    let dir = scratch(s, "up-clash").await;
+    let dir = scratch(&c, "up-clash").await;
     let tmp = tempfile::tempdir().unwrap();
     let src = tmp.path().join("report.pdf");
     std::fs::write(&src, b"new contents").unwrap();
@@ -557,8 +566,9 @@ async fn upload_replace_and_keep_both() {
 async fn remote_kinds_and_free_names() {
     let Some(c) = connect("remote_kinds_and_free_names").await else { return };
     let s = &c.sftp;
-    let m = |name: &str| p(&format!("{MIXED}/{name}"));
-    assert_eq!(remote_kind(s, &p(MIXED)).await, Ok(Some(true)));
+    let mixed = c.mixed();
+    let m = |name: &str| p(&format!("{mixed}/{name}"));
+    assert_eq!(remote_kind(s, &p(&mixed)).await, Ok(Some(true)));
     assert_eq!(remote_kind(s, &m("link-dir")).await, Ok(Some(true)));
     assert_eq!(remote_kind(s, &m("locked")).await, Ok(Some(true)));
     assert_eq!(remote_kind(s, &m("file-001.txt")).await, Ok(Some(false)));
@@ -567,11 +577,11 @@ async fn remote_kinds_and_free_names() {
     assert_eq!(remote_kind(s, &m("pipe")).await, Ok(Some(false)));
     assert_eq!(remote_kind(s, &m("nope")).await, Ok(None));
 
-    assert_eq!(free_remote_name(s, &p(MIXED), "file-001.txt").await.unwrap(), "file-001 (1).txt");
-    assert_eq!(free_remote_name(s, &p(MIXED), "dir-01").await.unwrap(), "dir-01 (1)");
-    assert_eq!(free_remote_name(s, &p(MIXED), "new.txt").await.unwrap(), "new.txt");
+    assert_eq!(free_remote_name(s, &p(&mixed), "file-001.txt").await.unwrap(), "file-001 (1).txt");
+    assert_eq!(free_remote_name(s, &p(&mixed), "dir-01").await.unwrap(), "dir-01 (1)");
+    assert_eq!(free_remote_name(s, &p(&mixed), "new.txt").await.unwrap(), "new.txt");
 
-    let dir = scratch(s, "names").await;
+    let dir = scratch(&c, "names").await;
     write_remote(s, &dir.join(".a.txt.dromon-part"), b"x").await;
     write_remote(s, &dir.join("a (1).txt"), b"x").await;
     assert_eq!(free_remote_name(s, &dir, "a.txt").await.unwrap(), "a (2).txt");
@@ -611,13 +621,13 @@ async fn throughput_256_mib_against_scp() {
     let Some(c) = connect("throughput_256_mib_against_scp").await else { return };
     let s = &c.sftp;
     const SIZE: u64 = 256 * MIB;
-    let dir = scratch(s, "speed").await;
+    let dir = scratch(&c, "speed").await;
     let src = dir.join("big.bin");
     random_remote(c.fixture, &src, SIZE);
     let want = sha_remote(c.fixture, &src);
     let tmp = tempfile::tempdir().unwrap();
     let dst = tmp.path().join("big.bin");
-    let remote_at = |path: &RemotePath| format!("{}:{path}", c.fixture.destination(USER_KEY));
+    let remote_at = |path: &RemotePath| format!("{}:{path}", c.fixture.destination(Role::Key));
     println!("chunk size {}, in flight {}", s.chunk_size(), CopyOptions::default().in_flight);
 
     let plan = the_plan(scan_remote(s, &src, &dst, |_| {}).await.unwrap());

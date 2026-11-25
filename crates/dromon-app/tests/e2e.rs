@@ -1,7 +1,8 @@
 //! The whole app end to end against a real sshd: the real `App` with its view, handlers and
 //! `on_key` in a headless Rune `Runtime`, the real service thread (`service::start`), the
-//! system `ssh`, the real `dromon` binary as ssh's askpass helper, and SFTP to the Docker
-//! fixture (`dromon-testkit`, one container for this test binary). Everything a user does goes
+//! system `ssh`, the real `dromon` binary as ssh's askpass helper, and SFTP to the sshd
+//! fixture (`dromon-testkit`, one server for this test binary: the Docker image, or the native
+//! sshd; user names and homes through `Fixture::user`/`home`). Everything a user does goes
 //! through the UI: clicking a host in the sidebar, typing into a sheet's field, Return,
 //! clicking buttons by key, type-to-select.
 //!
@@ -16,7 +17,8 @@
 //! between frames (`Harness::pump_until`). Every event and every connection-log line is checked
 //! for the secrets typed.
 //!
-//! Without Docker every test prints a skip line and passes (`DROMON_REQUIRE_DOCKER=1` fails).
+//! When the backend can't run every test prints a skip line and passes
+//! (`DROMON_REQUIRE_DOCKER=1` fails). The TOTP test needs the Docker backend.
 
 #![cfg(unix)]
 
@@ -30,7 +32,7 @@ use std::time::{Duration, Instant};
 use dromon_app::service::{self, Config, Sink};
 use dromon_app::state::{App, HostDirectory, ListError, Listing, ServiceEvent, Sheet};
 use dromon_core::{ConnStatus, EntryKind, HostId, HostSource, LinkTarget, PromptKind, RemotePath};
-use dromon_testkit::{Fixture, PASSPHRASE, PASSWORD, totp_now};
+use dromon_testkit::{Feature, Fixture, PASSPHRASE, PASSWORD, Role, totp_now};
 use rune::{Env, Key, KeyEvent, Mods, Runtime};
 
 const HELPER: &str = env!("CARGO_BIN_EXE_dromon");
@@ -119,6 +121,11 @@ impl Harness {
             })
         });
         Some(h)
+    }
+
+    /// The home folder of `role` on the server (`/home/key` in Docker).
+    fn home(&self, role: Role) -> String {
+        self.fx.home(role).as_str().to_owned()
     }
 
     fn step(&self, what: &str) {
@@ -346,14 +353,14 @@ fn write_ssh_config(fx: &Fixture, dir: &Path) -> PathBuf {
 
     let port = fx.port();
     let hosts = [
-        ("fx-key", dromon_testkit::USER_KEY, Some(&key), "publickey"),
-        ("fx-pw", dromon_testkit::USER_PASSWORD, None, "password"),
-        ("fx-kbd", dromon_testkit::USER_KBD, None, "keyboard-interactive"),
-        ("fx-enc", dromon_testkit::USER_ENCRYPTED_KEY, Some(&enc), "publickey"),
+        ("fx-key", Role::Key, Some(&key), "publickey"),
+        ("fx-pw", Role::Password, None, "password"),
+        ("fx-kbd", Role::Kbd, None, "keyboard-interactive"),
+        ("fx-enc", Role::EncryptedKey, Some(&enc), "publickey"),
     ];
     let mut config = String::new();
-    for (alias, user, identity, method) in hosts {
-        writeln!(config, "Host {alias}\n    HostName {}\n    Port {port}\n    User {user}", fx.host()).unwrap();
+    for (alias, role, identity, method) in hosts {
+        writeln!(config, "Host {alias}\n    HostName {}\n    Port {port}\n    User {}", fx.host(), fx.user(role)).unwrap();
         match identity {
             Some(file) => writeln!(config, "    IdentityFile {}\n    PubkeyAuthentication yes", file.display()).unwrap(),
             None => writeln!(config, "    PubkeyAuthentication no").unwrap(),
@@ -397,11 +404,16 @@ fn sign_in_pw(h: &mut Harness) {
     h.connect("fx-pw");
     h.trust_host_key("fx-pw");
     let (_, text, error) = h.wait_for_sheet("Sign in to fx-pw", |k| *k == PromptKind::Password);
-    assert_eq!((text.as_str(), error), ("pw@127.0.0.1's password: ", None));
+    assert_eq!((text, error), (password_prompt(h.fx), None));
     h.secrets.push(PASSWORD.into());
     h.answer(PASSWORD);
-    let rows = h.wait_for_listing("/home/pw");
+    let rows = h.wait_for_listing(&h.home(Role::Password));
     assert!(rows.iter().any(|r| r == ".profile"), "{rows:?}");
+}
+
+/// `pw@127.0.0.1's password: ` with the fixture's name for the password user.
+fn password_prompt(fx: &Fixture) -> String {
+    format!("{}@127.0.0.1's password: ", fx.user(Role::Password))
 }
 
 /// a. A public-key host: the host-key sheet shows the server's real fingerprint; trusted, the
@@ -413,7 +425,7 @@ fn key_host_trust_list_and_browse() {
     h.step("sidebar has fx-key, fx-pw, fx-kbd, fx-enc (SSH Config, resolved)");
     let spec = h.rt.state.hosts.get(&host("fx-key")).unwrap().clone();
     assert_eq!(spec.source, HostSource::SshConfig);
-    assert_eq!((spec.user.as_deref(), spec.port), (Some("key"), Some(h.fx.port())));
+    assert_eq!((spec.user.as_deref(), spec.port), (Some(h.fx.user(Role::Key)), Some(h.fx.port())));
 
     let expected = fixture_fingerprint(h.dir.path(), h.fx.port());
     h.connect("fx-key");
@@ -421,7 +433,9 @@ fn key_host_trust_list_and_browse() {
     assert_eq!(fingerprint, expected, "the sheet shows the server's own fingerprint");
     h.step(&format!("host-key sheet showed {fingerprint} (= ssh-keyscan), trusted"));
 
-    let home = h.wait_for_listing("/home/key");
+    let key_home = h.home(Role::Key);
+    let mixed = format!("{key_home}/fixture/mixed");
+    let home = h.wait_for_listing(&key_home);
     // Read only now: ssh writes known_hosts a moment after it gets the answer, and once the
     // folder lists the connection is up, so the file is there (CI once read it too early).
     let known = std::fs::read_to_string(h.dir.path().join("known_hosts")).unwrap();
@@ -429,12 +443,12 @@ fn key_host_trust_list_and_browse() {
     assert!(home.iter().any(|r| r == "fixture"), "{home:?}");
     assert!(!h.shown("sheet"), "connected: the sheet is gone");
     assert_eq!(h.text_of("status-summary"), format!("{} items", home.len()));
-    h.step(&format!("listed /home/key: {home:?}"));
+    h.step(&format!("listed {key_home}: {home:?}"));
 
     h.double_click("rows/fixture");
-    h.wait_for_listing("/home/key/fixture");
+    h.wait_for_listing(&format!("{key_home}/fixture"));
     h.double_click("rows/mixed");
-    let rows = h.wait_for_listing("/home/key/fixture/mixed");
+    let rows = h.wait_for_listing(&mixed);
     let c = h.rt.state.conn().unwrap();
     let kind = |name: &str| c.find(name).unwrap_or_else(|| panic!("no {name} in {rows:?}")).kind;
     assert_eq!(kind("link-dir"), EntryKind::Symlink { target: Some(LinkTarget::Dir) });
@@ -450,9 +464,9 @@ fn key_host_trust_list_and_browse() {
     h.type_text("link-d");
     assert_eq!(h.rt.state.conn().unwrap().selection.cursor(), Some("link-dir"));
     h.key(Key::Enter);
-    assert_eq!(h.wait_for_listing("/home/key/fixture/mixed/link-dir"), ["inside.txt"]);
+    assert_eq!(h.wait_for_listing(&format!("{mixed}/link-dir")), ["inside.txt"]);
     h.click("tb-back");
-    h.wait_for_listing("/home/key/fixture/mixed");
+    h.wait_for_listing(&mixed);
     h.step("opened link-dir (inside.txt) and came back");
 
     h.type_text("locked");
@@ -474,7 +488,7 @@ fn password_wrong_then_right() {
     h.connect("fx-pw");
     h.trust_host_key("fx-pw");
     let (_, text, error) = h.wait_for_sheet("Sign in to fx-pw", |k| *k == PromptKind::Password);
-    assert_eq!((text.as_str(), error), ("pw@127.0.0.1's password: ", None));
+    assert_eq!((text, error), (password_prompt(h.fx), None));
     assert!(h.shown("sheet-note"), "a password may be remembered");
     h.secrets.extend([WRONG_PASSWORD.to_owned(), PASSWORD.to_owned()]);
     h.answer(WRONG_PASSWORD);
@@ -483,9 +497,10 @@ fn password_wrong_then_right() {
     assert_eq!(h.status(), Some(ConnStatus::NeedsInput));
     h.step(&format!("sheet shows “{}”", dromon_ssh::WRONG_PASSWORD));
     h.answer(PASSWORD);
-    let rows = h.wait_for_listing("/home/pw");
+    let pw_home = h.home(Role::Password);
+    let rows = h.wait_for_listing(&pw_home);
     assert!(!h.shown("sheet"));
-    h.step(&format!("right password: listed /home/pw {rows:?}"));
+    h.step(&format!("right password: listed {pw_home} {rows:?}"));
     h.assert_no_secrets();
 }
 
@@ -493,23 +508,28 @@ fn password_wrong_then_right() {
 #[test]
 fn keyboard_interactive_password_then_code() {
     let Some(mut h) = Harness::new("keyboard_interactive_password_then_code") else { return };
+    if !h.fx.supports(Feature::Totp, h.name) {
+        return;
+    }
+    let kbd = h.fx.user(Role::Kbd);
     h.connect("fx-kbd");
     h.trust_host_key("fx-kbd");
     let (_, text, _) = h.wait_for_sheet("Sign in to fx-kbd", |k| *k == PromptKind::Password);
-    assert_eq!(text, "(kbd@127.0.0.1) Password: ");
+    assert_eq!(text, format!("({kbd}@127.0.0.1) Password: "));
     assert!(h.shown("sheet-note"), "the password is rememberable");
     h.secrets.push(PASSWORD.into());
     h.answer(PASSWORD);
     let (kind, text, _) = h.wait_for_sheet("Sign in to fx-kbd", |k| *k == PromptKind::Other);
-    assert_eq!(text, "(kbd@127.0.0.1) Verification code: ");
+    assert_eq!(text, format!("({kbd}@127.0.0.1) Verification code: "));
     assert!(!kind.rememberable());
     assert!(!h.shown("sheet-note"), "the code sheet doesn't offer to remember it");
     h.step("password sheet (remembered), then code sheet (not remembered)");
     let code = totp_now();
     h.codes.push(code.clone());
     h.answer(&code);
-    let rows = h.wait_for_listing("/home/kbd");
-    h.step(&format!("code accepted: listed /home/kbd {rows:?}"));
+    let kbd_home = h.home(Role::Kbd);
+    let rows = h.wait_for_listing(&kbd_home);
+    h.step(&format!("code accepted: listed {kbd_home} {rows:?}"));
     h.assert_no_secrets();
 }
 
@@ -527,8 +547,9 @@ fn encrypted_key_passphrase() {
     h.step(&format!("passphrase sheet names {key}"));
     h.secrets.push(PASSPHRASE.into());
     h.answer(PASSPHRASE);
-    let rows = h.wait_for_listing("/home/enc");
-    h.step(&format!("listed /home/enc {rows:?}"));
+    let enc_home = h.home(Role::EncryptedKey);
+    let rows = h.wait_for_listing(&enc_home);
+    h.step(&format!("listed {enc_home} {rows:?}"));
     h.assert_no_secrets();
 }
 
@@ -542,9 +563,11 @@ fn server_drop_reconnects_silently() {
     h.step("signed in to fx-pw");
 
     let mark = h.seen.len();
-    let killed = h.fx.kill_sessions(dromon_testkit::USER_PASSWORD).unwrap();
-    assert!(killed > 0, "pw had no processes to kill");
-    h.step(&format!("killed {killed} processes of pw in the container"));
+    let pw = h.fx.user(Role::Password);
+    let pw_home = h.home(Role::Password);
+    let killed = h.fx.kill_sessions(Role::Password).unwrap();
+    assert!(killed > 0, "{pw} had no processes to kill");
+    h.step(&format!("killed {killed} processes of {pw} on the server"));
     h.pump_until("Reconnecting", |rt| matches!(rt.state.conn().map(|c| &c.status), Some(ConnStatus::Reconnecting { .. })));
     let banner = h.rt.elements().into_iter().find(|e| e.key.as_deref() == Some("banner") && !e.exiting).and_then(|e| e.label);
     assert_eq!(banner.as_deref(), Some("Reconnecting to fx-pw…"), "the reconnect banner shows");
@@ -556,17 +579,19 @@ fn server_drop_reconnects_silently() {
         rt.state.conn().is_some_and(|c| c.status == ConnStatus::Ready && matches!(c.listing, Listing::Ready(_)) && !c.loading_more())
     });
     // The refresh after the reconnect: a whole new listing of the folder on screen.
-    h.pump_until_event(mark, "the relisting of /home/pw", |e| e.starts_with("ListingPage") && e.contains("/home/pw") && e.contains("done: true"));
+    h.pump_until_event(mark, &format!("the relisting of {pw_home}"), |e| {
+        e.starts_with("ListingPage") && e.contains(&pw_home) && e.contains("done: true")
+    });
     h.drain();
     let since = &h.seen[mark..];
     assert!(!since.iter().any(|e| e.starts_with("Prompt(")), "no prompt after the drop: {since:#?}");
-    assert!(since.iter().any(|e| e.starts_with("ListingPage") && e.contains("/home/pw") && e.contains("first: true")), "{since:#?}");
+    assert!(since.iter().any(|e| e.starts_with("ListingPage") && e.contains(&pw_home) && e.contains("first: true")), "{since:#?}");
     let rows = h.rt.state.conn().unwrap().row_names().into_iter().map(str::to_owned).collect::<Vec<_>>();
     assert!(rows.iter().any(|r| r == ".profile"), "{rows:?}");
     assert!(h.log().contains("answered from memory"), "{}", h.log());
     assert!(h.log().contains("Reconnected."));
     assert!(!h.shown("banner"));
-    h.step("Ready again with no sheet; password answered from memory; /home/pw listed again");
+    h.step(&format!("Ready again with no sheet; password answered from memory; {pw_home} listed again"));
     h.assert_no_secrets();
 }
 
@@ -596,7 +621,7 @@ fn disconnect_forgets_the_password() {
     assert!(!h.log().contains("answered from memory"), "{}", h.log());
     h.step("Connect asks for the password again");
     h.answer(PASSWORD);
-    h.wait_for_listing("/home/pw");
+    h.wait_for_listing(&h.home(Role::Password));
     h.step("signed in again");
     h.assert_no_secrets();
 }

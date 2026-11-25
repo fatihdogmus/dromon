@@ -4,8 +4,11 @@ name: CI
 # - linux: clippy, the whole test suite with the Docker sshd fixture required (testcontainers),
 #   goldens unchanged, the smoke script (headless, real window under Xvfb, real connect), and the
 #   --script flows rendered as artifacts for review.
-# - macos: the test suite (the Docker fixture tests skip: no Linux containers there) and the
-#   headless smoke.
+# - macos: the test suite (the Docker fixture tests skip: no Linux containers there), then the
+#   sshd fixture tests (askpass, SFTP, transfer I/O, the app's e2e and transfers) against a
+#   private native sshd instead of Docker: dromon-testkit's native backend
+#   (DROMON_FIXTURE_BACKEND=native) starts Apple's sshd as root through sudo, with test users
+#   dromon_*; the TOTP tests skip (no TOTP PAM module on macOS). Then the headless smoke.
 # - windows: the test suite, then the Docker sshd fixture tests of the library crates with
 #   Windows' own OpenSSH and the named-pipe askpass, against the same Linux image: Docker runs in
 #   WSL2 (Ubuntu 24.04) and answers on tcp://127.0.0.1:2375; the ports its containers publish on
@@ -91,7 +94,8 @@ jobs:
 
   macos:
     runs-on: macos-15
-    timeout-minutes: 60
+    # The suite twice (plain, then against the native sshd).
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -104,10 +108,25 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Tests
         run: cargo test --workspace --locked
+      # No Docker on Apple-silicon runners (no nested virtualisation): the sshd fixture tests
+      # again, against dromon-testkit's native backend (Apple's /usr/sbin/sshd as root through
+      # the runner's passwordless sudo, users dromon_*; tests/docker/README.md). The TOTP tests
+      # skip there. Both commands run; the step fails if either does.
+      - name: Tests (native sshd)
+        env:
+          DROMON_FIXTURE_BACKEND: native
+          # Fail, don't skip, when the native sshd can't start.
+          DROMON_REQUIRE_DOCKER: "1"
+        run: |
+          status=0
+          cargo test --locked --no-fail-fast -p dromon-testkit -p dromon-ssh -p dromon-sftp -p dromon-transfer || status=1
+          cargo test --locked --no-fail-fast -p dromon-app --test e2e --test transfers_e2e || status=1
+          exit "$status"
       # GitHub's macOS runners may not expose Metal to headless rendering; non-blocking until a
       # first green run proves it.
       - name: Smoke (headless)
         continue-on-error: true
+        timeout-minutes: 5
         run: bash scripts/smoke-app.sh
 
   windows:

@@ -1,6 +1,7 @@
-//! Integration tests against the Docker sshd fixture (`tests/docker/`, started by
-//! `dromon-testkit`, one container for this test binary). They run whenever Docker is reachable;
-//! otherwise each test prints a skip line and passes (fails with `DROMON_REQUIRE_DOCKER=1`).
+//! Integration tests against the sshd fixture (`dromon-testkit`, one server for this test
+//! binary: the Docker image of `tests/docker/`, or the native sshd). They run whenever the
+//! backend can; otherwise each test prints a skip line and passes (fails with
+//! `DROMON_REQUIRE_DOCKER=1`). All as the key user, in its home (`Fixture::home`).
 //! Each test opens its own `ssh -s … sftp` child with the ssh the app runs (`ssh_program()`, on
 //! Windows the inbox OpenSSH). The 1 GiB S4 test is `#[ignore]`:
 //! `cargo test -p dromon-sftp -- --ignored`.
@@ -9,12 +10,8 @@ use std::time::{Duration, Instant};
 
 use dromon_core::{Entry, EntryKind, Error, LinkTarget, RemotePath};
 use dromon_sftp::{Sftp, WriteMode};
-use dromon_testkit::{BIG_FILE_SIZE as BIG_SIZE, Fixture, USER_KEY};
+use dromon_testkit::{BIG_FILE_SIZE as BIG_SIZE, Fixture, Role};
 use tokio::process::{Child, Command};
-
-const HOME: &str = "/home/key";
-const MIXED: &str = "/home/key/fixture/mixed";
-const MANY: &str = "/home/key/fixture/many";
 
 struct Conn {
     sftp: Sftp,
@@ -22,11 +19,28 @@ struct Conn {
     _ssh: Child,
 }
 
+impl Conn {
+    /// The key user's home (`/home/key` in Docker).
+    fn home(&self) -> String {
+        self.fixture.home(Role::Key).as_str().to_owned()
+    }
+
+    /// The seed's mixed folder.
+    fn mixed(&self) -> String {
+        self.fixture.path(Role::Key, "fixture/mixed").as_str().to_owned()
+    }
+
+    /// The seed's 10,000 files.
+    fn many(&self) -> String {
+        self.fixture.path(Role::Key, "fixture/many").as_str().to_owned()
+    }
+}
+
 async fn connect(test: &str) -> Option<Conn> {
     let fixture = dromon_testkit::fixture(test).await?;
     let mut ssh = Command::new(dromon_ssh::ssh_program())
         .args(fixture.ssh_options())
-        .args(["-s", &fixture.destination(USER_KEY), "sftp"])
+        .args(["-s", &fixture.destination(Role::Key), "sftp"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .kill_on_drop(true)
@@ -43,10 +57,10 @@ fn p(s: &str) -> RemotePath {
 }
 
 /// A fresh, empty scratch folder for one test.
-async fn scratch(sftp: &Sftp, name: &str) -> RemotePath {
-    let dir = p(&format!("{HOME}/scratch/{name}-{}", std::process::id()));
-    rm_rf(sftp, &dir).await;
-    sftp.mkdir(&dir).await.unwrap();
+async fn scratch(c: &Conn, name: &str) -> RemotePath {
+    let dir = p(&format!("{}/scratch/{name}-{}", c.home(), std::process::id()));
+    rm_rf(&c.sftp, &dir).await;
+    c.sftp.mkdir(&dir).await.unwrap();
     dir
 }
 
@@ -107,7 +121,7 @@ fn rate(bytes: u64, took: Duration) -> String {
 #[tokio::test(flavor = "multi_thread")]
 async fn home_and_capabilities() {
     let Some(c) = connect("home_and_capabilities").await else { return };
-    assert_eq!(c.sftp.home().await.unwrap(), p(HOME));
+    assert_eq!(c.sftp.home().await.unwrap(), p(&c.home()));
     let caps = c.sftp.capabilities();
     println!("extensions: {:?}", caps.extensions);
     println!("limits: {:?}, chunk size {}", caps.limits, c.sftp.chunk_size());
@@ -122,7 +136,8 @@ async fn home_and_capabilities() {
 async fn list_mixed_folder() {
     let Some(c) = connect("list_mixed_folder").await else { return };
     let s = &c.sftp;
-    let entries = s.list(&p(MIXED)).await.unwrap();
+    let mixed = c.mixed();
+    let entries = s.list(&p(&mixed)).await.unwrap();
     assert_eq!(entries.len(), 100, "80 files, 10 folders and 10 specials");
     assert!(entries.iter().all(|e| e.name != "." && e.name != ".."));
 
@@ -142,19 +157,19 @@ async fn list_mixed_folder() {
     assert_eq!(find(&entries, "unicode-ğüş.txt").size, 8);
     assert_eq!(find(&entries, "space name.txt").size, 7);
 
-    let locked = p(&format!("{MIXED}/locked"));
+    let locked = p(&format!("{mixed}/locked"));
     assert_eq!(s.list(&locked).await, Err(Error::PermissionDenied(locked.clone())));
-    let missing = p(&format!("{MIXED}/nope"));
+    let missing = p(&format!("{mixed}/nope"));
     assert_eq!(s.list(&missing).await, Err(Error::NotFound(missing.clone())));
     assert_eq!(s.stat(&missing).await, Err(Error::NotFound(missing.clone())));
     assert!(!s.exists(&missing).await.unwrap());
-    assert!(s.exists(&p(&format!("{MIXED}/dangling"))).await.unwrap());
+    assert!(s.exists(&p(&format!("{mixed}/dangling"))).await.unwrap());
 
-    let link = p(&format!("{MIXED}/link-dir"));
+    let link = p(&format!("{mixed}/link-dir"));
     assert_eq!(s.stat(&link).await.unwrap().kind, EntryKind::Dir);
     let l = s.lstat(&link).await.unwrap();
     assert_eq!((l.name.as_str(), l.kind), ("link-dir", EntryKind::Symlink { target: Some(LinkTarget::Dir) }));
-    assert_eq!(s.realpath(&link).await.unwrap(), p(&format!("{MIXED}/dir-01")));
+    assert_eq!(s.realpath(&link).await.unwrap(), p(&format!("{mixed}/dir-01")));
     let inside = s.list(&link).await.unwrap();
     assert_eq!(inside.len(), 1);
     assert_eq!(inside[0].name, "inside.txt");
@@ -165,9 +180,10 @@ async fn list_mixed_folder() {
 async fn paged_listing_of_10k_entries() {
     let Some(c) = connect("paged_listing_of_10k_entries").await else { return };
     let s = &c.sftp;
+    let (mixed, many) = (c.mixed(), c.many());
 
     let start = Instant::now();
-    let mut rx = s.list_paged(&p(MANY), 512);
+    let mut rx = s.list_paged(&p(&many), 512);
     let mut pages = Vec::new();
     let mut first_page = None;
     while let Some(page) = rx.recv().await {
@@ -181,27 +197,27 @@ async fn paged_listing_of_10k_entries() {
     assert_eq!(pages[19], 10_000 - 19 * 512);
 
     let start = Instant::now();
-    let all = s.list(&p(MANY)).await.unwrap();
+    let all = s.list(&p(&many)).await.unwrap();
     let whole = start.elapsed();
     assert_eq!(all.len(), 10_000);
     assert!(all.iter().all(|e| e.kind == EntryKind::File && e.size == 0));
     println!("10k listing: first page after {first_page:?}, paged total {paged:?}, list() {whole:?}");
 
     // An empty folder yields one empty page; an unreadable one a single error.
-    let dir = scratch(s, "paged").await;
+    let dir = scratch(&c, "paged").await;
     let mut rx = s.list_paged(&dir, 512);
     assert_eq!(rx.recv().await, Some(Ok(Vec::new())));
     assert_eq!(rx.recv().await, None);
-    let locked = p(&format!("{MIXED}/locked"));
+    let locked = p(&format!("{mixed}/locked"));
     let mut rx = s.list_paged(&locked, 512);
     assert_eq!(rx.recv().await, Some(Err(Error::PermissionDenied(locked))));
     assert_eq!(rx.recv().await, None);
 
     // Dropping the receiver early stops the listing; the session stays usable.
-    let mut rx = s.list_paged(&p(MANY), 100);
+    let mut rx = s.list_paged(&p(&many), 100);
     assert_eq!(rx.recv().await.unwrap().unwrap().len(), 100);
     drop(rx);
-    assert_eq!(s.list(&p(MIXED)).await.unwrap().len(), 100);
+    assert_eq!(s.list(&p(&mixed)).await.unwrap().len(), 100);
     rm_rf(s, &dir).await;
 }
 
@@ -209,7 +225,7 @@ async fn paged_listing_of_10k_entries() {
 async fn mkdir_rename_remove() {
     let Some(c) = connect("mkdir_rename_remove").await else { return };
     let s = &c.sftp;
-    let dir = scratch(s, "ops").await;
+    let dir = scratch(&c, "ops").await;
     let a = dir.join("a");
     let b = dir.join("b");
 
@@ -237,7 +253,7 @@ async fn mkdir_rename_remove() {
     assert_eq!(s.remove_file(&missing).await, Err(Error::NotFound(missing.clone())));
     assert_eq!(s.remove_dir(&missing).await, Err(Error::NotFound(missing.clone())));
 
-    let locked = p(&format!("{MIXED}/locked/x"));
+    let locked = p(&format!("{}/locked/x", c.mixed()));
     assert_eq!(s.mkdir(&locked).await, Err(Error::PermissionDenied(locked.clone())));
     assert!(s.list(&dir).await.unwrap().is_empty());
     rm_rf(s, &dir).await;
@@ -247,7 +263,7 @@ async fn mkdir_rename_remove() {
 async fn write_read_round_trip_and_mtime() {
     let Some(c) = connect("write_read_round_trip_and_mtime").await else { return };
     let s = &c.sftp;
-    let dir = scratch(s, "io").await;
+    let dir = scratch(&c, "io").await;
     let f = dir.join("data.bin");
 
     // 3.5 MiB: many chunks in flight, and a short final chunk.
@@ -284,7 +300,7 @@ async fn write_read_round_trip_and_mtime() {
     s.open_write(&fresh, WriteMode::CreateNew).await.unwrap().close().await.unwrap();
     let missing = dir.join("missing.bin");
     assert_eq!(s.open_read(&missing).await.err(), Some(Error::NotFound(missing)));
-    let locked = p(&format!("{MIXED}/locked/f"));
+    let locked = p(&format!("{}/locked/f", c.mixed()));
     assert_eq!(
         s.open_write(&locked, WriteMode::Truncate).await.err(),
         Some(Error::PermissionDenied(locked))
@@ -301,7 +317,7 @@ async fn write_read_round_trip_and_mtime() {
 async fn copy_data_small_file_is_exact() {
     let Some(c) = connect("copy_data_small_file_is_exact").await else { return };
     let s = &c.sftp;
-    let dir = scratch(s, "copysmall").await;
+    let dir = scratch(&c, "copysmall").await;
     let src = dir.join("src.bin");
     let data = pattern(777_777, 9);
     write_pipelined(s, &src, WriteMode::Truncate, 0, &data).await;
@@ -334,9 +350,9 @@ async fn copy_data_small_file_is_exact() {
 async fn copy_data_big_file() {
     let Some(c) = connect("copy_data_big_file").await else { return };
     let s = &c.sftp;
-    let big = p(c.fixture.big_file().await);
+    let big = p(&c.fixture.big_file().await);
     assert_eq!(s.stat(&big).await.unwrap().size, BIG_SIZE);
-    let dir = scratch(s, "copybig").await;
+    let dir = scratch(&c, "copybig").await;
 
     let dst = dir.join("copy-data.bin");
     let mut steps = 0;

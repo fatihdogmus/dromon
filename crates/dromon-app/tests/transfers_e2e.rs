@@ -1,13 +1,15 @@
-//! Transfers end to end against the Docker sshd: the real service thread (`service::start`)
+//! Transfers end to end against the sshd fixture (`dromon-testkit`: the Docker image, or the
+//! native sshd): the real service thread (`service::start`)
 //! with its connection tasks and transfer engine, the system `ssh`, and SFTP to the fixture.
 //! Commands go in through the service's channel as the UI sends them; the `Transfers`
 //! snapshots coming back are what the popover would show.
 //!
 //! Each test writes its own ssh config (one key-auth alias, `fx-key`, with a private
 //! `known_hosts` that accepts the fixture's key), downloads into its own temporary folder and
-//! uploads into its own scratch folder on the server.
+//! uploads into its own scratch folder on the server (in the key user's home).
 //!
-//! Without Docker every test prints a skip line and passes (`DROMON_REQUIRE_DOCKER=1` fails).
+//! When the backend can't run every test prints a skip line and passes
+//! (`DROMON_REQUIRE_DOCKER=1` fails).
 
 #![cfg(unix)]
 
@@ -19,12 +21,11 @@ use std::time::{Duration, Instant};
 use dromon_app::service::{self, Config, Sink};
 use dromon_app::state::{Backend, Command, ServiceEvent, TransferCommand};
 use dromon_core::{EntryKind, HostId, RemotePath};
-use dromon_testkit::{Fixture, USER_KEY};
+use dromon_testkit::{Fixture, Role, file_sha1};
 use dromon_transfer::{ConflictChoice, JobId, JobKind, JobRequest, JobView, RemoteItem, Reveal, TaskState};
 
 const HELPER: &str = env!("CARGO_BIN_EXE_dromon");
 const WAIT: Duration = Duration::from_secs(60);
-const MIXED: &str = "/home/key/fixture/mixed";
 
 fn host() -> HostId {
     HostId("fx-key".into())
@@ -68,9 +69,9 @@ impl Harness {
             without_env: vec!["SSH_AUTH_SOCK".into()],
         };
         service::start(commands, TestSink(tx), cfg).expect("start the service thread");
-        let scratch = RemotePath::new(&format!("/home/key/scratch/transfers-{name}-{}", std::process::id()));
+        let scratch = fx.path(Role::Key, &format!("scratch/transfers-{name}-{}", std::process::id()));
         // `exec` runs as root: the folder goes to the user the app signs in as.
-        let make = format!("rm -rf '{0}' && mkdir -p '{0}' && chown {USER_KEY}:{USER_KEY} '{0}'", scratch.as_str());
+        let make = format!("rm -rf '{0}' && mkdir -p '{0}' && chown {1} '{0}'", scratch.as_str(), fx.owner(Role::Key));
         fx.exec(&["sh", "-c", &make]).unwrap();
         let mut h = Harness { fx, dir, backend, events, jobs: Vec::new(), scratch };
         h.backend.send(Command::Connect { host: host() });
@@ -132,13 +133,18 @@ impl Harness {
     fn remote(&self, cmd: &str) -> String {
         self.fx.exec(&["sh", "-c", cmd]).unwrap()
     }
+
+    /// The seed's mixed folder in the key user's home.
+    fn mixed(&self) -> String {
+        self.fx.path(Role::Key, "fixture/mixed").as_str().to_owned()
+    }
 }
 
 fn write_ssh_config(fx: &Fixture, dir: &Path) -> PathBuf {
     let key = dir.join("id_ed25519");
     std::fs::copy(fx.key(), &key).unwrap();
     let mut config = String::new();
-    writeln!(config, "Host fx-key\n    HostName {}\n    Port {}\n    User {USER_KEY}", fx.host(), fx.port()).unwrap();
+    writeln!(config, "Host fx-key\n    HostName {}\n    Port {}\n    User {}", fx.host(), fx.port(), fx.user(Role::Key)).unwrap();
     writeln!(config, "    IdentityFile {}\n    IdentitiesOnly yes\n    PreferredAuthentications publickey", key.display()).unwrap();
     writeln!(config, "    UserKnownHostsFile {}\n    GlobalKnownHostsFile /dev/null", dir.join("known_hosts").display()).unwrap();
     writeln!(config, "    StrictHostKeyChecking accept-new\n    UpdateHostKeys no").unwrap();
@@ -160,7 +166,8 @@ fn mtime(path: &Path) -> i64 {
 fn downloads_land_in_the_folder_with_their_bytes_and_dates() {
     let Some(mut h) = Harness::new("downloads") else { return };
     let into = h.downloads();
-    let items = vec![item(&format!("{MIXED}/file-001.txt"), EntryKind::File), item(&format!("{MIXED}/dir-01"), EntryKind::Dir)];
+    let mixed = h.mixed();
+    let items = vec![item(&format!("{mixed}/file-001.txt"), EntryKind::File), item(&format!("{mixed}/dir-01"), EntryKind::Dir)];
     h.transfer(TransferCommand::Start(JobRequest::Download { host: host(), items, into: into.clone() }));
     let id = h.newest(None);
     let job = h.finished(id);
@@ -176,7 +183,7 @@ fn downloads_land_in_the_folder_with_their_bytes_and_dates() {
     assert!(leftovers.is_empty(), "{leftovers:?}");
 
     // The same file again: Chrome-style name, the first one untouched.
-    let items = vec![item(&format!("{MIXED}/file-001.txt"), EntryKind::File)];
+    let items = vec![item(&format!("{mixed}/file-001.txt"), EntryKind::File)];
     h.transfer(TransferCommand::Start(JobRequest::Download { host: host(), items, into: into.clone() }));
     let again = h.newest(Some(id));
     assert_eq!(h.finished(again).state, TaskState::Done);
@@ -221,7 +228,8 @@ fn a_dropped_connection_resumes_the_download_where_it_stopped() {
     let Some(mut h) = Harness::new("resume") else { return };
     let src = h.scratch.join("big.bin");
     h.remote(&format!("head -c 67108864 /dev/urandom > '{}'", src.as_str()));
-    let want = h.remote(&format!("sha256sum '{}' | cut -c1-64", src.as_str())).trim().to_owned();
+    // SHA-1 on the server and here (no hashing tool needed on the host: macOS has no sha256sum).
+    let want = h.fx.sha1(src.as_str()).unwrap();
 
     let into = h.downloads();
     let items = vec![RemoteItem { path: src.clone(), kind: EntryKind::File, size: 64 << 20 }];
@@ -231,15 +239,14 @@ fn a_dropped_connection_resumes_the_download_where_it_stopped() {
     // itself (key auth needs nobody) and the file carries on from its part file.
     h.wait_jobs("the first bytes", |jobs| jobs.iter().any(|j| j.id == id && j.progress.done > 0));
     let before = h.job(id).progress.done;
-    assert!(h.fx.kill_sessions(USER_KEY).unwrap() > 0);
+    assert!(h.fx.kill_sessions(Role::Key).unwrap() > 0);
     h.wait_jobs("the job to wait for the connection", |jobs| jobs.iter().any(|j| j.id == id && j.waiting_for_connection));
     h.wait_jobs("the job to move again", |jobs| jobs.iter().any(|j| j.id == id && !j.waiting_for_connection));
     let job = h.finished(id);
     assert_eq!(job.state, TaskState::Done, "{job:#?}");
     assert!(before < 64 << 20, "the drop came before the end");
 
-    let got = std::process::Command::new("sha256sum").arg(into.join("big.bin")).output().unwrap();
-    assert_eq!(String::from_utf8_lossy(&got.stdout)[..64], want);
+    assert_eq!(file_sha1(&into.join("big.bin")).unwrap(), want);
 }
 
 fn walk(dir: &Path) -> Vec<PathBuf> {

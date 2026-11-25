@@ -1,6 +1,6 @@
 [package]
 name = "dromon-testkit"
-description = "The Docker sshd fixture (testcontainers) for Dromon's integration tests"
+description = "The sshd fixture (Docker via testcontainers, or a native sshd) for Dromon's integration tests"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,6 +8,8 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+# `Fixture::home` returns the app's remote path type.
+dromon-core.workspace = true
 # Reading `Fixture::exec`'s output stream (already in the tree through testcontainers).
 futures-util = "0.3"
 hmac.workspace = true
