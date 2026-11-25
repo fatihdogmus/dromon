@@ -420,10 +420,12 @@ fn key_host_trust_list_and_browse() {
     let fingerprint = h.trust_host_key("fx-key");
     assert_eq!(fingerprint, expected, "the sheet shows the server's own fingerprint");
     h.step(&format!("host-key sheet showed {fingerprint} (= ssh-keyscan), trusted"));
-    let known = std::fs::read_to_string(h.dir.path().join("known_hosts")).unwrap();
-    assert!(known.starts_with(&format!("[127.0.0.1]:{} ssh-ed25519 ", h.fx.port())), "{known}");
 
     let home = h.wait_for_listing("/home/key");
+    // Read only now: ssh writes known_hosts a moment after it gets the answer, and once the
+    // folder lists the connection is up, so the file is there (CI once read it too early).
+    let known = std::fs::read_to_string(h.dir.path().join("known_hosts")).unwrap();
+    assert!(known.starts_with(&format!("[127.0.0.1]:{} ssh-ed25519 ", h.fx.port())), "{known}");
     assert!(home.iter().any(|r| r == "fixture"), "{home:?}");
     assert!(!h.shown("sheet"), "connected: the sheet is gone");
     assert_eq!(h.text_of("status-summary"), format!("{} items", home.len()));
