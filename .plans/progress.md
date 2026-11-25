@@ -53,11 +53,18 @@ Tracks where implementation stands against `dromon-plan.md`. Newest first.
   - Windows (`windows` job, after the plain suite): the same image on Docker in WSL2 (`windows-2025` has nested virtualisation; dockerd answers on tcp 2375 via a systemd drop-in, published ports reach Windows through WSL's localhost forwarding). Windows' own `ssh.exe` 9.5 with our named-pipe askpass passes every askpass e2e (host key, password, wrong password, passphrase, keyboard-interactive + TOTP, ProxyJump, publickey,password), SFTP and transfer test. Found on the way: Windows' `ssh-keyscan` gives up on sntrup761 (not used any more); the `docker` CLI over TCP returned no `exec` output (the testkit uses the Docker API); an askpass answer must end in `\n`, not `\r\n`.
   - macOS (`macos` job, after the plain suite): Apple's own `sshd` through the testkit's native backend (users `dromon_*` via `dscl`, root watchdog cleans up). Everything passes except the 3 TOTP tests, which skip (no TOTP PAM module on macOS). Apple-silicon runners can't run Docker (no nested virtualisation).
   - S3 (askpass) is therefore verified with real prompts on Linux, macOS and Windows; S1/S2 (build, ssh + SFTP) on all three in CI.
+  - The app's own end-to-end tests (`e2e.rs`, `transfers_e2e.rs`, `fileops_e2e.rs`: headless UI and the service against the real server) run on all three too, nothing skipped on Windows (key copies get a current-user-only ACL via `copy_private_key`, `NUL` for "no file", the host key's fingerprint read on the server).
+  - Found by running them on macOS: work cut off by a dropped connection could wait forever when the reconnect was handled before the lost task's outcome (two channels, no order); outcomes now carry the sessions they used (`Sftp::same_session`) and run again at once on a replaced session.
+
+- M3 backend:
+  - File operations (`Command::FileOp`: Mkdir, Rename, Delete with progress; `Sftp::remove_all` counts first, never follows links), relisting the folder on screen; `state/ops.rs`.
+  - Copies and moves as transfer jobs (`RemoteCopy`, `Move`, `CrossHostCopy`, `CrossHostMove`): copy-data or streaming, posix-rename with merge on Replace, cross-host move deletes a source only after verifying its copy, then tidies emptied folders.
+  - Fixtures: one folder tree (`fixture/tree.rs`) for transfers and file operations.
 
 **Next**
-1. A first run in a real window on a macOS and a Linux desktop (real GPU, real input, Wayland), and on Windows.
-2. The app's own e2e tests (`e2e.rs`, `transfers_e2e.rs`) are `cfg(unix)`: run them on Windows too.
-3. M3: file operations (new folder, rename, delete, copy/cut/paste, drag to move), then M4.
+1. M3 UI (inline new folder and rename, delete sheet and toast, copy path, clipboard and ⌥⌘V, drag to move, context menus): in progress.
+2. A first run in a real window on a macOS and a Linux desktop (real GPU, real input, Wayland), and on Windows.
+3. M4.
 4. Window frames across launches.
 
 **Service-thread caveats**
