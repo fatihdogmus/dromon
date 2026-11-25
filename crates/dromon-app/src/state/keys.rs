@@ -43,6 +43,8 @@ pub enum FileKey {
     CopyPath,
     /// ⌥⌘V: "Move here".
     MoveHere,
+    /// ⌘R, and F5 on Windows and Linux: list the folder on screen again.
+    Refresh,
 }
 
 impl FileKey {
@@ -56,6 +58,7 @@ impl FileKey {
             FileKey::Cut => F::Cut,
             FileKey::CopyPath => F::CopyPath,
             FileKey::MoveHere => F::RequestPaste { as_move: true },
+            FileKey::Refresh => F::Refresh,
         }
     }
 }
@@ -90,6 +93,8 @@ pub fn shortcut(ev: &KeyEvent, platform: KeyPlatform) -> Option<Shortcut> {
         Key::Command('c') if !m.shift => Shortcut::File(FileKey::Copy),
         Key::Command('x') if !m.shift && !m.alt => Shortcut::File(FileKey::Cut),
         Key::Function(2) if !m.cmd && !m.alt && !m.shift => Shortcut::File(FileKey::Rename),
+        Key::Command('r') if !m.shift && !m.alt => Shortcut::File(FileKey::Refresh),
+        Key::Function(5) if !mac && !m.cmd && !m.alt && !m.shift => Shortcut::File(FileKey::Refresh),
         Key::Backspace if mac && m.cmd && !m.alt && !m.shift => Shortcut::File(FileKey::Delete),
         Key::Delete if !mac && !m.cmd && !m.alt && !m.shift => Shortcut::File(FileKey::Delete),
         Key::Command('[') => Shortcut::Back,
@@ -187,6 +192,9 @@ mod tests {
             assert_eq!(on(Key::Command('c'), alt(primary), p), f(FileKey::CopyPath));
             assert_eq!(on(Key::Command('v'), alt(primary), p), f(FileKey::MoveHere));
             assert_eq!(on(Key::Function(2), NONE, p), f(FileKey::Rename));
+            assert_eq!(on(Key::Command('r'), primary, p), f(FileKey::Refresh));
+            let f5 = if p == KeyPlatform::Mac { None } else { f(FileKey::Refresh) };
+            assert_eq!(on(Key::Function(5), NONE, p), f5, "F5 refreshes on Windows and Linux");
             assert_eq!(on(Key::Command('v'), primary, p), None, "⌘V is the paste handler's");
             assert_eq!(on(Key::Command('n'), primary, p), None, "⌘N is a new window's (M4)");
         }

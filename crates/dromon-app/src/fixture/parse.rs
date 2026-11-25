@@ -352,6 +352,7 @@ fn transfers(v: &Value, at: &At, hosts: &[HostSpec]) -> R<Vec<JobView>> {
             reveal,
             errors: lines("errors")?,
             skipped: lines("skipped")?,
+            folders: Vec::new(),
         });
     }
     Ok(out)

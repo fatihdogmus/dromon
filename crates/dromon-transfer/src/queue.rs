@@ -769,6 +769,7 @@ impl Queue {
             reveal: j.reveal(),
             errors: j.errors.clone(),
             skipped: j.skipped.clone(),
+            folders: j.req.changed_folders(),
         }
     }
 }

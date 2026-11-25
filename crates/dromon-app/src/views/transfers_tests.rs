@@ -24,6 +24,7 @@ fn job(state: TaskState, done: u64, total: u64) -> JobView {
         reveal: None,
         errors: Vec::new(),
         skipped: Vec::new(),
+        folders: Vec::new(),
     }
 }
 

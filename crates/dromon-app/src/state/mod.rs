@@ -376,7 +376,15 @@ impl App {
                     c.log.push((self.wall_ms)(), line);
                 }
             }
-            ServiceEvent::Transfers(jobs) => self.transfers.set(jobs),
+            ServiceEvent::Transfers(jobs) => {
+                // A folder on screen that a job just finished changing is listed again (until
+                // polling, §4.5, the only way to see what a paste, move or upload made).
+                for (host, path) in self.transfers.set(jobs) {
+                    if self.conns.get(&host).is_some_and(|c| c.interactive() && c.cwd == path) {
+                        self.send(Command::List { host, path });
+                    }
+                }
+            }
             ServiceEvent::FileOpProgress { id, host, done, total } => self.ops.progress(id, &host, done, total),
             ServiceEvent::FileOpDone { id, host } => self.ops.done(id, &host),
             ServiceEvent::FileOpFailed { id, host, error } => self.ops.failed(id, &host, error),

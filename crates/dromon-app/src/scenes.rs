@@ -175,6 +175,7 @@ fn job(id: u64, kind: JobKind, host: &str, title: &str, state: TaskState, done: 
         reveal: None,
         errors: Vec::new(),
         skipped: Vec::new(),
+        folders: Vec::new(),
     }
 }
 

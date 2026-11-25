@@ -122,6 +122,24 @@ impl JobRequest {
             JobRequest::Download { .. } => None,
         }
     }
+
+    /// The remote folders the job changes, by host, without repeats: the folder the items go
+    /// into, and for a move the folders they leave. A download changes none.
+    pub fn changed_folders(&self) -> Vec<(HostId, RemotePath)> {
+        let mut out: Vec<(HostId, RemotePath)> = Vec::new();
+        if let Some(into) = self.remote_into() {
+            out.push((self.host().clone(), into.clone()));
+        }
+        if let JobRequest::Move { items, .. } | JobRequest::CrossHostMove { items, .. } = self {
+            for parent in items.iter().filter_map(|i| i.path.parent()) {
+                let at = (self.source_host().clone(), parent);
+                if !out.contains(&at) {
+                    out.push(at);
+                }
+            }
+        }
+        out
+    }
 }
 
 /// One file to copy, decided by a scan. `src` and `dst` are final paths: conflicts have been
@@ -248,6 +266,8 @@ pub struct JobView {
     /// Files that failed, with their errors (the job is `Failed` once nothing else is left).
     pub errors: Vec<String>,
     pub skipped: Vec<String>,
+    /// [`JobRequest::changed_folders`]: the folders to list again once the job is over.
+    pub folders: Vec<(HostId, RemotePath)>,
 }
 
 /// Something to show when a finished row is clicked.

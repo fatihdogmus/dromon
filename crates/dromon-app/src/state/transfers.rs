@@ -63,15 +63,29 @@ pub struct DropHover {
 
 impl Transfers {
     /// A new snapshot from the engine. The open tab follows the newest job when the popover is
-    /// closed, so opening it shows what just started.
-    pub fn set(&mut self, jobs: Vec<JobView>) {
+    /// closed, so opening it shows what just started. Returns the remote folders of the jobs
+    /// that ended with it (finished, failed or cancelled since the last snapshot, or new and
+    /// already over), to be listed again.
+    pub fn set(&mut self, jobs: Vec<JobView>) -> Vec<(HostId, RemotePath)> {
         if !self.open
             && let Some(newest) = jobs.first()
             && self.jobs.first().map(|j| j.id) != Some(newest.id)
         {
             self.tab = if newest.kind.in_uploads_tab() { Tab::Uploads } else { Tab::Downloads };
         }
+        let mut ended: Vec<(HostId, RemotePath)> = Vec::new();
+        for job in jobs.iter().filter(|j| !j.state.is_active()) {
+            let was_active = self.jobs.iter().find(|o| o.id == job.id).is_none_or(|o| o.state.is_active());
+            if was_active {
+                for f in &job.folders {
+                    if !ended.contains(f) {
+                        ended.push(f.clone());
+                    }
+                }
+            }
+        }
         self.jobs = jobs;
+        ended
     }
 
     /// Jobs still queued, preparing, running or paused.

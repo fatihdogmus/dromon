@@ -112,6 +112,7 @@ fn job(id: u64, kind: JobKind, state: TaskState, done: u64, total: u64) -> JobVi
         reveal: None,
         errors: Vec::new(),
         skipped: Vec::new(),
+        folders: Vec::new(),
     }
 }
 

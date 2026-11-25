@@ -695,11 +695,13 @@ fn file_operations_from_the_keyboard() {
     });
     assert!(on_server("-f", "page (1).txt"), "the copy is on the server as “page (1).txt”");
     assert_eq!(fx.exec(&["cat", &format!("{dir}/page (1).txt")]).unwrap(), "hello");
-    h.rt.update(|s, _| {
-        s.act(dromon_app::state::Action::File(dromon_app::state::FileAction::Refresh));
-    });
+    // No refresh: the job's end lists the folder on screen again by itself.
     h.pump_until("the copy listed", |rt| rt.state.conn().is_some_and(|c| c.find("page (1).txt").is_some()));
-    h.step("⌘C ⌘V copied page.txt to “page (1).txt”");
+    h.step("⌘C ⌘V copied page.txt to “page (1).txt”, listed when the job ended");
+    // ⌘R lists it again too (here: nothing changed).
+    h.rt.key(KeyEvent { key: Key::Command('r'), mods: mods(false) });
+    h.settle();
+    h.pump_until("still listed after ⌘R", |rt| rt.state.conn().is_some_and(|c| c.find("page (1).txt").is_some()));
 
     h.click("rows/renamed");
     if cfg!(target_os = "macos") {

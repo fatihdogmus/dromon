@@ -53,6 +53,7 @@ fn job(id: u64, kind: JobKind, state: TaskState, done: u64, total: u64) -> JobVi
         reveal: None,
         errors: Vec::new(),
         skipped: Vec::new(),
+        folders: Vec::new(),
     }
 }
 
@@ -309,4 +310,47 @@ fn closing_with_transfers_running_asks_first() {
     assert_eq!(s.act(Action::QuitAnyway), [Effect::CloseWindow]);
     assert!(!s.ui.confirm_quit);
     assert!(s.close_requested());
+}
+
+#[test]
+fn the_folder_on_screen_is_listed_again_when_a_job_changing_it_ends() {
+    let (mut s, rec) = connected();
+    let lists = |rec: &Recorder| rec.sent().iter().filter(|c| matches!(c, Command::List { .. })).count();
+    let site = (prod(), RemotePath::new(SITE));
+    let elsewhere = (prod(), RemotePath::new("/srv/other"));
+    let with = |id, state, folders: Vec<(HostId, RemotePath)>| JobView { folders, ..job(id, JobKind::Move, state, 0, 1) };
+
+    // Running, then done: one listing, when it ends.
+    s.apply(ServiceEvent::Transfers(vec![with(1, TaskState::Running, vec![elsewhere.clone(), site.clone()])]));
+    assert_eq!(lists(&rec), 0);
+    s.apply(ServiceEvent::Transfers(vec![with(1, TaskState::Done, vec![elsewhere.clone(), site.clone()])]));
+    assert_eq!(rec.sent().last(), Some(&Command::List { host: prod(), path: RemotePath::new(SITE) }));
+    assert_eq!(lists(&rec), 1, "only the folder on screen");
+    // Seen again (another job moved on): nothing more.
+    s.apply(ServiceEvent::Transfers(vec![with(1, TaskState::Done, vec![site.clone()])]));
+    assert_eq!(lists(&rec), 1);
+    // A job that is over in its first snapshot (failed, or fast) counts as ending.
+    s.apply(ServiceEvent::Transfers(vec![with(2, TaskState::Failed { error: "x".into() }, vec![site.clone()])]));
+    assert_eq!(lists(&rec), 2);
+    // Another folder, or a download (no remote folders), lists nothing.
+    s.apply(ServiceEvent::Transfers(vec![with(3, TaskState::Done, vec![elsewhere])]));
+    s.apply(ServiceEvent::Transfers(vec![job(4, JobKind::Download, TaskState::Done, 1, 1)]));
+    assert_eq!(lists(&rec), 2);
+}
+
+#[test]
+fn changed_folders_are_the_destination_and_for_moves_the_sources() {
+    let item = |p: &str| RemoteItem { path: RemotePath::new(p), kind: EntryKind::File, size: 1 };
+    let (a, b) = (prod(), HostId("nas".into()));
+    let into = RemotePath::new("/dst");
+    let items = vec![item("/src/one"), item("/src/two"), item("/other/three")];
+    let copy = JobRequest::RemoteCopy { host: a.clone(), items: items.clone(), into: into.clone() };
+    assert_eq!(copy.changed_folders(), [(a.clone(), into.clone())]);
+    let moving = JobRequest::CrossHostMove { from: a.clone(), items: items.clone(), to: b.clone(), into: into.clone() };
+    assert_eq!(
+        moving.changed_folders(),
+        [(b.clone(), into.clone()), (a.clone(), RemotePath::new("/src")), (a.clone(), RemotePath::new("/other"))]
+    );
+    let download = JobRequest::Download { host: a, items, into: PathBuf::from("/tmp") };
+    assert!(download.changed_folders().is_empty());
 }
