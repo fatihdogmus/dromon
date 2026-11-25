@@ -432,6 +432,9 @@ impl Backend for FixtureBackend {
                 Some(host) => self.drive(&host, Work::Answer(answer), &mut out),
                 None => wipe(answer),
             },
+            // Fixtures don't simulate transfers yet: jobs stay as the fixture's `transfers`
+            // (M2 UI) put them.
+            Command::Transfer(_) => {}
         }
         out
     }

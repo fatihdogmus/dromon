@@ -22,6 +22,7 @@ mod fmt;
 #[allow(dead_code)]
 mod icons;
 mod persist;
+mod reveal;
 mod scenes;
 pub mod service;
 pub mod state;
@@ -161,6 +162,11 @@ pub fn run() {
             None => HostDirectory::default(),
         };
         let mut app = App::new(hosts, now_secs(), Box::new(backend));
+        // The user's Downloads folder (XDG_DOWNLOAD_DIR on Linux), else the home folder.
+        let dirs = rune::dirs::AppDirs::new(persist::APP_ID);
+        if let Some(dir) = dirs.as_ref().and_then(|d| d.downloads().or(d.home())) {
+            app.downloads = dir.to_path_buf();
+        }
         if let Some((saved, prefs)) = remembered {
             app.remember(saved, Box::new(persist::PrefsWriter::spawn(prefs)));
         }

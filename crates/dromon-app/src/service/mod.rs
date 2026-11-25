@@ -219,6 +219,8 @@ fn dispatch<S: Sink>(cmd: Command, known: &HashMap<HostId, HostSpec>, conns: &mu
                 None => auth::wipe(answer),
             }
         }
+        // The transfer engine joins the service next (M2); until then nothing runs.
+        Command::Transfer(_) => {}
     }
 }
 

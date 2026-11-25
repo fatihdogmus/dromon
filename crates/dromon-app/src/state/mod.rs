@@ -12,11 +12,13 @@ pub mod prefs;
 pub mod selection;
 pub mod service;
 pub mod sheets;
+pub mod transfers;
 
 #[cfg(test)]
 mod tests;
 
 use std::collections::{BTreeMap, VecDeque};
+use std::path::PathBuf;
 
 use dromon_core::{ConnStatus, HostId, HostSource, RemotePath, SortKey};
 use rune::TextEdit;
@@ -28,8 +30,11 @@ pub use prefs::{NoStore, Saved, Store};
 pub use selection::{Selection, TypeSelect};
 #[cfg(test)]
 pub use service::Recorder;
-pub use service::{Backend, Command, ServiceEvent, Silent};
+pub use service::{Backend, Command, ServiceEvent, Silent, TransferCommand};
 pub use sheets::{Sheet, Sheets};
+pub use transfers::{Tab, Transfers};
+
+use dromon_transfer::{ConflictChoice, JobId};
 
 use crate::theme::{Appearance, size};
 
@@ -82,6 +87,10 @@ pub struct App {
     /// What's remembered between launches, and where changes go ([`App::remember`]).
     pub saved: Saved,
     store: Box<dyn Store>,
+    /// The transfer engine's jobs and the popover.
+    pub transfers: Transfers,
+    /// Where downloads go (§3.5: Downloads, or the folder set in Settings).
+    pub downloads: PathBuf,
     inbox: VecDeque<ServiceEvent>,
 }
 
@@ -89,7 +98,7 @@ pub struct App {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     SelectHost(HostId),
-    /// Double-click or Return on a row: navigate into folders (files will download in M2).
+    /// Double-click or Return on a row: navigate into a folder, download a file.
     Open(String),
     OpenSelection,
     GoUp,
@@ -122,6 +131,23 @@ pub enum Action {
     OpenLog,
     /// Close a connection and forget its remembered secrets.
     Disconnect(HostId),
+    /// ⌘D or the context menu: download the selected rows (or the cursor's).
+    Download,
+    /// Files dropped or pasted from Finder/Explorer: upload them into the folder on screen, or
+    /// into its subfolder `folder` (dropped on a folder row).
+    Upload { paths: Vec<PathBuf>, folder: Option<String> },
+    /// A transfer row's buttons: pause, resume, cancel, retry, clear finished.
+    Transfer(TransferCommand),
+    /// The conflict sheet's buttons, for the clash on screen.
+    ResolveConflict(ConflictChoice),
+    /// The conflict sheet's "Apply to all".
+    ToggleApplyAll,
+    /// The toolbar's transfers button.
+    ToggleTransfers,
+    TransfersTab(Tab),
+    /// A click on a finished row: show the file in Finder/Explorer, or the folder it was
+    /// uploaded to.
+    RevealTransfer(JobId),
 }
 
 /// What an action asks the view layer to do afterwards.
@@ -133,6 +159,8 @@ pub enum Effect {
     ScrollTop,
     /// Hand the keyboard back from the filter field to the list.
     Blur,
+    /// Show this local file in Finder/Explorer (selected in its folder).
+    ShowInFolder(PathBuf),
 }
 
 impl App {
@@ -149,6 +177,9 @@ impl App {
             wall_ms: system_ms,
             saved: Saved::default(),
             store: Box::new(NoStore),
+            transfers: Transfers::default(),
+            // `run` puts the user's real Downloads folder here; scenes and tests keep this.
+            downloads: PathBuf::from("Downloads"),
             inbox: VecDeque::new(),
         }
     }
@@ -305,6 +336,7 @@ impl App {
                     c.log.push((self.wall_ms)(), line);
                 }
             }
+            ServiceEvent::Transfers(jobs) => self.transfers.set(jobs),
         }
     }
 
@@ -402,6 +434,10 @@ impl App {
                 }
             }
             Action::Escape => {
+                if self.transfers.open {
+                    self.transfers.open = false;
+                    return fx;
+                }
                 if self.conn().is_some_and(|c| c.filter.is_on()) {
                     return self.act(Action::CloseFilter);
                 }
@@ -436,6 +472,14 @@ impl App {
                     self.send(Command::Disconnect { host });
                 }
             }
+            Action::Download
+            | Action::Upload { .. }
+            | Action::Transfer(_)
+            | Action::ResolveConflict(_)
+            | Action::ToggleApplyAll
+            | Action::ToggleTransfers
+            | Action::TransfersTab(_)
+            | Action::RevealTransfer(_) => self.transfer_action(action, &mut fx),
         }
         fx
     }
@@ -483,13 +527,25 @@ impl App {
         if e.kind.is_dir_like() {
             let path = c.cwd.join(name);
             self.navigate(path, Nav::Visit, fx);
+        } else {
+            let names = vec![name.to_owned()];
+            self.download(&names);
         }
     }
 
     fn navigate(&mut self, path: RemotePath, how: Nav, fx: &mut Vec<Effect>) {
+        self.navigate_selecting(path, how, None, fx);
+    }
+
+    /// [`App::navigate`], selecting the row `select` once the folder lists. Set before the
+    /// listing is asked for, since a backend may answer at once.
+    fn navigate_selecting(&mut self, path: RemotePath, how: Nav, select: Option<&str>, fx: &mut Vec<Effect>) {
         let Some(c) = self.conn_mut() else { return };
         if !c.interactive() || !c.go(path, how) {
             return;
+        }
+        if let Some(name) = select {
+            c.reveal_after(name);
         }
         c.fallback = None;
         let (host, path) = (c.host.clone(), c.cwd.clone());

@@ -41,6 +41,12 @@ pub fn effect(fx: Effect, tx: &mut Tx) {
         Effect::Reveal(name) => tx.scroll_into_view_in(ROWS, name),
         Effect::ScrollTop => tx.scroll_to_y(LIST, 0.0),
         Effect::Blur => tx.blur(),
+        // Never from tests or headless runs (`--snap`, `--script`): no file manager there.
+        Effect::ShowInFolder(path) => {
+            if !cfg!(test) && rune::tooling::headless_run().is_none() {
+                crate::reveal::show_in_folder(path);
+            }
+        }
     }
 }
 

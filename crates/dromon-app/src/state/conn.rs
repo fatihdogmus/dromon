@@ -228,6 +228,12 @@ impl ConnView {
         true
     }
 
+    /// Selects `name` once the listing in flight arrives (an uploaded file, shown from the
+    /// transfers popover).
+    pub fn reveal_after(&mut self, name: &str) {
+        self.reveal = Some(name.to_owned());
+    }
+
     /// Back: true when there was somewhere to go (and it needs a listing).
     pub fn back(&mut self) -> bool {
         match self.history.back(self.cwd.clone()) {

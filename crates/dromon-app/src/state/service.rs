@@ -11,6 +11,7 @@
 //! [`PromptAnswer`], whose `Debug` is redacted. Events never carry secrets.
 
 use dromon_core::{ConnStatus, Entry, Error, HostId, HostSpec, Prompt, PromptAnswer, PromptId, RemotePath};
+use dromon_transfer::{ConflictChoice, JobId, JobRequest, JobView, TaskState};
 
 /// What the UI asks of the service.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -24,10 +25,26 @@ pub enum Command {
     Disconnect { host: HostId },
     /// The user's answer to the open prompt `id`. Answers to prompts that are gone are ignored.
     AnswerPrompt { id: PromptId, answer: PromptAnswer },
+    /// Something for the transfer engine; answered with `Transfers` snapshots.
+    Transfer(TransferCommand),
+}
+
+/// What the UI asks of the transfer engine (§4.6). Unknown or finished job ids are ignored.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TransferCommand {
+    Start(JobRequest),
+    Pause(JobId),
+    Resume(JobId),
+    Cancel(JobId),
+    Retry(JobId),
+    /// The answer to the job's name clash (`JobView::conflict`).
+    Resolve { job: JobId, choice: ConflictChoice, apply_all: bool },
+    /// Forget finished, failed and cancelled jobs.
+    ClearFinished,
 }
 
 /// What the service tells the UI.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ServiceEvent {
     /// The hosts in the user's ssh config: replaces the sidebar's SSH Config section.
     Hosts(Vec<HostSpec>),
@@ -48,6 +65,9 @@ pub enum ServiceEvent {
     /// One line for the host's connection log: ssh's stderr or our own lifecycle notes.
     /// Never contains secrets.
     Log { host: HostId, line: String },
+    /// Every transfer job, newest first: replaces the list. Sent when something changed, at
+    /// most about ten times a second while bytes move.
+    Transfers(Vec<JobView>),
 }
 
 /// Set to `1` to have [`super::App::apply`] write one [`trace_line`] per event to stderr.
@@ -84,6 +104,11 @@ pub fn trace_line(ev: &ServiceEvent) -> String {
         ServiceEvent::Prompt(p) => format!("Prompt host={} id={}", p.host, p.id.0),
         ServiceEvent::PromptClosed(id) => format!("PromptClosed id={}", id.0),
         ServiceEvent::Log { host, .. } => format!("Log host={host}"),
+        ServiceEvent::Transfers(jobs) => {
+            let active = jobs.iter().filter(|j| j.state.is_active()).count();
+            let done = jobs.iter().filter(|j| j.state == TaskState::Done).count();
+            format!("Transfers jobs={} active={active} done={done}", jobs.len())
+        }
     }
 }
 
