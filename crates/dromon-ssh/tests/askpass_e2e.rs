@@ -1,18 +1,18 @@
-//! Spike S3 on Linux, end to end: the real system `ssh`, launched exactly as Dromon launches it
-//! (`SshCommand::sftp` + `spawn`), sends every prompt through the askpass helper binary to an
-//! `AskpassServer`; the test answers them with `classify_prompt` + `AuthAttempt` +
-//! `PasswordStore` as the service thread will, and ends in a working `Sftp` session.
+//! Spike S3 end to end: the real system `ssh` (`ssh_program()`: on Windows the inbox OpenSSH),
+//! launched exactly as Dromon launches it (`SshCommand::sftp` + `spawn`), sends every prompt
+//! through the askpass helper binary to an `AskpassServer` (a Unix socket, on Windows a named
+//! pipe); the test answers them with `classify_prompt` + `AuthAttempt` + `PasswordStore` as the
+//! service thread will, and ends in a working `Sftp` session.
 //!
 //! Uses the Docker sshd fixture (`tests/docker/`, started by `dromon-testkit`, one container for
 //! this test binary; users and credentials: `tests/docker/Dockerfile`). Runs whenever Docker is
 //! reachable; otherwise each test prints a skip line and passes (fails with
-//! `DROMON_REQUIRE_DOCKER=1`).
+//! `DROMON_REQUIRE_DOCKER=1`). On Windows that is a Linux Docker named by `DOCKER_HOST` (CI:
+//! Docker in WSL2, `tests/docker/README.md`).
 //!
 //! Isolation from the developer's own ssh setup, test-only: a per-test ssh config passed with
 //! `-F` (so `~/.ssh/config` and `/etc/ssh/ssh_config` are not read) pointing at a per-test
 //! `known_hosts`, `IdentitiesOnly yes`, and `SSH_AUTH_SOCK` removed from ssh's environment.
-
-#![cfg(unix)]
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -26,8 +26,8 @@ use dromon_ssh::{
     WRONG_PASSWORD, WRONG_SIGN_IN, classify_prompt, password_identity, spawn,
 };
 use dromon_testkit::{
-    ENCRYPTED_KEY_COMMENT, PASSPHRASE, PASSWORD, USER_ENCRYPTED_KEY, USER_KBD, USER_KEY, USER_KEY_THEN_PASSWORD,
-    USER_PASSWORD, totp_now, wrong_totp,
+    NULL_DEVICE, PASSPHRASE, PASSWORD, USER_ENCRYPTED_KEY, USER_KBD, USER_KEY, USER_KEY_THEN_PASSWORD, USER_PASSWORD,
+    openssh, totp_now, wrong_totp,
 };
 use secrecy::ExposeSecret;
 use tokio::sync::mpsc;
@@ -39,9 +39,29 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
 const ASKPASS_EXEC_LINE: &str = "read_passphrase: requested to askpass";
 
 /// An absolute path without `..` or symlinks, as ssh will print it in prompts.
+#[cfg(unix)]
 fn key_file(path: &Path) -> String {
     let path = std::fs::canonicalize(path).expect("fixture key");
     path.to_str().unwrap().to_owned()
+}
+
+/// An absolute path, as ssh will print it in prompts. Not `canonicalize`: on Windows it returns
+/// a `\\?\C:\…` verbatim path, which ssh can't read back from a config value.
+#[cfg(windows)]
+fn key_file(path: &Path) -> String {
+    let path = std::path::absolute(path).expect("fixture key");
+    path.to_str().unwrap().to_owned()
+}
+
+/// This test's askpass endpoint: a socket in its own folder, on Windows a fresh named pipe.
+#[cfg(unix)]
+fn bind_askpass(tmp: &Path) -> AskpassServer {
+    AskpassServer::bind_in(&tmp.join("rt")).unwrap()
+}
+
+#[cfg(windows)]
+fn bind_askpass(_tmp: &Path) -> AskpassServer {
+    AskpassServer::bind().unwrap()
 }
 
 fn text(s: &str) -> PromptAnswer {
@@ -103,7 +123,7 @@ impl Fixture {
     async fn new(name: &'static str) -> Option<Fixture> {
         let sshd = dromon_testkit::fixture(name).await?;
         let tmp = tempfile::tempdir().unwrap();
-        let mut server = AskpassServer::bind_in(&tmp.path().join("rt")).unwrap();
+        let mut server = bind_askpass(tmp.path());
         let requests = server.take_requests().unwrap();
         Some(Fixture { name, sshd, tmp, server, requests, store: PasswordStore::new(), connections: 0 })
     }
@@ -148,7 +168,7 @@ impl Fixture {
         let known_hosts = self.known_hosts();
         for line in [
             &format!("UserKnownHostsFile {}", known_hosts.display()) as &str,
-            "GlobalKnownHostsFile /dev/null",
+            &format!("GlobalKnownHostsFile {NULL_DEVICE}"),
             "StrictHostKeyChecking ask",
             "UpdateHostKeys no",
             "HashKnownHosts no",
@@ -162,13 +182,13 @@ impl Fixture {
         path
     }
 
-    /// The encrypted fixture key, copied (with its `.pub`, mode kept) to a short path in this
-    /// test's folder: ssh cuts the path in its passphrase prompt at 100 bytes (`%.100s`), and
-    /// the temp folder's path may be longer.
+    /// The encrypted fixture key, copied (with its `.pub`; still private to us) to a short path
+    /// in this test's folder: ssh cuts the path in its passphrase prompt at 100 bytes
+    /// (`%.100s`), and the temp folder's path may be longer.
     fn encrypted_key(&self) -> String {
         let src = PathBuf::from(key_file(&self.sshd.encrypted_key()));
         let dst = self.tmp.path().join("id_ed25519_enc");
-        std::fs::copy(&src, &dst).unwrap();
+        dromon_testkit::copy_private_key(&src, &dst).unwrap();
         std::fs::copy(src.with_extension("pub"), dst.with_extension("pub")).unwrap();
         let path = dst.to_str().unwrap().to_owned();
         assert!(path.len() <= 100, "{path}");
@@ -259,7 +279,7 @@ fn on_stderr_line(line: &str, attempt: &mut AuthAttempt, store: &mut PasswordSto
 
 /// The fixture's host key fingerprint, from `ssh-keyscan` and `ssh-keygen -l`.
 async fn fixture_fingerprint(dir: &Path, port: u16) -> String {
-    let scan = tokio::process::Command::new("ssh-keyscan")
+    let scan = tokio::process::Command::new(openssh("ssh-keyscan"))
         .args(["-t", "ed25519", "-p", &port.to_string(), "127.0.0.1"])
         .output()
         .await
@@ -267,7 +287,8 @@ async fn fixture_fingerprint(dir: &Path, port: u16) -> String {
     assert!(scan.status.success() && !scan.stdout.is_empty(), "{}", String::from_utf8_lossy(&scan.stderr));
     let file = dir.join("keyscan");
     std::fs::write(&file, &scan.stdout).unwrap();
-    let out = tokio::process::Command::new("ssh-keygen").args(["-l", "-E", "sha256", "-f"]).arg(&file).output().await.unwrap();
+    let out =
+        tokio::process::Command::new(openssh("ssh-keygen")).args(["-l", "-E", "sha256", "-f"]).arg(&file).output().await.unwrap();
     assert!(out.status.success());
     // `256 SHA256:… [127.0.0.1]:<port> (ED25519)`
     let line = String::from_utf8(out.stdout).unwrap();
@@ -611,8 +632,15 @@ async fn encrypted_key_wrong_passphrase_then_right() {
 }
 
 /// A real `SSH_ASKPASS_PROMPT=confirm` question: `AddKeysToAgent ask` with a private agent.
+///
+/// Unix only: it needs a throwaway agent of its own (`ssh-agent -D -a <socket>`). Win32-OpenSSH's
+/// ssh-agent is the per-machine `ssh-agent` service on the fixed pipe
+/// `\\.\pipe\openssh-ssh-agent`, so on Windows the key would land in the user's real agent.
+#[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
 async fn add_key_to_agent_is_a_confirm_prompt() {
+    use dromon_testkit::ENCRYPTED_KEY_COMMENT;
+
     let Some(mut f) = Fixture::new("add_key_to_agent_is_a_confirm_prompt").await else { return };
     let sock = f.tmp.path().join("agent.sock");
     let _agent = tokio::process::Command::new("ssh-agent")

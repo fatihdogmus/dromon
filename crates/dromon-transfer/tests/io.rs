@@ -1,8 +1,9 @@
 //! `dromon_transfer::io` against the Docker sshd fixture (`tests/docker/`, started by
 //! `dromon-testkit`): scans, downloads and uploads with part files, resume, cancel, mtimes and
-//! name clashes. Each test opens its own `ssh -s … sftp` child, uses its own scratch folder on
-//! the server and a temp folder locally. Without Docker each test prints a skip line and passes
-//! (fails with `DROMON_REQUIRE_DOCKER=1`). The 256 MiB throughput test is `#[ignore]`:
+//! name clashes. Each test opens its own `ssh -s … sftp` child (`openssh("ssh")`, on Windows
+//! the inbox OpenSSH), uses its own scratch folder on the server and a temp folder locally.
+//! Without Docker each test prints a skip line and passes (fails with
+//! `DROMON_REQUIRE_DOCKER=1`). The 256 MiB throughput test is `#[ignore]`:
 //! `cargo test -p dromon-transfer --test io -- --ignored --nocapture`.
 
 use std::path::{Path, PathBuf};
@@ -10,7 +11,7 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use dromon_core::{EntryKind, Error, RemotePath};
 use dromon_sftp::{Sftp, WriteMode};
-use dromon_testkit::{Fixture, USER_KEY};
+use dromon_testkit::{Fixture, USER_KEY, file_sha1, openssh};
 use dromon_transfer::io::{
     CopyOptions, create_dirs, download, free_remote_name, remote_kind, remove_part, scan_local, scan_remote,
     upload,
@@ -31,7 +32,7 @@ struct Conn {
 
 async fn connect(test: &str) -> Option<Conn> {
     let fixture = dromon_testkit::fixture(test).await?;
-    let mut ssh = Command::new("ssh")
+    let mut ssh = Command::new(openssh("ssh"))
         .args(fixture.ssh_options())
         .args(["-s", &fixture.destination(USER_KEY), "sftp"])
         .stdin(std::process::Stdio::piped())
@@ -103,19 +104,15 @@ fn random_remote(fixture: &Fixture, path: &RemotePath, len: u64) {
     fixture.exec(&["sh", "-c", &script]).unwrap();
 }
 
+/// SHA-1 from `sha1sum` in the container, so the check doesn't go through SFTP.
 fn sha_remote(fixture: &Fixture, path: &RemotePath) -> String {
-    let out = fixture.exec(&["sha256sum", path.as_str()]).unwrap();
+    let out = fixture.exec(&["sha1sum", path.as_str()]).unwrap();
     out.split_whitespace().next().unwrap().to_owned()
 }
 
-/// `sha256sum` on Linux, `shasum -a 256` where coreutils' tool is missing (older macOS).
+/// SHA-1 computed here (no hashing tool needed on the host, Windows included).
 fn sha_local(path: &Path) -> String {
-    let out = match std::process::Command::new("sha256sum").arg(path).output() {
-        Ok(out) => out,
-        Err(_) => std::process::Command::new("shasum").args(["-a", "256"]).arg(path).output().unwrap(),
-    };
-    assert!(out.status.success());
-    String::from_utf8(out.stdout).unwrap().split_whitespace().next().unwrap().to_owned()
+    file_sha1(path).unwrap()
 }
 
 /// The engine runs these in spawned tasks, so their futures must be `Send` (checked at compile
@@ -603,7 +600,7 @@ fn scp_args(fixture: &Fixture) -> Vec<String> {
 
 async fn scp(fixture: &Fixture, from: &str, to: &str) -> Duration {
     let start = Instant::now();
-    let status = Command::new("scp").args(scp_args(fixture)).args(["-q", from, to]).status().await.unwrap();
+    let status = Command::new(openssh("scp")).args(scp_args(fixture)).args(["-q", from, to]).status().await.unwrap();
     assert!(status.success(), "scp {from} {to}");
     start.elapsed()
 }

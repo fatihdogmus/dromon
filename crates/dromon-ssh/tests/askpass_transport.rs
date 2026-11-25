@@ -178,6 +178,32 @@ async fn real_helper_process_answers() {
     eprintln!("helper process start to request: {to_request:?}");
 }
 
+/// The answer ends in a bare `\n`, on Windows too: Windows' OpenSSH keeps a `\r` as part of the
+/// answer, so `yes\r\n` to the host-key question loops on "Please type 'yes', 'no' or the
+/// fingerprint" (seen on the windows-2025 runner).
+#[tokio::test(flavor = "multi_thread")]
+async fn helper_answer_has_no_carriage_return() {
+    let (server, mut requests) = bind();
+    let env = server.register(HostId("prod".into()), Path::new(HELPER)).unwrap();
+    let prompt = "Are you sure you want to continue connecting (yes/no/[fingerprint])? ";
+    let child = tokio::process::Command::new(HELPER)
+        .arg(prompt)
+        .env("DROMON_ASKPASS_ENDPOINT", &env.endpoint)
+        .env("DROMON_ASKPASS_TOKEN", &env.token)
+        .env_remove("SSH_ASKPASS_PROMPT")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let req = next_request(&mut requests).await;
+    assert_eq!((req.prompt.as_str(), req.hint.as_deref()), (prompt, None));
+    req.reply.send(PromptAnswer::Text("yes".into())).unwrap();
+    let out = child.wait_with_output().await.unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert!(!out.stdout.contains(&b'\r'), "{:?}", String::from_utf8_lossy(&out.stdout));
+    assert_eq!(out.stdout, b"yes\n");
+}
+
 /// The `ssh-keygen` next to the `ssh` Dromon runs (Windows: the inbox OpenSSH if present).
 fn ssh_keygen() -> PathBuf {
     ssh_program().with_file_name(if cfg!(windows) { "ssh-keygen.exe" } else { "ssh-keygen" })

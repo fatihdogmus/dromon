@@ -6,6 +6,10 @@ name: CI
 #   --script flows rendered as artifacts for review.
 # - macos, windows: the test suite (the Docker fixture tests skip: no Linux containers there)
 #   and the headless smoke.
+# - windows-docker: the Docker sshd fixture tests of the library crates on Windows, with
+#   Windows' own OpenSSH and the named-pipe askpass, against the same Linux image: Docker runs in
+#   WSL2 (Ubuntu 24.04) and answers on tcp://127.0.0.1:2375; the ports its containers publish on
+#   127.0.0.1 reach Windows through WSL's localhost forwarding.
 
 on:
   push:
@@ -127,3 +131,61 @@ jobs:
         continue-on-error: true
         timeout-minutes: 5
         run: bash scripts/smoke-app.sh
+
+  windows-docker:
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: Vampire/setup-wsl@4c48163d9f981914dd8caa0fc335fe19cca5bff4 # v7.2.0
+        with:
+          distribution: Ubuntu-24.04
+          wsl-version: 2
+          additional-packages: docker.io docker-buildx
+      # WSL stops an idle distro, and dockerd with it.
+      - name: Keep the distro running
+        shell: pwsh
+        run: Start-Process -WindowStyle Hidden wsl.exe -ArgumentList '-d','Ubuntu-24.04','-u','root','--','sleep','infinity'
+      # Linux-side steps run through wsl-bash: scripts passed from pwsh to wsl keep CRLF endings.
+      # docker.io's systemd unit owns dockerd, so the TCP listener comes from a drop-in.
+      - name: dockerd on tcp 2375 too (systemd drop-in)
+        shell: wsl-bash {0}
+        run: |
+          set -eux
+          mkdir -p /etc/systemd/system/docker.service.d
+          printf '[Service]\nExecStart=\nExecStart=/usr/bin/dockerd -H fd:// -H tcp://0.0.0.0:2375 --containerd=/run/containerd/containerd.sock\n' > /etc/systemd/system/docker.service.d/tcp.conf
+          systemctl daemon-reload
+          systemctl restart docker
+      - name: Linux Docker answers from Windows
+        shell: pwsh
+        run: |
+          $deadline = (Get-Date).AddSeconds(60)
+          while ($true) {
+            try {
+              $v = Invoke-RestMethod -TimeoutSec 5 http://127.0.0.1:2375/version
+              if ($v.Os -eq 'linux') { "Docker $($v.Version) ($($v.Os)/$($v.Arch)) on 127.0.0.1:2375"; break }
+            } catch {}
+            if ((Get-Date) -gt $deadline) { throw 'no Linux Docker on http://127.0.0.1:2375 after 60 s' }
+            Start-Sleep -Seconds 2
+          }
+      - name: Rust toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: windows-docker
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # dromon-app's end-to-end tests are Unix-only for now.
+      - name: Tests (Docker sshd fixture in WSL2, Windows' OpenSSH)
+        env:
+          DOCKER_HOST: tcp://127.0.0.1:2375
+          # Fail, don't skip, when the sshd fixture can't start.
+          DROMON_REQUIRE_DOCKER: "1"
+        run: cargo test --locked -p dromon-testkit -p dromon-ssh -p dromon-sftp -p dromon-transfer
+      - name: Docker state
+        if: failure()
+        shell: wsl-bash {0}
+        run: |
+          docker ps -a
+          docker image ls

@@ -1,8 +1,9 @@
 //! Integration tests against the Docker sshd fixture (`tests/docker/`, started by
 //! `dromon-testkit`, one container for this test binary). They run whenever Docker is reachable;
 //! otherwise each test prints a skip line and passes (fails with `DROMON_REQUIRE_DOCKER=1`).
-//! Each test opens its own `ssh -s … sftp` child, exactly as the app will. The 1 GiB S4 test is
-//! `#[ignore]`: `cargo test -p dromon-sftp -- --ignored`.
+//! Each test opens its own `ssh -s … sftp` child with the ssh the app runs (`ssh_program()`, on
+//! Windows the inbox OpenSSH). The 1 GiB S4 test is `#[ignore]`:
+//! `cargo test -p dromon-sftp -- --ignored`.
 
 use std::time::{Duration, Instant};
 
@@ -23,7 +24,7 @@ struct Conn {
 
 async fn connect(test: &str) -> Option<Conn> {
     let fixture = dromon_testkit::fixture(test).await?;
-    let mut ssh = Command::new("ssh")
+    let mut ssh = Command::new(dromon_ssh::ssh_program())
         .args(fixture.ssh_options())
         .args(["-s", &fixture.destination(USER_KEY), "sftp"])
         .stdin(std::process::Stdio::piped())

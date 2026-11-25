@@ -24,6 +24,10 @@
 //!
 //! Debugging: `DROMON_FIXTURE_KEEP=1` skips the lifeline, so the container (and the key folder)
 //! outlive the tests; the start line prints the port, key folder and the `docker rm -f` command.
+//!
+//! Windows: the same Linux image, on a Linux Docker named by `DOCKER_HOST` (CI: Docker in WSL2
+//! on `tcp://127.0.0.1:2375`; WSL forwards the published 127.0.0.1 ports to Windows). The ssh
+//! tools are the inbox OpenSSH ([`openssh`]) and the null device is `NUL` ([`NULL_DEVICE`]).
 
 use std::fmt;
 use std::io::{Read as _, Write as _};
@@ -76,6 +80,8 @@ pub const KEEP_ENV: &str = "DROMON_FIXTURE_KEEP";
 pub const IMAGE_NAME: &str = "dromon-testkit-sshd";
 /// Label on every fixture container; its value is the test process id.
 pub const LABEL: &str = "dev.dromon.testkit.pid";
+/// The file ssh options name to read or write nothing: `/dev/null`, on Windows `NUL`.
+pub const NULL_DEVICE: &str = if cfg!(windows) { "NUL" } else { "/dev/null" };
 
 const CONTEXT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/docker");
 /// Everything the Dockerfile uses (README.md is not part of the image).
@@ -174,12 +180,12 @@ impl Fixture {
     /// the developer's ssh config, known hosts and agent keys: add `destination` and a command
     /// or `-s … sftp`.
     pub fn ssh_options(&self) -> Vec<String> {
-        let mut args: Vec<String> = ["-T", "-x", "-e", "none", "-F", "/dev/null"].map(String::from).into();
+        let mut args: Vec<String> = ["-T", "-x", "-e", "none", "-F", NULL_DEVICE].map(String::from).into();
         for option in [
             "BatchMode=yes",
             "StrictHostKeyChecking=no",
-            "UserKnownHostsFile=/dev/null",
-            "GlobalKnownHostsFile=/dev/null",
+            &format!("UserKnownHostsFile={NULL_DEVICE}"),
+            &format!("GlobalKnownHostsFile={NULL_DEVICE}"),
             "LogLevel=ERROR",
             "IdentitiesOnly=yes",
             "ConnectTimeout=10",
@@ -226,7 +232,7 @@ impl Fixture {
                     "set -e; f={BIG_FILE}; [ \"$(stat -c %s $f 2>/dev/null || echo 0)\" = {BIG_FILE_SIZE} ] && exit 0; \
                      mkdir -p \"${{f%/*}}\"; head -c {BIG_FILE_SIZE} /dev/urandom >\"$f.tmp\"; mv \"$f.tmp\" \"$f\""
                 );
-                let out = tokio::process::Command::new("ssh")
+                let out = tokio::process::Command::new(openssh("ssh"))
                     .args(self.ssh_options())
                     .arg(self.destination(USER_KEY))
                     .arg(script)
@@ -246,6 +252,66 @@ impl Fixture {
         }
         BIG_FILE
     }
+}
+
+/// An OpenSSH client tool (`ssh`, `ssh-keygen`, `ssh-keyscan`, `scp`): on Windows the inbox
+/// OpenSSH's `C:\Windows\System32\OpenSSH\<name>.exe` when present (the folder of
+/// `dromon_ssh::ssh_program`), else `<name>.exe` from `PATH`; elsewhere `<name>` from `PATH`.
+pub fn openssh(name: &str) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let inbox = Path::new(r"C:\Windows\System32\OpenSSH").join(format!("{name}.exe"));
+        if inbox.is_file() {
+            return inbox;
+        }
+        PathBuf::from(format!("{name}.exe"))
+    }
+    #[cfg(not(windows))]
+    PathBuf::from(name)
+}
+
+/// Copies a private key so ssh still accepts the copy. Unix keeps the 0600 mode. On Windows the
+/// copy would get its folder's inherited ACL, and Win32-OpenSSH refuses a key other users may
+/// read ("UNPROTECTED PRIVATE KEY FILE"), so the copy's ACL becomes the current user alone.
+pub fn copy_private_key(src: &Path, dst: &Path) -> Result<(), String> {
+    std::fs::copy(src, dst).map_err(|e| format!("copy {} to {}: {e}", src.display(), dst.display()))?;
+    #[cfg(windows)]
+    restrict_to_current_user(dst)?;
+    Ok(())
+}
+
+/// `icacls <path> /inheritance:r /grant:r <user>:F`: no inherited entries, full control for the
+/// current user and nobody else.
+#[cfg(windows)]
+fn restrict_to_current_user(path: &Path) -> Result<(), String> {
+    let user = std::env::var("USERNAME").map_err(|_| "USERNAME is not set".to_owned())?;
+    let out = std::process::Command::new("icacls")
+        .arg(path)
+        .args(["/inheritance:r", "/grant:r", &format!("{user}:F")])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| format!("spawn icacls: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("icacls {}: {}: {}", path.display(), out.status, String::from_utf8_lossy(&out.stdout).trim()));
+    }
+    Ok(())
+}
+
+/// SHA-1 of a local file as lowercase hex, the format of `sha1sum` in the container
+/// ([`Fixture::exec`]): an integrity check that needs no hashing tool on the host.
+pub fn file_sha1(path: &Path) -> std::io::Result<String> {
+    use sha1::{Digest, Sha1};
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha1::new();
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
 /// Starts the fixture on a thread with its own runtime: every `#[tokio::test]` has a runtime of
@@ -369,7 +435,7 @@ async fn start_container(docker: &Docker) -> Result<Fixture, String> {
     if keep {
         note(format_args!(
             "dromon-testkit: {KEEP_ENV}=1: the container keeps running; log in with \
-             `ssh -F /dev/null -i {} -p {port} key@{HOST}`; clean up with `docker rm -f {id}; rm -r {}`",
+             `ssh -F {NULL_DEVICE} -i {} -p {port} key@{HOST}`; clean up with `docker rm -f {id}; rm -r {}`",
             fixture.key().display(),
             fixture.keys.display(),
         ));
@@ -408,7 +474,7 @@ fn try_lifeline(addr: &SocketAddr) -> Result<TcpStream, String> {
 async fn probe_login(fixture: &Fixture) -> Result<(), String> {
     let mut last = String::new();
     for _ in 0..20 {
-        let out = tokio::process::Command::new("ssh")
+        let out = tokio::process::Command::new(openssh("ssh"))
             .args(fixture.ssh_options())
             .arg(fixture.destination(USER_KEY))
             .arg("true")
@@ -460,6 +526,7 @@ fn sweep_stale_key_dirs() {
     }
 }
 
+#[cfg(not(windows))]
 fn process_alive(pid: u32) -> bool {
     std::process::Command::new("kill")
         .args(["-0", &pid.to_string()])
@@ -468,8 +535,22 @@ fn process_alive(pid: u32) -> bool {
         .is_ok_and(|s| s.success())
 }
 
+/// `tasklist` lists the process as a CSV row with its pid quoted, or prints an `INFO:` line
+/// without quotes when there is none. If tasklist can't run, the folder is kept.
+#[cfg(windows)]
+fn process_alive(pid: u32) -> bool {
+    std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .map_or(true, |out| String::from_utf8_lossy(&out.stdout).contains(&format!("\"{pid}\"")))
+}
+
+/// Win32-OpenSSH's ssh-keygen writes the private key with an ACL for the current user alone,
+/// which its ssh requires.
 fn keygen(path: &Path, passphrase: &str, comment: &str) -> Result<(), String> {
-    let out = std::process::Command::new("ssh-keygen")
+    let out = std::process::Command::new(openssh("ssh-keygen"))
         .args(["-q", "-t", "ed25519", "-N", passphrase, "-C", comment, "-f"])
         .arg(path)
         .output()
