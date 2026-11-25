@@ -1,0 +1,274 @@
+use dromon_core::HostId;
+
+use super::*;
+
+fn askpass() -> AskpassEnv {
+    AskpassEnv { exe: PathBuf::from("/opt/dromon/dromon"), endpoint: "/run/user/1000/dromon/a.sock".into(), token: "ab".repeat(32) }
+}
+
+fn saved(alias: &str) -> HostSpec {
+    HostSpec {
+        id: HostId(alias.into()),
+        source: HostSource::Saved,
+        alias: alias.into(),
+        hostname: Some("10.0.0.4".into()),
+        user: Some("deploy".into()),
+        port: Some(2222),
+        identity_file: Some("~/.ssh/id_deploy".into()),
+        proxy_jump: Some("bastion".into()),
+    }
+}
+
+fn build(host: &HostSpec, verbose: bool) -> Result<SshCommand, CommandError> {
+    SshCommand::sftp_with(PathBuf::from("ssh"), host, askpass().vars_with_display(None), verbose)
+}
+
+fn args(cmd: &SshCommand) -> Vec<&str> {
+    cmd.args.iter().map(|a| a.to_str().unwrap()).collect()
+}
+
+const BASE: [&str; 14] = [
+    "-T",
+    "-x",
+    "-e",
+    "none",
+    "-o",
+    "BatchMode=no",
+    "-o",
+    "ServerAliveInterval=15",
+    "-o",
+    "ServerAliveCountMax=3",
+    "-o",
+    "ConnectTimeout=15",
+    "-o",
+    "ControlMaster=no",
+];
+
+#[test]
+fn config_host_passes_only_the_alias() {
+    let mut host = saved("prod");
+    host.source = HostSource::SshConfig;
+    let cmd = build(&host, false).unwrap();
+    let mut expected = BASE.to_vec();
+    expected.extend(["-s", "prod", "sftp"]);
+    assert_eq!(args(&cmd), expected);
+    assert_eq!(cmd.program, PathBuf::from("ssh"));
+}
+
+#[test]
+fn saved_host_gets_explicit_options() {
+    let cmd = build(&saved("box"), false).unwrap();
+    let mut expected = BASE.to_vec();
+    expected.extend([
+        "-o",
+        "HostName=10.0.0.4",
+        "-o",
+        "User=deploy",
+        "-o",
+        "Port=2222",
+        "-o",
+        "IdentityFile=~/.ssh/id_deploy",
+        "-o",
+        "ProxyJump=bastion",
+        "-s",
+        "box",
+        "sftp",
+    ]);
+    assert_eq!(args(&cmd), expected);
+}
+
+#[test]
+fn recent_host_with_only_some_fields() {
+    let host = HostSpec {
+        source: HostSource::Recent,
+        identity_file: None,
+        proxy_jump: None,
+        user: None,
+        ..saved("deploy@10.0.0.4:22")
+    };
+    let cmd = build(&host, true).unwrap();
+    let mut expected = BASE.to_vec();
+    expected.extend(["-o", "HostName=10.0.0.4", "-o", "Port=2222", "-v", "-s", "deploy@10.0.0.4:22", "sftp"]);
+    assert_eq!(args(&cmd), expected);
+}
+
+#[test]
+fn verbose_goes_before_the_subsystem() {
+    let host = HostSpec::from_config_alias("prod");
+    let cmd = build(&host, true).unwrap();
+    assert_eq!(args(&cmd)[BASE.len()..], ["-v", "-s", "prod", "sftp"]);
+}
+
+#[test]
+fn config_file_goes_right_after_the_base_options() {
+    let cmd = build(&saved("box"), true).unwrap().with_config_file(Path::new("/tmp/x y/ssh_config")).unwrap();
+    let a = args(&cmd);
+    assert_eq!(a[..BASE.len()], BASE);
+    assert_eq!(a[BASE.len()..BASE.len() + 3], ["-F", "/tmp/x y/ssh_config", "-o"]);
+    assert_eq!(a[a.len() - 4..], ["-v", "-s", "box", "sftp"]);
+    assert_eq!(a.len(), BASE.len() + 2 + 10 + 4);
+}
+
+#[test]
+fn config_file_injection_is_rejected() {
+    for path in ["", "-oProxyCommand=sh", "/a\nProxyCommand sh", "/a\0b", "/a\rb"] {
+        let err = build(&saved("box"), false).unwrap().with_config_file(Path::new(path)).unwrap_err();
+        assert!(err.to_string().starts_with("The ssh config file"), "{path:?}: {err}");
+    }
+}
+
+#[test]
+fn env_removal_is_opt_in() {
+    let cmd = build(&saved("box"), false).unwrap();
+    assert!(cmd.env_remove.is_empty());
+    let cmd = cmd.without_env("SSH_AUTH_SOCK");
+    assert_eq!(cmd.env_remove, [OsString::from("SSH_AUTH_SOCK")]);
+    assert!(format!("{cmd:?}").contains("env_remove: [\"SSH_AUTH_SOCK\"]"));
+}
+
+/// ssh reads the `-F` file and nothing else: a value from it shows in `ssh -G`.
+#[cfg(unix)]
+#[test]
+fn real_ssh_reads_the_config_file() {
+    let ssh = std::path::Path::new("/usr/bin/ssh");
+    if !ssh.exists() {
+        eprintln!("skipped: no /usr/bin/ssh");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let config = dir.path().join("ssh_config");
+    std::fs::write(&config, "Host *\n  ServerAliveCountMax 7\n  Compression yes\n").unwrap();
+    let cmd = build(&saved("box"), false).unwrap().with_config_file(&config).unwrap();
+    let out = std::process::Command::new(ssh).arg("-G").args(&cmd.args).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.lines().any(|l| l == "compression yes"), "{stdout}");
+    // The command line still wins over the file.
+    assert!(stdout.lines().any(|l| l == "serveralivecountmax 3"), "{stdout}");
+}
+
+#[test]
+fn alias_injection_is_rejected() {
+    for alias in ["-oProxyCommand=sh", "-v", "", "prod\nProxyCommand x", "a\0b", "a\rb"] {
+        let host = HostSpec::from_config_alias(alias);
+        assert!(build(&host, false).is_err(), "{alias:?} should be rejected");
+    }
+}
+
+type Mutation = fn(&mut HostSpec);
+
+#[test]
+fn option_value_injection_is_rejected() {
+    let cases: [(&str, Mutation); 6] = [
+        ("hostname dash", |h| h.hostname = Some("-oProxyCommand=sh".into())),
+        ("user dash", |h| h.user = Some("-x".into())),
+        ("identity newline", |h| h.identity_file = Some("/k\nProxyCommand sh".into())),
+        ("jump dash", |h| h.proxy_jump = Some("-J evil".into())),
+        ("hostname nul", |h| h.hostname = Some("a\0b".into())),
+        ("empty user", |h| h.user = Some(String::new())),
+    ];
+    for (name, mutate) in cases {
+        let mut host = saved("box");
+        mutate(&mut host);
+        assert!(build(&host, false).is_err(), "{name} should be rejected");
+    }
+}
+
+#[test]
+fn errors_are_readable() {
+    let host = HostSpec::from_config_alias("-x");
+    let err = build(&host, false).unwrap_err();
+    assert_eq!(err.to_string(), "The host alias can't start with \"-\"");
+    let core: dromon_core::Error = err.into();
+    assert!(matches!(core, dromon_core::Error::Connect(_)));
+}
+
+#[test]
+fn option_values_are_quoted_and_escaped() {
+    let esc = Percent::Escape;
+    assert_eq!(config_option("IdentityFile", "/a b/k", esc).unwrap(), "IdentityFile=\"/a b/k\"");
+    assert_eq!(
+        config_option("IdentityFile", r"C:\Users\John Doe\.ssh\id", esc).unwrap(),
+        r#"IdentityFile="C:\Users\John Doe\.ssh\id""#
+    );
+    assert_eq!(config_option("IdentityFile", r"C:\keys\id", esc).unwrap(), r"IdentityFile=C:\keys\id");
+    assert_eq!(config_option("IdentityFile", "/k#1", esc).unwrap(), "IdentityFile=\"/k#1\"");
+    assert_eq!(config_option("IdentityFile", "/o'k", esc).unwrap(), "IdentityFile=\"/o'k\"");
+    assert_eq!(config_option("IdentityFile", "/a=b", esc).unwrap(), "IdentityFile=\"/a=b\"");
+    assert_eq!(config_option("IdentityFile", "/k$HOME", esc).unwrap(), "IdentityFile=/k$HOME");
+    assert_eq!(config_option("HostName", "fe80::1%eth0", esc).unwrap(), "HostName=fe80::1%%eth0");
+    assert_eq!(config_option("ProxyJump", "a%b", Percent::Literal).unwrap(), "ProxyJump=a%b");
+    assert_eq!(config_option("User", "a b", Percent::Reject).unwrap(), "User=\"a b\"");
+    assert!(config_option("User", "a%b", Percent::Reject).is_err());
+    assert!(config_option("IdentityFile", "/a\"b", esc).is_err());
+    assert!(config_option("IdentityFile", "${HOME}/k", esc).is_err());
+    assert!(config_option("IdentityFile", r"\\server\share\id", esc).is_err());
+    assert!(config_option("IdentityFile", r"C:\my dir\", esc).is_err());
+    assert_eq!(
+        config_option("IdentityFile", "/a\"b", esc).unwrap_err().to_string(),
+        "IdentityFile contains characters ssh can't read back reliably"
+    );
+}
+
+#[test]
+fn askpass_env_sets_everything() {
+    let env = askpass().vars_with_display(None);
+    let get = |k: &str| env.iter().find(|(key, _)| key == k).map(|(_, v)| v.to_str().unwrap());
+    assert_eq!(get("SSH_ASKPASS"), Some("/opt/dromon/dromon"));
+    assert_eq!(get("SSH_ASKPASS_REQUIRE"), Some("force"));
+    assert_eq!(get("DISPLAY"), Some("dromon:0"));
+    assert_eq!(get("DROMON_ASKPASS_ENDPOINT"), Some("/run/user/1000/dromon/a.sock"));
+    assert_eq!(get("DROMON_ASKPASS_TOKEN"), Some("ab".repeat(32).as_str()));
+    assert_eq!(env.len(), 5);
+}
+
+#[test]
+fn display_is_kept_when_set_and_replaced_when_empty() {
+    let set = askpass().vars_with_display(Some(OsStr::new(":1")));
+    assert!(!set.iter().any(|(k, _)| k == "DISPLAY"));
+    let empty = askpass().vars_with_display(Some(OsStr::new("")));
+    assert!(empty.iter().any(|(k, v)| k == "DISPLAY" && v == FALLBACK_DISPLAY));
+}
+
+#[test]
+fn debug_never_prints_the_token() {
+    let token = askpass().token;
+    assert!(!format!("{:?}", askpass()).contains(&token));
+    let cmd = build(&saved("box"), false).unwrap();
+    assert!(!format!("{cmd:?}").contains(&token));
+}
+
+#[cfg(not(windows))]
+#[test]
+fn ssh_program_is_plain_ssh() {
+    assert_eq!(ssh_program(), PathBuf::from("ssh"));
+}
+
+/// Feeds our options to the real `ssh -G` (no network, empty config) and checks it reads back
+/// exactly the values we meant.
+#[cfg(unix)]
+#[test]
+fn real_ssh_reads_our_options_back() {
+    let ssh = std::path::Path::new("/usr/bin/ssh");
+    if !ssh.exists() {
+        eprintln!("skipped: no /usr/bin/ssh");
+        return;
+    }
+    let host = HostSpec {
+        hostname: Some("fe80::1%eth0".into()),
+        user: Some("first last=#".into()),
+        identity_file: Some("/tmp/o'k keys/id#1=x".into()),
+        proxy_jump: Some("j@b:2200,c".into()),
+        ..saved("box")
+    };
+    let cmd = build(&host, false).unwrap();
+    let out = std::process::Command::new(ssh).args(["-F", "/dev/null", "-G"]).args(&cmd.args).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let r = crate::parse_ssh_g(&String::from_utf8_lossy(&out.stdout));
+    assert_eq!(r.hostname.as_deref(), Some("fe80::1%eth0"));
+    assert_eq!(r.user.as_deref(), Some("first last=#"));
+    assert_eq!(r.port, Some(2222));
+    assert_eq!(r.proxy_jump.as_deref(), Some("j@b:2200,c"));
+    // -G prints IdentityFile before % expansion, so the doubled % shows; there is none here.
+    assert!(r.identity_files.iter().any(|f| f == "/tmp/o'k keys/id#1=x"), "{:?}", r.identity_files);
+}

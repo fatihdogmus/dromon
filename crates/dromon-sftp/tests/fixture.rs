@@ -1,0 +1,366 @@
+//! Integration tests against the Docker sshd fixture (`tests/docker/`). They run only with
+//! `DROMON_SSH_FIXTURE=1` after `bash tests/docker/setup.sh`; otherwise each test prints a skip
+//! note and passes. Each test opens its own `ssh -s … sftp` child, exactly as the app will.
+
+use std::time::{Duration, Instant};
+
+use dromon_core::{Entry, EntryKind, Error, LinkTarget, RemotePath};
+use dromon_sftp::{Sftp, WriteMode};
+use tokio::process::{Child, Command};
+
+const KEY: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/docker/.keys/id_ed25519");
+const HOME: &str = "/home/key";
+const MIXED: &str = "/home/key/fixture/mixed";
+const MANY: &str = "/home/key/fixture/many";
+const BIG: &str = "/home/key/fixture/big/big.bin";
+const BIG_SIZE: u64 = 1 << 30;
+
+struct Conn {
+    sftp: Sftp,
+    _ssh: Child,
+}
+
+async fn connect(test: &str) -> Option<Conn> {
+    if std::env::var("DROMON_SSH_FIXTURE").as_deref() != Ok("1") {
+        eprintln!("skipping {test}: set DROMON_SSH_FIXTURE=1 after `bash tests/docker/setup.sh`");
+        return None;
+    }
+    let port = std::env::var("DROMON_SSH_FIXTURE_PORT").unwrap_or_else(|_| "2222".into());
+    let mut ssh = Command::new("ssh")
+        .args(["-T", "-x", "-e", "none", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=no"])
+        .args(["-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR", "-i", KEY])
+        .args(["-p", &port, "-s", "key@127.0.0.1", "sftp"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("spawn ssh");
+    let stdout = ssh.stdout.take().unwrap();
+    let stdin = ssh.stdin.take().unwrap();
+    let sftp = Sftp::new(tokio::io::join(stdout, stdin)).await.expect("SFTP session");
+    Some(Conn { sftp, _ssh: ssh })
+}
+
+fn p(s: &str) -> RemotePath {
+    RemotePath::new(s)
+}
+
+/// A fresh, empty scratch folder for one test.
+async fn scratch(sftp: &Sftp, name: &str) -> RemotePath {
+    let dir = p(&format!("{HOME}/scratch/{name}-{}", std::process::id()));
+    rm_rf(sftp, &dir).await;
+    sftp.mkdir(&dir).await.unwrap();
+    dir
+}
+
+async fn rm_rf(sftp: &Sftp, path: &RemotePath) {
+    let Ok(entry) = sftp.lstat(path).await else { return };
+    if entry.kind == EntryKind::Dir {
+        for child in sftp.list(path).await.unwrap() {
+            Box::pin(rm_rf(sftp, &path.join(&child.name))).await;
+        }
+        sftp.remove_dir(path).await.unwrap();
+    } else {
+        sftp.remove_file(path).await.unwrap();
+    }
+}
+
+fn find<'a>(entries: &'a [Entry], name: &str) -> &'a Entry {
+    entries.iter().find(|e| e.name == name).unwrap_or_else(|| panic!("{name} not listed"))
+}
+
+fn pattern(len: usize, seed: u8) -> Vec<u8> {
+    (0..len).map(|i| (i as u8).wrapping_mul(31).wrapping_add(seed)).collect()
+}
+
+/// Writes `data` with every chunk in flight at once, then waits for the acks.
+async fn write_pipelined(sftp: &Sftp, path: &RemotePath, mode: WriteMode, offset: u64, data: &[u8]) {
+    let file = sftp.open_write(path, mode).await.unwrap();
+    let chunk = sftp.chunk_size() as usize;
+    let acks: Vec<_> = data
+        .chunks(chunk)
+        .enumerate()
+        .map(|(i, c)| file.write_at(offset + (i * chunk) as u64, c))
+        .collect();
+    for ack in acks {
+        ack.await.unwrap();
+    }
+    file.close().await.unwrap();
+}
+
+/// Reads `len` bytes at `offset` with every chunk requested up front.
+async fn read_pipelined(sftp: &Sftp, path: &RemotePath, offset: u64, len: u64) -> Vec<u8> {
+    let file = sftp.open_read(path).await.unwrap();
+    let chunk = u64::from(sftp.chunk_size());
+    let reads: Vec<_> = (0..len.div_ceil(chunk))
+        .map(|i| file.read_at(offset + i * chunk, chunk.min(len - i * chunk) as u32))
+        .collect();
+    let mut out = Vec::new();
+    for read in reads {
+        out.extend(read.await.unwrap());
+    }
+    file.close().await.unwrap();
+    out
+}
+
+fn rate(bytes: u64, took: Duration) -> String {
+    format!("{:.2} s, {:.0} MiB/s", took.as_secs_f64(), bytes as f64 / 1048576.0 / took.as_secs_f64())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn home_and_capabilities() {
+    let Some(c) = connect("home_and_capabilities").await else { return };
+    assert_eq!(c.sftp.home().await.unwrap(), p(HOME));
+    let caps = c.sftp.capabilities();
+    println!("extensions: {:?}", caps.extensions);
+    println!("limits: {:?}, chunk size {}", caps.limits, c.sftp.chunk_size());
+    assert!(caps.posix_rename, "posix-rename@openssh.com");
+    assert!(caps.copy_data, "copy-data");
+    let limits = caps.limits.expect("limits@openssh.com");
+    assert!(limits.max_read > 0 && limits.max_write > 0);
+    assert_eq!(u64::from(c.sftp.chunk_size()), limits.max_read.min(limits.max_write));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn list_mixed_folder() {
+    let Some(c) = connect("list_mixed_folder").await else { return };
+    let s = &c.sftp;
+    let entries = s.list(&p(MIXED)).await.unwrap();
+    assert_eq!(entries.len(), 100, "80 files, 10 folders and 10 specials");
+    assert!(entries.iter().all(|e| e.name != "." && e.name != ".."));
+
+    let f = find(&entries, "file-001.txt");
+    assert_eq!((f.kind, f.size, f.mtime), (EntryKind::File, 100, Some(1_577_934_245)));
+    assert_eq!(f.mode.map(|m| m & 0o777), Some(0o644));
+    assert_eq!(find(&entries, "file-080.txt").size, 8000);
+    assert_eq!(find(&entries, "dir-01").kind, EntryKind::Dir);
+    assert_eq!(find(&entries, "link-dir").kind, EntryKind::Symlink { target: Some(LinkTarget::Dir) });
+    assert!(find(&entries, "link-dir").kind.is_dir_like());
+    assert_eq!(find(&entries, "link-file").kind, EntryKind::Symlink { target: Some(LinkTarget::File) });
+    assert_eq!(find(&entries, "dangling").kind, EntryKind::Symlink { target: None });
+    assert_eq!(find(&entries, "pipe").kind, EntryKind::Other);
+    assert_eq!(find(&entries, "locked").kind, EntryKind::Dir);
+    assert!(find(&entries, ".hidden").hidden());
+    assert_eq!(find(&entries, ".config").kind, EntryKind::Dir);
+    assert_eq!(find(&entries, "unicode-ğüş.txt").size, 8);
+    assert_eq!(find(&entries, "space name.txt").size, 7);
+
+    let locked = p(&format!("{MIXED}/locked"));
+    assert_eq!(s.list(&locked).await, Err(Error::PermissionDenied(locked.clone())));
+    let missing = p(&format!("{MIXED}/nope"));
+    assert_eq!(s.list(&missing).await, Err(Error::NotFound(missing.clone())));
+    assert_eq!(s.stat(&missing).await, Err(Error::NotFound(missing.clone())));
+    assert!(!s.exists(&missing).await.unwrap());
+    assert!(s.exists(&p(&format!("{MIXED}/dangling"))).await.unwrap());
+
+    let link = p(&format!("{MIXED}/link-dir"));
+    assert_eq!(s.stat(&link).await.unwrap().kind, EntryKind::Dir);
+    let l = s.lstat(&link).await.unwrap();
+    assert_eq!((l.name.as_str(), l.kind), ("link-dir", EntryKind::Symlink { target: Some(LinkTarget::Dir) }));
+    assert_eq!(s.realpath(&link).await.unwrap(), p(&format!("{MIXED}/dir-01")));
+    let inside = s.list(&link).await.unwrap();
+    assert_eq!(inside.len(), 1);
+    assert_eq!(inside[0].name, "inside.txt");
+    assert_eq!(s.stat(&RemotePath::root()).await.unwrap().name, "/");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn paged_listing_of_10k_entries() {
+    let Some(c) = connect("paged_listing_of_10k_entries").await else { return };
+    let s = &c.sftp;
+
+    let start = Instant::now();
+    let mut rx = s.list_paged(&p(MANY), 512);
+    let mut pages = Vec::new();
+    let mut first_page = None;
+    while let Some(page) = rx.recv().await {
+        first_page.get_or_insert_with(|| start.elapsed());
+        pages.push(page.unwrap().len());
+    }
+    let paged = start.elapsed();
+    assert_eq!(pages.iter().sum::<usize>(), 10_000);
+    assert_eq!(pages.len(), 20);
+    assert!(pages[..19].iter().all(|&n| n == 512));
+    assert_eq!(pages[19], 10_000 - 19 * 512);
+
+    let start = Instant::now();
+    let all = s.list(&p(MANY)).await.unwrap();
+    let whole = start.elapsed();
+    assert_eq!(all.len(), 10_000);
+    assert!(all.iter().all(|e| e.kind == EntryKind::File && e.size == 0));
+    println!("10k listing: first page after {first_page:?}, paged total {paged:?}, list() {whole:?}");
+
+    // An empty folder yields one empty page; an unreadable one a single error.
+    let dir = scratch(s, "paged").await;
+    let mut rx = s.list_paged(&dir, 512);
+    assert_eq!(rx.recv().await, Some(Ok(Vec::new())));
+    assert_eq!(rx.recv().await, None);
+    let locked = p(&format!("{MIXED}/locked"));
+    let mut rx = s.list_paged(&locked, 512);
+    assert_eq!(rx.recv().await, Some(Err(Error::PermissionDenied(locked))));
+    assert_eq!(rx.recv().await, None);
+
+    // Dropping the receiver early stops the listing; the session stays usable.
+    let mut rx = s.list_paged(&p(MANY), 100);
+    assert_eq!(rx.recv().await.unwrap().unwrap().len(), 100);
+    drop(rx);
+    assert_eq!(s.list(&p(MIXED)).await.unwrap().len(), 100);
+    rm_rf(s, &dir).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mkdir_rename_remove() {
+    let Some(c) = connect("mkdir_rename_remove").await else { return };
+    let s = &c.sftp;
+    let dir = scratch(s, "ops").await;
+    let a = dir.join("a");
+    let b = dir.join("b");
+
+    s.mkdir(&a).await.unwrap();
+    assert_eq!(s.mkdir(&a).await, Err(Error::AlreadyExists(a.clone())));
+    s.rename(&a, &b).await.unwrap();
+    assert!(!s.exists(&a).await.unwrap());
+    assert_eq!(s.stat(&b).await.unwrap().kind, EntryKind::Dir);
+
+    let f1 = dir.join("one.txt");
+    let f2 = dir.join("two.txt");
+    write_pipelined(s, &f1, WriteMode::Truncate, 0, b"one").await;
+    write_pipelined(s, &f2, WriteMode::Truncate, 0, b"second").await;
+    assert_eq!(s.rename(&f1, &f2).await, Err(Error::AlreadyExists(f2.clone())));
+    s.posix_rename(&f1, &f2).await.unwrap();
+    assert!(!s.exists(&f1).await.unwrap());
+    assert_eq!(s.stat(&f2).await.unwrap().size, 3);
+    let missing = dir.join("missing");
+    assert_eq!(s.rename(&missing, &f1).await, Err(Error::NotFound(missing.clone())));
+
+    s.rename(&f2, &b.join("moved.txt")).await.unwrap();
+    assert!(matches!(s.remove_dir(&b).await, Err(Error::Io(_))), "folder isn't empty");
+    s.remove_file(&b.join("moved.txt")).await.unwrap();
+    s.remove_dir(&b).await.unwrap();
+    assert_eq!(s.remove_file(&missing).await, Err(Error::NotFound(missing.clone())));
+    assert_eq!(s.remove_dir(&missing).await, Err(Error::NotFound(missing.clone())));
+
+    let locked = p(&format!("{MIXED}/locked/x"));
+    assert_eq!(s.mkdir(&locked).await, Err(Error::PermissionDenied(locked.clone())));
+    assert!(s.list(&dir).await.unwrap().is_empty());
+    rm_rf(s, &dir).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn write_read_round_trip_and_mtime() {
+    let Some(c) = connect("write_read_round_trip_and_mtime").await else { return };
+    let s = &c.sftp;
+    let dir = scratch(s, "io").await;
+    let f = dir.join("data.bin");
+
+    // 3.5 MiB: many chunks in flight, and a short final chunk.
+    let data = pattern(3 * 1024 * 1024 + 512 * 1024 + 7, 1);
+    write_pipelined(s, &f, WriteMode::Truncate, 0, &data).await;
+    assert_eq!(s.stat(&f).await.unwrap().size, data.len() as u64);
+    let back = read_pipelined(s, &f, 0, data.len() as u64 + 1000).await;
+    assert!(back == data, "round trip differs");
+
+    // Reading at and past the end gives empty buffers.
+    let file = s.open_read(&f).await.unwrap();
+    assert!(file.read_at(data.len() as u64, 10).await.unwrap().is_empty());
+    assert!(file.read_at(data.len() as u64 + (1 << 20), 10).await.unwrap().is_empty());
+    assert_eq!(file.stat().await.unwrap().size, data.len() as u64);
+    file.close().await.unwrap();
+
+    // Resume keeps the contents and writes at the given offset (append-at-offset).
+    let head = pattern(100_000, 2);
+    let tail = pattern(50_000, 3);
+    let r = dir.join("resume.bin");
+    write_pipelined(s, &r, WriteMode::Truncate, 0, &head).await;
+    write_pipelined(s, &r, WriteMode::Resume, head.len() as u64, &tail).await;
+    let back = read_pipelined(s, &r, 0, 150_000).await;
+    assert!(back[..100_000] == head[..] && back[100_000..] == tail[..]);
+    // Truncate empties it again.
+    s.open_write(&r, WriteMode::Truncate).await.unwrap().close().await.unwrap();
+    assert_eq!(s.stat(&r).await.unwrap().size, 0);
+
+    assert_eq!(
+        s.open_write(&r, WriteMode::CreateNew).await.err(),
+        Some(Error::AlreadyExists(r.clone()))
+    );
+    let fresh = dir.join("fresh.bin");
+    s.open_write(&fresh, WriteMode::CreateNew).await.unwrap().close().await.unwrap();
+    let missing = dir.join("missing.bin");
+    assert_eq!(s.open_read(&missing).await.err(), Some(Error::NotFound(missing)));
+    let locked = p(&format!("{MIXED}/locked/f"));
+    assert_eq!(
+        s.open_write(&locked, WriteMode::Truncate).await.err(),
+        Some(Error::PermissionDenied(locked))
+    );
+
+    s.set_mtime(&f, 1_000_000_000).await.unwrap();
+    assert_eq!(s.stat(&f).await.unwrap().mtime, Some(1_000_000_000));
+    s.set_mtime(&dir, 1_234_567_890).await.unwrap();
+    assert_eq!(s.stat(&dir).await.unwrap().mtime, Some(1_234_567_890));
+    rm_rf(s, &dir).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn copy_data_small_file_is_exact() {
+    let Some(c) = connect("copy_data_small_file_is_exact").await else { return };
+    let s = &c.sftp;
+    let dir = scratch(s, "copysmall").await;
+    let src = dir.join("src.bin");
+    let data = pattern(777_777, 9);
+    write_pipelined(s, &src, WriteMode::Truncate, 0, &data).await;
+
+    let dst = dir.join("dst.bin");
+    s.copy_data(&src, &dst).await.unwrap();
+    assert!(read_pipelined(s, &dst, 0, data.len() as u64).await == data);
+
+    let streamed = dir.join("streamed.bin");
+    s.copy_streaming(&src, &streamed).await.unwrap();
+    assert!(read_pipelined(s, &streamed, 0, data.len() as u64).await == data);
+
+    let empty = dir.join("empty");
+    write_pipelined(s, &empty, WriteMode::Truncate, 0, b"").await;
+    s.copy_data(&empty, &dir.join("empty2")).await.unwrap();
+    s.copy_streaming(&empty, &dir.join("empty3")).await.unwrap();
+    assert_eq!(s.stat(&dir.join("empty2")).await.unwrap().size, 0);
+    assert_eq!(s.stat(&dir.join("empty3")).await.unwrap().size, 0);
+
+    let missing = dir.join("missing");
+    assert_eq!(s.copy_data(&missing, &dst).await, Err(Error::NotFound(missing.clone())));
+    assert_eq!(s.copy_streaming(&missing, &dst).await, Err(Error::NotFound(missing)));
+    rm_rf(s, &dir).await;
+}
+
+/// Spike S4: server-side copy of a 1 GiB file, against the streaming fallback.
+#[tokio::test(flavor = "multi_thread")]
+async fn copy_data_big_file() {
+    let Some(c) = connect("copy_data_big_file").await else { return };
+    let s = &c.sftp;
+    let big = p(BIG);
+    assert_eq!(s.stat(&big).await.unwrap().size, BIG_SIZE);
+    let dir = scratch(s, "copybig").await;
+
+    let dst = dir.join("copy-data.bin");
+    let mut steps = 0;
+    let start = Instant::now();
+    s.copy_data_with_progress(&big, &dst, |_| steps += 1).await.unwrap();
+    let server_side = start.elapsed();
+    assert_eq!(s.stat(&dst).await.unwrap().size, BIG_SIZE);
+    assert_eq!(steps, BIG_SIZE / dromon_sftp::COPY_DATA_CHUNK);
+
+    let streamed = dir.join("streamed.bin");
+    let start = Instant::now();
+    s.copy_streaming(&big, &streamed).await.unwrap();
+    let through_app = start.elapsed();
+    assert_eq!(s.stat(&streamed).await.unwrap().size, BIG_SIZE);
+
+    println!("S4 copy-data 1 GiB: {}", rate(BIG_SIZE, server_side));
+    println!("S4 streaming 1 GiB: {}", rate(BIG_SIZE, through_app));
+
+    // Spot-check contents: the first and last MiB and one in the middle of each copy.
+    for offset in [0, BIG_SIZE / 2 + 12_345, BIG_SIZE - (1 << 20)] {
+        let want = read_pipelined(s, &big, offset, 1 << 20).await;
+        assert!(read_pipelined(s, &dst, offset, 1 << 20).await == want, "copy-data @ {offset}");
+        assert!(read_pipelined(s, &streamed, offset, 1 << 20).await == want, "stream @ {offset}");
+    }
+    rm_rf(s, &dir).await;
+}

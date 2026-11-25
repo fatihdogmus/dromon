@@ -1,0 +1,3 @@
+/target
+*.dromon-part
+/tests/goldens/*.new.png

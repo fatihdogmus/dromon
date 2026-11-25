@@ -1,0 +1,21 @@
+[package]
+name = "dromon-sftp"
+description = "SFTP session wrapper, extensions, listing diff and adaptive polling for Dromon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+bytes.workspace = true
+dromon-core.workspace = true
+russh-sftp.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+dromon-ssh.workspace = true
+
+[lints]
+workspace = true

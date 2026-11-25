@@ -1,0 +1,18 @@
+[package]
+name = "dromon-transfer"
+description = "Transfer queue, scheduling, resume, conflict naming and progress for Dromon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+dromon-core.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

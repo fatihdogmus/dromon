@@ -1,0 +1,66 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/dromon-app",
+    "crates/dromon-core",
+    "crates/dromon-sftp",
+    "crates/dromon-ssh",
+    "crates/dromon-transfer",
+]
+default-members = [
+    "crates/dromon-app",
+    "crates/dromon-core",
+    "crates/dromon-sftp",
+    "crates/dromon-ssh",
+    "crates/dromon-transfer",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+license = "MIT"
+rust-version = "1.99"
+publish = false
+
+[workspace.dependencies]
+dromon-core = { path = "crates/dromon-core" }
+dromon-sftp = { path = "crates/dromon-sftp" }
+dromon-ssh = { path = "crates/dromon-ssh" }
+dromon-transfer = { path = "crates/dromon-transfer" }
+
+# Rune is pre-release: pin one `dev` rev. When bumping, update every rev below together and
+# re-check Rune's root Cargo.toml for its current [patch.crates-io] list.
+rune = { git = "https://github.com/anomalyco/rune", rev = "241d08d1d8dca18250c44f96fb3a99683d1351ea" }
+
+bytes = "1"
+glob = "0.3"
+getrandom = "0.3"
+hex = "0.4"
+russh-sftp = "4.0"
+secrecy = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1.54", features = ["rt-multi-thread", "macros", "process", "io-util", "net", "sync", "time", "fs"] }
+zeroize = "1"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+
+[patch.crates-io]
+winit = { git = "https://github.com/anomalyco/rune", rev = "241d08d1d8dca18250c44f96fb3a99683d1351ea" }
+sctk-adwaita = { git = "https://github.com/anomalyco/rune", rev = "241d08d1d8dca18250c44f96fb3a99683d1351ea" }
+parley_engine = { git = "https://github.com/anomalyco/rune", rev = "241d08d1d8dca18250c44f96fb3a99683d1351ea" }
+wgpu-hal = { git = "https://github.com/anomalyco/rune", rev = "241d08d1d8dca18250c44f96fb3a99683d1351ea" }
+naga = { git = "https://github.com/anomalyco/rune", rev = "241d08d1d8dca18250c44f96fb3a99683d1351ea" }
+accesskit_windows = { git = "https://github.com/anomalyco/rune", rev = "241d08d1d8dca18250c44f96fb3a99683d1351ea" }
+accesskit_macos = { git = "https://github.com/anomalyco/rune", rev = "241d08d1d8dca18250c44f96fb3a99683d1351ea" }
+accesskit_atspi_common = { git = "https://github.com/anomalyco/rune", rev = "241d08d1d8dca18250c44f96fb3a99683d1351ea" }
+
+[profile.dev.package."*"]
+opt-level = 2
