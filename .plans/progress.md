@@ -62,7 +62,6 @@ Tracks where implementation stands against `dromon-plan.md`. Newest first.
   - Copies and moves as transfer jobs (`RemoteCopy`, `Move`, `CrossHostCopy`, `CrossHostMove`): copy-data or streaming, posix-rename with merge on Replace, cross-host move deletes a source only after verifying its copy, then tidies emptied folders.
   - Fixtures: one folder tree (`fixture/tree.rs`) for transfers and file operations.
 
-**Next**
 - M3 UI: inline new folder (⌘⇧N) and rename (F2), delete sheet (Enter doesn't delete) and progress toast, copy path (⌥⌘C), clipboard (⌘C/⌘X/⌘V while the OS clipboard still holds the clip's paths; Finder files still upload) and ⌥⌘V, drag rows onto folders/breadcrumbs (move, ⌥/Ctrl copies) and hosts (copy), context menus (native via Rune where available, drawn otherwise). A job's end lists its folders on screen again (`JobView.folders`); ⌘R / F5 refresh. Needs a real window: native menu placement, ⌥⌘C/⌥⌘V reporting, Ctrl+Alt on Windows (AltGr).
 
 **Next**
