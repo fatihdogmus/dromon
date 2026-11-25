@@ -55,8 +55,10 @@ pub enum Role {
     Key,
     /// The SSH `password` method only: prompt `<user>@<host>'s password: `.
     Password,
-    /// Keyboard-interactive through PAM: `(<user>@<host>) Password: ` ([`PASSWORD`]), then, with
-    /// [`Feature::Totp`], `(<user>@<host>) Verification code: ` ([`totp_now`]).
+    /// Keyboard-interactive through PAM: [`Fixture::password_prompt`] ([`PASSWORD`]):
+    /// `(<user>@<host>) Password: `, or `Password:` without the space where the server's PAM is
+    /// Apple's OpenPAM (native macOS); then, with [`Feature::Totp`],
+    /// `(<user>@<host>) Verification code: ` ([`totp_now`]).
     Kbd,
     /// Two methods: public key ([`Fixture::encrypted_key`]), then password ([`PASSWORD`]).
     KeyThenPassword,
@@ -312,6 +314,28 @@ impl Fixture {
     /// `<user of role>@127.0.0.1`.
     pub fn destination(&self, role: Role) -> String {
         format!("{}@{HOST}", self.user(role))
+    }
+
+    /// The password prompt ssh shows (its askpass gets) when signing in as `role` to [`HOST`]:
+    /// - [`Role::Kbd`] (keyboard-interactive): ssh's `(<user>@127.0.0.1) ` before the server PAM's
+    ///   text, which is Linux-PAM's `pam_unix` `Password: ` (Docker, native Linux) or Apple's
+    ///   OpenPAM `Password:`, without a space (native macOS);
+    /// - [`Role::Password`], [`Role::KeyThenPassword`] (the SSH `password` method): ssh's own
+    ///   `<user>@127.0.0.1's password: `.
+    ///
+    /// Panics for the roles without a password.
+    pub fn password_prompt(&self, role: Role) -> String {
+        match role {
+            Role::Kbd => {
+                let pam = match &self.server {
+                    Server::Docker(_) => "Password: ",
+                    Server::Native(sshd) => sshd.pam_password_prompt(),
+                };
+                format!("({}) {pam}", self.destination(role))
+            }
+            Role::Password | Role::KeyThenPassword => format!("{}'s password: ", self.destination(role)),
+            Role::Key | Role::EncryptedKey => panic!("{role:?} has no password"),
+        }
     }
 
     /// Non-interactive ssh options for a public-key login with [`Fixture::key`], isolated from

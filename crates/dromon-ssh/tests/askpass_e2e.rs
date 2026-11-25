@@ -521,11 +521,12 @@ async fn second_factor_after_public_key() {
 
 const KBD_ONLY: &str = "PubkeyAuthentication no\nPreferredAuthentications keyboard-interactive";
 
-/// What PAM asks user `kbd` (pam_unix, then pam_google_authenticator), with ssh's prefix:
-/// `(kbd@127.0.0.1) Password: ` and `(kbd@127.0.0.1) Verification code: `.
+/// What PAM asks user `kbd` (the password, then pam_google_authenticator), with ssh's prefix:
+/// the fixture's password prompt (`(kbd@127.0.0.1) Password: `; Apple's OpenPAM says
+/// `Password:`) and `(kbd@127.0.0.1) Verification code: `.
 fn kbd_prompts(f: &Fixture) -> (String, String) {
     let kbd = f.at(Role::Kbd, "127.0.0.1");
-    (format!("({kbd}) Password: "), format!("({kbd}) Verification code: "))
+    (f.sshd.password_prompt(Role::Kbd), format!("({kbd}) Verification code: "))
 }
 
 /// Keyboard-interactive through PAM with a real second factor: the account password, then a

@@ -86,16 +86,23 @@ What it does, once per test binary:
   macOS: `sshd-session` is a platform binary, so the first `dlopen` of the Homebrew module is
   refused by library validation; Apple's OpenPAM then clears it (`csops(CS_OPS_CLEAR_LV)`,
   allowed by the `com.apple.private.security.clear-library-validation` entitlement of
-  `sshd-session`) and loads the module. Without a module, `Fixture::supports(Feature::Totp, …)`
+  `sshd-session`) and loads the module. The password prompt is then OpenPAM's
+  `(dromon_kbd@127.0.0.1) Password:`, without Linux-PAM's trailing space; tests take it from
+  `Fixture::password_prompt(Role::Kbd)`. Without a module, `Fixture::supports(Feature::Totp, …)`
   prints `skipping <test>: the native sshd has no TOTP PAM module (Docker fixture only)` and
   `keyboard_interactive_password_then_verification_code`,
   `keyboard_interactive_wrong_code_fails_cleanly` (askpass) and
   `keyboard_interactive_password_then_code` (app e2e) skip; the start line says why.
 - **Cleanup**: sshd is started by a root `sh` watchdog that checks once a second whether the test
   process still exists; when it is gone (normal exit, panic, `kill -9`) the watchdog stops sshd,
-  `pkill -u`s the fixture users' leftover sessions and deletes the folder and the kbd PAM
-  service; the next start also deletes services no folder names. The users and their homes
-  stay. `DROMON_FIXTURE_KEEP=1` skips the watchdog and prints how to log in and clean up.
+  ends that sshd's sessions (its process tree) and deletes the folder and the kbd PAM service.
+  The fixture users' other leftovers (what a session left running) are `pkill -u`ed only when
+  no other fixture is live (its test process runs, or it is kept and its sshd runs): all
+  fixtures share the users, and the next test binary's start (`seed.sh`) overlaps the previous
+  one's cleanup. A lock (`/var/tmp/dromon-testkit-lock`) orders that check against a start
+  making its folder. The next start deletes folders whose test process and watchdog are both
+  gone, and services no folder names. The users and their homes stay.
+  `DROMON_FIXTURE_KEEP=1` skips the watchdog and prints how to log in and clean up.
 - **`Fixture::exec`** runs `sudo -n <command>` (as root, like `docker exec`); `kill_sessions` is
   `pkill -u` as in the container; `Fixture::sha1` uses `shasum -a 1` on macOS.
 

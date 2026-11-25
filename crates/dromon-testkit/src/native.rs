@@ -28,9 +28,11 @@
 //!
 //! Cleanup: statics are never dropped, so sshd is started by a small root watchdog (`sh`) that
 //! polls this process's pid once a second; when it is gone (normal exit, panic, `kill -9`), the
-//! watchdog stops sshd, ends the fixture users' leftover sessions and deletes the folder and the
-//! kbd user's PAM service. The users and their homes stay (reused by the next run).
-//! `DROMON_FIXTURE_KEEP=1`: no watchdog.
+//! watchdog stops sshd, ends its sessions (sshd's process tree) and, when no other fixture is
+//! live, the fixture users' other leftovers, and deletes the folder and the kbd user's PAM
+//! service. It never ends a live fixture's processes: test binaries run back to back, and the
+//! next one's start (`seed.sh` as `dromon_key`) overlaps this cleanup. The users and their
+//! homes stay (reused by the next run). `DROMON_FIXTURE_KEEP=1`: no watchdog.
 
 use std::io::Write as _;
 use std::path::Path;
@@ -124,6 +126,16 @@ impl Sshd {
     pub(crate) fn bsd_tools(&self) -> bool {
         self.os == Os::MacOs
     }
+
+    /// What the platform's PAM asks for the account password (keyboard-interactive): Apple's
+    /// OpenPAM `Password:` (`pam_get_authtok`'s default prompt, no space; its policy options
+    /// can't change it, as they can't hold a space), Linux-PAM's `pam_unix` `Password: `.
+    pub(crate) fn pam_password_prompt(&self) -> &'static str {
+        match self.os {
+            Os::MacOs => "Password:",
+            Os::Linux => "Password: ",
+        }
+    }
 }
 
 pub(crate) async fn start() -> State {
@@ -215,15 +227,36 @@ fn root_sh(as_root: bool, what: &str, script: &str, args: &[&str], stdin: &[u8])
 /// Every script starts with this: `sudo` may keep the caller's PATH, which needn't have sbin.
 const SCRIPT_HEAD: &str = "set -eu\nPATH=/usr/sbin:/usr/bin:/sbin:/bin:$PATH\nexport PATH\n";
 
-/// `$1` this process's pid, `$2` keep (`1`/`0`). Sweeps folders of processes that are gone, and
-/// the kbd PAM services (`totp.rs`) no remaining folder's `pam_service` names, makes a fresh
-/// folder with the host key and prints its path.
+/// For every script: a lock (a `mkdir`, outside the folders' glob) between one fixture's start
+/// making its folder and another's watchdog deciding whether any fixture is still live. Broken
+/// after 10 s, as its holder then died.
+const LOCK: &str = r#"
+lock=/var/tmp/dromon-testkit-lock
+lock_take() {
+    n=0
+    until mkdir "$lock" 2>/dev/null; do
+        n=$((n + 1))
+        if [ "$n" -ge 100 ]; then rm -rf "$lock"; n=0; fi
+        sleep 0.1
+    done
+}
+lock_release() { rmdir "$lock" 2>/dev/null || true; }
+"#;
+
+/// `$1` this process's pid, `$2` keep (`1`/`0`). Under the lock: sweeps folders of processes
+/// that are gone (unless their watchdog is still cleaning them up), and the kbd PAM services
+/// (`totp.rs`) no remaining folder's `pam_service` names, makes a fresh folder owned by this
+/// process with the host key and prints its path.
 const PREPARE: &str = r#"
 pid=$1 keep=$2
+lock_take
+trap lock_release EXIT
 for d in /var/tmp/dromon-testkit-sshd.*; do
     if [ ! -d "$d" ] || [ -e "$d/kept" ]; then continue; fi
     owner=$(cat "$d/owner" 2>/dev/null || true)
     if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then continue; fi
+    watchdog=$(cat "$d/watchdog" 2>/dev/null || true)
+    if [ -n "$watchdog" ] && kill -0 "$watchdog" 2>/dev/null; then continue; fi
     rm -rf "$d"
 done
 for p in /etc/pam.d/dromon-testkit-sshd.*; do
@@ -323,27 +356,57 @@ done
 "#;
 
 /// `$1` the test process's pid, `$2` the folder, `$3` sshd, `$4` keep, then the fixture users.
-/// Starts sshd, then (unless kept) waits for the test process to go and cleans up after it,
-/// also the kbd user's PAM service (`totp.rs`), if any.
+/// Starts sshd, then (unless kept) waits for the test process to go and cleans up after it:
+/// - this sshd's sessions: its process tree, taken before the listener stops (the listener
+///   doesn't end them, and they are no longer its children after);
+/// - what those sessions left outside the tree (orphans): `pkill -u` of the fixture users, but
+///   only under the lock and while no other fixture is live (its owner runs, or it is kept and
+///   its sshd runs), since all fixtures share the users: never a live fixture's processes, such
+///   as the next test binary's `seed.sh`;
+/// - the kbd user's PAM service (`totp.rs`), if any, and the folder.
+///
 /// INT and HUP are ignored so a Ctrl-C in the developer's terminal doesn't orphan sshd.
 const WATCHDOG: &str = r#"
 set +e
 trap '' INT HUP
 pid=$1 dir=$2 sshd=$3 keep=$4
 shift 4
+echo "$$" >"$dir/watchdog"
 "$sshd" -D -e -f "$dir/sshd_config" </dev/null >>"$dir/sshd.log" 2>&1 &
 sshd_pid=$!
 if [ "$keep" = 1 ]; then exit 0; fi
 while kill -0 "$pid" 2>/dev/null; do sleep 1; done
+tree() {
+    for c in $(pgrep -P "$1" 2>/dev/null); do
+        echo "$c"
+        tree "$c"
+    done
+}
+sessions=$(tree "$sshd_pid")
 kill "$sshd_pid" 2>/dev/null
 wait "$sshd_pid" 2>/dev/null
-for u in "$@"; do pkill -u "$u" 2>/dev/null; done
+if [ -n "$sessions" ]; then kill $sessions 2>/dev/null; fi
+lock_take
+live=0
+for d in /var/tmp/dromon-testkit-sshd.*; do
+    if [ "$d" = "$dir" ] || [ ! -d "$d" ]; then continue; fi
+    if [ -e "$d/kept" ]; then
+        other=$(cat "$d/sshd.pid" 2>/dev/null)
+    else
+        other=$(cat "$d/owner" 2>/dev/null)
+    fi
+    if [ -n "$other" ] && kill -0 "$other" 2>/dev/null; then live=1; fi
+done
+if [ "$live" = 0 ]; then
+    for u in "$@"; do pkill -u "$u" 2>/dev/null; done
+fi
 if [ -f "$dir/pam_service" ]; then rm -f "/etc/pam.d/$(cat "$dir/pam_service")"; fi
 rm -rf "$dir"
+lock_release
 "#;
 
 fn script(body: &str) -> String {
-    format!("{SCRIPT_HEAD}{body}")
+    format!("{SCRIPT_HEAD}{LOCK}{body}")
 }
 
 async fn launch(os: Os, as_root: bool, sshd_bin: &str, sftp_server: &str) -> Result<Fixture, String> {

@@ -200,11 +200,19 @@ pub(super) fn setup(os: Os, as_root: bool, dir: &str, sshd: &str, kbd: &Account)
 pub(super) async fn probe(fixture: &Fixture, sshd: &Sshd, totp: &Totp) {
     let user = fixture.user(Role::Kbd);
     match sign_in(fixture).await {
-        Ok(prompts) if prompts.iter().any(|p| p.contains("erification code")) => note(format_args!(
-            "dromon-testkit: TOTP for {user} through PAM service {} ({}): signed in with the password and a code; \
-             prompts {prompts:?}",
-            totp.service, totp.module,
-        )),
+        Ok(prompts) if prompts.iter().any(|p| p.contains("erification code")) => {
+            let expected = fixture.password_prompt(Role::Kbd);
+            let drift = if prompts.first() == Some(&expected) {
+                String::new()
+            } else {
+                format!("; NOT Fixture::password_prompt's {expected:?}")
+            };
+            note(format_args!(
+                "dromon-testkit: TOTP for {user} through PAM service {} ({}): signed in with the password and a code; \
+                 prompts {prompts:?}{drift}",
+                totp.service, totp.module,
+            ));
+        }
         result => {
             let why = match result {
                 Ok(prompts) => format!("signed in without being asked for a code; prompts {prompts:?}"),

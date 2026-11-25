@@ -519,7 +519,8 @@ fn keyboard_interactive_password_then_code() {
     h.connect("fx-kbd");
     h.trust_host_key("fx-kbd");
     let (_, text, _) = h.wait_for_sheet("Sign in to fx-kbd", |k| *k == PromptKind::Password);
-    assert_eq!(text, format!("({kbd}@127.0.0.1) Password: "));
+    // `… Password: `, or `… Password:` from Apple's OpenPAM: a password sheet either way.
+    assert_eq!(text, h.fx.password_prompt(Role::Kbd));
     assert!(h.shown("sheet-note"), "the password is rememberable");
     h.secrets.push(PASSWORD.into());
     h.answer(PASSWORD);
