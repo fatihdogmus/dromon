@@ -108,7 +108,7 @@ pub fn failed(s: &App, c: &ConnView, msg: &str, p: Paint) -> El {
     let actions = row()
         .gap(space::S2)
         .child(button(p, "state-retry", &icons::SERVER, "Try again", Action::SelectHost(c.host.clone())))
-        .child(button(p, "state-show-log", &icons::FILE_TEXT, "Show log", Action::OpenLog));
+        .child(button(p, "state-show-log", &icons::LOG, "Show log", Action::OpenLog));
     let sub = col()
         .center()
         .gap(space::S2)

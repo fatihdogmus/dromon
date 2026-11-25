@@ -367,6 +367,36 @@ pub fn file_ops_light(s: &mut App) {
     s.ui.appearance = Appearance::Light;
 }
 
+/// Every file icon in the list, one row per category (folder, plain, code, text, log, image,
+/// audio, video, PDF, archive, binary), to look at the set as the views draw it.
+pub fn icons(s: &mut App) {
+    listing(s);
+    let Some(c) = s.conn() else { return };
+    let (cwd, host) = (c.cwd.clone(), prod());
+    let entry = |name: &str, kind: dromon_core::EntryKind, size: u64| dromon_core::Entry {
+        name: name.into(),
+        kind,
+        size,
+        mtime: Some(1_795_000_000),
+        mode: Some(0o644),
+    };
+    use dromon_core::EntryKind::{Dir, File};
+    let entries = vec![
+        entry("folder", Dir, 0),
+        entry("plain", File, 1200),
+        entry("code.rs", File, 3400),
+        entry("notes.txt", File, 900),
+        entry("server.log", File, 48000),
+        entry("photo.png", File, 250_000),
+        entry("song.mp3", File, 4_100_000),
+        entry("clip.mp4", File, 52_000_000),
+        entry("paper.pdf", File, 810_000),
+        entry("backup.zip", File, 9_000_000),
+        entry("tool.bin", File, 120_000),
+    ];
+    s.apply(ServiceEvent::Listing { host, path: cwd, entries });
+}
+
 /// A named state: what `AppSpec::scenes` takes.
 pub type Scene = (&'static str, fn(&mut App));
 
@@ -404,4 +434,5 @@ pub const SCENES: &[Scene] = &[
     ("menu-row", menu_row),
     ("menu-empty", menu_empty),
     ("file-ops-light", file_ops_light),
+    ("icons", icons),
 ];

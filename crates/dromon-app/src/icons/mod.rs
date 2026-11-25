@@ -110,6 +110,30 @@ pub static FILE_BINARY: IconPair = pair!(
     concat!(page_1x!(), r#"<path d="M6 8.5L7.5 10L6 11.5M8.5 11.5H10"/>"#),
     concat!(page_2x!(), r#"<path d="M6 8.75L7.5 10.25L6 11.75M8.5 11.75H10"/>"#)
 );
+/// A music note: an eighth note whose stem (a straight vertical edge) is tangent to its head.
+pub static FILE_AUDIO: IconPair = pair!(
+    "dromon-file-audio",
+    concat!(page_1x!(), r#"<circle cx="7" cy="11.5" r="1.5"/><path d="M8.5 11.5V7.5L10.5 9"/>"#),
+    concat!(page_2x!(), r#"<circle cx="7.25" cy="11.5" r="1.5"/><path d="M8.75 11.5V7.5L10.5 9"/>"#)
+);
+/// A play triangle whose upright edge is pixel-exact, like `RESUME`'s.
+pub static FILE_VIDEO: IconPair = pair!(
+    "dromon-file-video",
+    concat!(page_1x!(), r#"<path d="M6.5 7.5V12.5L10.5 10L6.5 7.5Z"/>"#),
+    concat!(page_2x!(), r#"<path d="M6.25 7.5V12.5L10.5 10L6.25 7.5Z"/>"#)
+);
+/// A title line over a heavy bar (2 pt at 1×, 3 pt at 2×, centred on a whole point so both edges sit on pixels).
+pub static FILE_PDF: IconPair = pair!(
+    "dromon-file-pdf",
+    concat!(page_1x!(), r#"<path d="M6 8.5H8"/><path d="M6 11H10" stroke-width="2"/>"#),
+    concat!(page_2x!(), r#"<path d="M6 7.75H8"/><path d="M6 11H10" stroke-width="3"/>"#)
+);
+/// The connection log: a window of lines, each a timestamp tick and a message.
+pub static LOG: IconPair = pair!(
+    "dromon-log",
+    r#"<rect x="2.5" y="3.5" width="11" height="10" rx="1.5"/><path d="M5.5 6.5H6.5M8.5 6.5H11M5.5 8.5H6.5M8.5 8.5H10.5M5.5 10.5H6.5M8.5 10.5H10"/>"#,
+    r#"<rect x="2.25" y="3.75" width="11.5" height="10" rx="1.5"/><path d="M5.5 6.75H6.5M8.5 6.75H11M5.5 8.75H6.5M8.5 8.75H10.5M5.5 10.75H6.5M8.5 10.75H10"/>"#
+);
 /// Drawn at 10 pt in a knocked-out disc at a file icon's bottom-left corner, on its own 10 pt grid.
 pub static LINK_BADGE: IconPair = IconPair {
     x1: stroked!("dromon-link-badge@1x", 10.0, "1", r#"<path d="M3.5 6.5L6.5 3.5M4 3.5H6.5V6"/>"#),
@@ -203,6 +227,9 @@ pub fn for_file(name: &str) -> (&'static IconPair, Option<f32>) {
         "md" | "txt" | "log" | "csv" | "conf" | "ini" | "env" => (&FILE_TEXT, None),
         "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "ico" | "avif" | "heic" => (&FILE_IMAGE, Some(320.0)),
         "zip" | "gz" | "tgz" | "xz" | "bz2" | "zst" | "tar" | "7z" | "rar" => (&FILE_ARCHIVE, Some(70.0)),
+        "mp3" | "m4a" | "aac" | "flac" | "wav" | "ogg" | "opus" | "aiff" | "aif" | "wma" => (&FILE_AUDIO, Some(150.0)),
+        "mp4" | "m4v" | "mov" | "mkv" | "webm" | "avi" | "wmv" | "mpg" | "mpeg" => (&FILE_VIDEO, Some(200.0)),
+        "pdf" => (&FILE_PDF, Some(355.0)),
         "bin" | "exe" | "so" | "dylib" | "dll" | "o" | "a" | "wasm" => (&FILE_BINARY, Some(20.0)),
         _ => (&FILE, None),
     }

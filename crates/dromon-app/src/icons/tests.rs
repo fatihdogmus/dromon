@@ -12,6 +12,15 @@ fn categories_by_extension() {
     assert_eq!(for_file("index.html").0.x1.name, "dromon-file-code@1x");
     assert_eq!(for_file("photo.JPG").0.x2.name, "dromon-file-image@2x");
     assert_eq!(for_file("backup.tar.gz").0.x1.name, "dromon-file-archive@1x");
+    assert_eq!(for_file("song.MP3").0.x1.name, "dromon-file-audio@1x");
+    assert_eq!(for_file("clip.webm").0.x2.name, "dromon-file-video@2x");
+    assert_eq!(for_file("paper.pdf").0.x1.name, "dromon-file-pdf@1x");
+    for ext in ["mp3", "m4a", "aac", "flac", "wav", "ogg", "opus", "aiff", "aif", "wma"] {
+        assert_eq!(for_file(&format!("a.{ext}")).0.x1.name, "dromon-file-audio@1x", "{ext}");
+    }
+    for ext in ["mp4", "m4v", "mov", "mkv", "webm", "avi", "wmv", "mpg", "mpeg"] {
+        assert_eq!(for_file(&format!("a.{ext}")).0.x1.name, "dromon-file-video@1x", "{ext}");
+    }
     assert_eq!(for_file("README").0.x1.name, "dromon-file@1x");
     // A dotfile's name is not an extension.
     assert_eq!(for_file(".gitignore").0.x1.name, "dromon-file@1x");
@@ -27,6 +36,10 @@ const ALL: &[&IconPair] = &[
     &FILE_IMAGE,
     &FILE_ARCHIVE,
     &FILE_BINARY,
+    &FILE_AUDIO,
+    &FILE_VIDEO,
+    &FILE_PDF,
+    &LOG,
     &LINK_BADGE,
     &LOCK,
     &SERVER,
@@ -139,6 +152,15 @@ fn straight_edges_are_pixel_exact_at_both_scales() {
         scan(&FILE_TEXT, Line::Col(7.0), full, 5),
         scan(&FILE_CODE, Line::Row(13.0), full, 2),
         scan(&FILE_ARCHIVE, Line::Row(10.0), full, 3),
+        // FILE_AUDIO: the page's left side and the note's stem (clear of the flag).
+        scan(&FILE_AUDIO, Line::Row(8.0), (0.0, 9.5), 2),
+        // FILE_VIDEO: the page's left side and the triangle's upright edge.
+        scan(&FILE_VIDEO, Line::Row(10.0), (0.0, 8.0), 2),
+        // FILE_PDF: the page's top, the title line, the heavy bar (two strokes thick) and the bottom.
+        scan(&FILE_PDF, Line::Col(7.0), full, 5),
+        // LOG: the frame's top and bottom around three message lines; its left side.
+        scan(&LOG, Line::Col(9.0), full, 5),
+        scan(&LOG, Line::Row(8.0), (0.0, 4.0), 1),
         // SERVER: the tops and bottoms of both units, then each side clear of the status dot.
         scan(&SERVER, Line::Col(8.0), full, 4),
         scan(&SERVER, Line::Row(4.0), (0.0, 4.0), 1),
