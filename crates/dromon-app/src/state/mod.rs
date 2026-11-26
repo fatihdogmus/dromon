@@ -19,6 +19,7 @@ pub mod keys;
 pub mod log;
 pub mod menu;
 pub mod ops;
+pub mod page;
 pub mod palette;
 pub mod prefs;
 pub mod quick;
@@ -48,13 +49,14 @@ pub use menu::MenuKind;
 pub use hosts::{HostDirectory, Section};
 pub use keys::Shortcut;
 pub use ops::{OpView, Ops};
+pub use page::{Page, SettingsSection};
 pub use palette::PaletteAction;
 pub use prefs::{NoStore, Saved, Store};
 pub use selection::{Selection, TypeSelect};
 #[cfg(test)]
 pub use service::Recorder;
 pub use service::{Backend, Command, FileOp, FileOpKind, HostBookCommand, HostBookEvent, OpId, ServiceEvent, Silent, TransferCommand, WindowId};
-pub use settings::{Density, Settings, SettingsChange, SettingsView, SettingsWindow};
+pub use settings::{Density, Settings, SettingsChange, SettingsView};
 pub use sheets::{Sheet, Sheets};
 pub use transfers::{DropHover, DropTarget, Tab, Transfers};
 pub use windows::{News, NoPeers, Peers};
@@ -87,9 +89,9 @@ pub struct UiState {
     pub quick: quick::QuickConnect,
     /// The ⌘K palette (`palette.rs`).
     pub palette: palette::Palette,
-    /// Scenes only: this window draws the Settings window's view (`views/settings.rs`), since a
-    /// headless run renders no second window.
-    pub settings_preview: bool,
+    /// The folder view, or the Settings page in its place (`page.rs`).
+    pub page: Page,
+    pub settings_page: page::SettingsPage,
     /// What screen readers are told as it happens (`focus.rs`, §6.9).
     pub announcer: focus::Announcer,
 }
@@ -108,7 +110,8 @@ impl Default for UiState {
             quit_approved: false,
             quick: quick::QuickConnect::default(),
             palette: palette::Palette::default(),
-            settings_preview: false,
+            page: Page::Files,
+            settings_page: page::SettingsPage::default(),
             announcer: focus::Announcer::default(),
         }
     }
@@ -131,8 +134,6 @@ pub struct App {
     pub show_hidden_default: bool,
     /// Theme, density, download folder, transfers at once, hidden files (`settings.rs`, §8).
     pub settings: Settings,
-    /// The Settings window, a second window with its own state (`settings_window.rs`).
-    pub settings_window: Box<dyn SettingsWindow>,
     /// Sort remembered globally (§12).
     pub sort: Sort,
     pub backend: Box<dyn Backend>,
@@ -228,9 +229,14 @@ pub enum Action {
     File(FileAction),
     /// The ⌘K palette (`palette.rs`).
     Palette(PaletteAction),
-    /// Open the Settings window, or bring it forward (⌘,, the app menu, the palette).
+    /// Show the Settings page in this window, or keep it (⌘,, the app menu, the palette, the
+    /// sidebar's gear; `page.rs`).
     OpenSettings,
-    /// A control in the Settings window (`settings.rs`).
+    /// The page's back button, Escape: back to the folder view.
+    LeaveSettings,
+    /// A section picked in the page's list.
+    SettingsSection(SettingsSection),
+    /// A control on the Settings page (`settings.rs`).
     Setting(SettingsChange),
     /// ⌘N, the File menu: another main window, on the welcome state (`windows.rs`).
     NewWindow,
@@ -270,7 +276,6 @@ impl App {
             now,
             show_hidden_default: true,
             settings: Settings::default(),
-            settings_window: Box::new(settings::NoWindow),
             sort: Sort::default(),
             backend,
             wall_ms: system_ms,
@@ -619,6 +624,8 @@ impl App {
             Action::File(a) => self.file_action(a, &mut fx),
             Action::Palette(a) => self.palette_action(a, &mut fx),
             Action::OpenSettings => self.open_settings(),
+            Action::LeaveSettings => self.leave_settings(),
+            Action::SettingsSection(section) => self.show_section(section),
             Action::Setting(change) => self.change_setting(change),
             Action::NewWindow => self.new_window(),
             Action::CloseWindow => self.close_window(&mut fx),
@@ -640,8 +647,8 @@ impl App {
     /// Maps a shortcut to its action (`now` is for type-to-select). The conflict sheet is
     /// modal like the prompt sheets: while it's up, the list's shortcuts do nothing.
     pub fn shortcut(&mut self, sc: Shortcut, now: f64) -> Vec<Effect> {
-        // Settings is another window: it opens whatever is modal here, as the app menu's item
-        // does; so do ⌘N and ⌘W, which are about windows, not this one's content.
+        // ⌘, shows the Settings page under whatever is modal here, as the app menu's item does;
+        // ⌘N and ⌘W are about windows, not this one's content.
         match sc {
             Shortcut::Settings => return self.act(Action::OpenSettings),
             Shortcut::NewWindow => return self.act(Action::NewWindow),
@@ -661,6 +668,10 @@ impl App {
         // So is the palette: only its own keys (`palette.rs`).
         if self.ui.palette.is_open() {
             return self.palette_shortcut(sc);
+        }
+        // The Settings page has a few of its own; the folder view's wait for it (`page.rs`).
+        if self.on_settings() {
+            return self.settings_shortcut(sc);
         }
         let action = match sc {
             // ⌘K opens the palette from anywhere, a focused field included.
@@ -699,6 +710,8 @@ impl App {
         if self.hosts.get(&host).is_none() {
             return;
         }
+        // Picking a host leaves the Settings page for its folder view.
+        self.leave_settings();
         self.remember_host(&host);
         self.ui.filter_edit = TextEdit::new("");
         self.active = Some(host.clone());

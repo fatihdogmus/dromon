@@ -8,7 +8,9 @@
 //!
 //! The File menu (macOS) has New Window (⌘N) and Close Window (⌘W); their keys reach the
 //! window first (`keys_first`), so on every platform `on_key` takes them. Closing the last main
-//! window quits the app, on macOS too.
+//! window quits the app, on macOS too. The app menu's "Settings…" (⌘,, macOS) acts in the key
+//! window, as Rune's menu bar holds the key window's items: it shows that window's Settings page
+//! (`state/page.rs`). On Windows and Linux Rune has no app menu, and Ctrl+, reaches `on_key`.
 //!
 //! The taskbar, the Dock badge and notifications are hooked up once for the app
 //! ([`Fleet::connect_os`]); every main window's native window joins that link, and only the
@@ -18,13 +20,14 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use rune::{App as RuneApp, AppHandle, Display, MenuItem, Titlebar, Tx, WindowHandle, WindowOptions, WindowPlacement, WindowSpec};
+use rune::{App as RuneApp, AppHandle, ColorScheme, Display, MenuItem, Titlebar, Tx, WindowHandle, WindowOptions, WindowPlacement, WindowSpec};
 
 use crate::service::RuneSink;
 use crate::state::frames::{self, Area, CASCADE, Frame};
 use crate::state::{Action, App, News, Peers, WindowId};
+use crate::theme::Appearance;
 use crate::views::OsLink;
-use crate::{settings_window, theme, views};
+use crate::{theme, views};
 
 /// The app's main windows.
 #[derive(Clone, Default)]
@@ -60,7 +63,7 @@ impl Fleet {
         self.lock().get(&id).cloned()
     }
 
-    /// The first main window still open, which the Settings window's changes go to.
+    /// The first main window still open.
     pub fn first(&self) -> Option<AppHandle<App>> {
         self.sink.handles().into_iter().next().map(|(_, h)| h)
     }
@@ -105,6 +108,18 @@ impl Peers for Fleet {
         self.sink.remove(window);
         self.lock().remove(&window);
     }
+
+    /// The app's color scheme, which every window without one of its own follows (Rune keeps
+    /// it for windows made later; nothing in a headless run).
+    fn theme(&self, theme: Appearance) {
+        if let Some(window) = self.first() {
+            window.set_color_scheme(match theme {
+                Appearance::System => ColorScheme::System,
+                Appearance::Dark => ColorScheme::Dark,
+                Appearance::Light => ColorScheme::Light,
+            });
+        }
+    }
 }
 
 /// A placement as a frame to reopen at: a maximized window's restored frame where the system
@@ -143,9 +158,9 @@ fn options_at(f: Frame) -> WindowOptions {
     WindowOptions { position: Some((f.x, f.y)), physical_size: Some((f.width, f.height)), ..WindowOptions::default() }
 }
 
-/// The first main window's app, with the Settings window beside it.
+/// The first main window's app.
 pub fn first(fleet: &Fleet) -> RuneApp<App> {
-    settings_window::attach(main_window(fleet, WindowId::FIRST, RuneApp::new(crate::spec())), fleet)
+    main_window(fleet, WindowId::FIRST, RuneApp::new(crate::spec()))
 }
 
 /// What every main window's app has: one 44 pt band for title bar and toolbar (§6.2), the
@@ -177,7 +192,7 @@ fn main_window(fleet: &Fleet, id: WindowId, app: RuneApp<App>) -> RuneApp<App> {
         })
         .menu_item(menu_item("New Window", "new-window", "mod+n", |s, tx| views::run(s, Action::NewWindow, tx)))
         .menu_item(menu_item("Close Window", "close-window", "mod+w", |s, tx| views::run(s, Action::CloseWindow, tx)))
-        .menu_item(settings_window::menu_item())
+        .menu_item(settings_item())
 }
 
 fn menu_item(title: &str, id: &str, chord: &str, action: fn(&mut App, &mut Tx)) -> MenuItem<App> {
@@ -188,9 +203,28 @@ fn menu_item(title: &str, id: &str, chord: &str, action: fn(&mut App, &mut Tx)) 
     }
 }
 
-/// The fleet as a window state's peers, and its backend waking the windows (a fixture's).
+/// The app menu's "Settings…" (⌘,): the Settings page in the window it acts in.
+fn settings_item() -> MenuItem<App> {
+    let item = MenuItem::new("Settings…", open_settings).id("settings");
+    match "mod+comma".parse() {
+        Ok(chord) => item.key_equivalent(chord),
+        Err(_) => item,
+    }
+}
+
+fn open_settings(s: &mut App, tx: &mut Tx) {
+    views::run(s, Action::OpenSettings, tx);
+}
+
+/// The fleet as a window state's peers, and its backend waking the windows (a fixture's); the
+/// windows' frames take the theme it starts with. Outside a headless run, its Settings page
+/// writes folders under the home folder as `~/…`.
 pub fn join(fleet: &Fleet, app: &mut App) {
     app.set_peers(Rc::new(fleet.clone()));
+    fleet.theme(app.settings.theme);
+    if rune::tooling::headless_run().is_none() {
+        app.ui.settings_page.home = rune::dirs::home();
+    }
     let waker = fleet.clone();
     app.backend.set_wake(Box::new(move |w| waker.wake(w)));
 }

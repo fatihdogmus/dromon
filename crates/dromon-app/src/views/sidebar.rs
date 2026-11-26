@@ -1,10 +1,11 @@
 //! The host sidebar (§6.2): Connected, SSH Config, Saved and Recent, with a quick-connect
-//! button at the bottom. Its right edge drags to resize it between 200 and 320 pt.
+//! button and the Settings gear at the bottom. Its right edge drags to resize it between 200
+//! and 320 pt. It stays while the Settings page is on screen; picking a host leaves the page.
 
 use dromon_core::{ConnStatus, HostSpec};
 use rune::{Color, Cursor, Drag, El, Phase, ScrollSpec, Tx, col, el, icon, row, text};
 
-use super::widgets::{Keyboard, dot};
+use super::widgets::{Keyboard, dot, icon_button};
 use super::{Paint, menu};
 use crate::icons;
 use crate::state::{Action, App, MenuKind, RowTarget, Section, hosts};
@@ -12,6 +13,8 @@ use crate::theme::{motion, radius, size, space, type_};
 
 /// The key of the + button, which the quick-connect popover hangs from.
 pub const QUICK_CONNECT: &str = "sb-quick-connect";
+/// The key of the gear beside it.
+pub const SETTINGS: &str = "sidebar-settings";
 
 pub fn view(s: &App, p: Paint) -> El {
     let t = p.t;
@@ -32,7 +35,7 @@ pub fn view(s: &App, p: Paint) -> El {
         .border_sides([0.0, p.hair, 0.0, 0.0], t.border_subtle)
         .child(band(p))
         .child(sections)
-        .child(footer(p))
+        .child(footer(s, p))
         .child(resize_grip())
 }
 
@@ -144,8 +147,16 @@ fn host_row(s: &App, p: Paint, h: &HostSpec) -> El {
     r
 }
 
-fn footer(p: Paint) -> El {
+/// Quick connect, and the gear that shows the Settings page (filled while it's on screen).
+fn footer(s: &App, p: Paint) -> El {
     let t = p.t;
+    fn open_settings(s: &mut App, tx: &mut Tx) {
+        super::run(s, Action::OpenSettings, tx)
+    }
+    let mut settings = icon_button(p, SETTINGS, "Settings", &icons::GEAR, Some(open_settings));
+    if s.on_settings() {
+        settings = settings.fill(t.active);
+    }
     let button = row()
         .key(QUICK_CONNECT)
         .role("button")
@@ -162,7 +173,15 @@ fn footer(p: Paint) -> El {
         .on_press_tx(|s: &mut App, tx: &mut Tx| super::run(s, Action::QuickConnect, tx))
         .tab_press()
         .child(text("Quick connect").font(type_::BODY).color(t.text_2).grow(1.0));
-    row().w_full().h(44.0).px(space::S2).center_y().border_sides([p.hair, 0.0, 0.0, 0.0], t.border_subtle).child(button)
+    row()
+        .w_full()
+        .h(44.0)
+        .px(space::S2)
+        .gap(space::S1)
+        .center_y()
+        .border_sides([p.hair, 0.0, 0.0, 0.0], t.border_subtle)
+        .child(button)
+        .child(settings)
 }
 
 /// The resize handle on the sidebar's right edge.

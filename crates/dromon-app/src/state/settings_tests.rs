@@ -1,5 +1,6 @@
 //! Settings: defaults, clamping, what each change does at once, what's remembered, prefs from
-//! before Settings, and what the window is told.
+//! before Settings; and the Settings page (`page.rs`): what opens and leaves it, its sections,
+//! the folder view it leaves as it was, and a change reaching another window's page.
 
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -9,7 +10,9 @@ use dromon_core::HostId;
 
 use super::*;
 use crate::fixture;
-use crate::state::{Action, Recorder, Saved, Shortcut, Store};
+use crate::state::frames::Frame;
+use crate::state::page::{self, PageEvent};
+use crate::state::{Action, News, Page, PaletteAction, Peers, Recorder, Saved, SettingsSection, Shortcut, Store, WindowId};
 
 /// A store that keeps every snapshot it was handed.
 #[derive(Clone, Default)]
@@ -27,28 +30,6 @@ impl Recorded {
     }
     fn count(&self) -> usize {
         self.0.borrow().len()
-    }
-}
-
-/// A window that notes what it was asked: `(opened, view)` per call.
-#[derive(Clone, Default)]
-struct Window(Rc<RefCell<Vec<(bool, SettingsView)>>>);
-
-impl SettingsWindow for Window {
-    fn open(&mut self, view: SettingsView) {
-        self.0.borrow_mut().push((true, view));
-    }
-    fn show(&mut self, view: SettingsView) {
-        self.0.borrow_mut().push((false, view));
-    }
-    fn another(&self) -> Box<dyn SettingsWindow> {
-        Box::new(self.clone())
-    }
-}
-
-impl Window {
-    fn calls(&self) -> Vec<(bool, SettingsView)> {
-        self.0.borrow().clone()
     }
 }
 
@@ -238,30 +219,239 @@ fn the_hidden_files_default_is_for_hosts_opened_from_now_on() {
 }
 
 #[test]
-fn the_window_opens_on_the_apps_values_and_is_told_every_change() {
-    let mut s = fixture::app(fixture::demo());
-    let window = Window::default();
-    s.attach_settings_window(Box::new(window.clone()));
-    assert_eq!(window.calls(), [(false, s.settings_view())], "it shows the values from the start");
-    s.act(Action::OpenSettings);
-    s.shortcut(Shortcut::Settings, 0.0);
-    set(&mut s, SettingsChange::TransfersAtOnce(20));
-    let calls = window.calls();
-    assert_eq!(calls.len(), 4);
-    assert!(calls[1].0 && calls[2].0, "⌘, again opens (brings forward) the one window");
-    assert_eq!((calls[3].0, calls[3].1.settings.transfers_at_once), (false, 8), "it shows the app's clamped value");
-    assert_eq!(calls[3].1.default_folder, s.downloads);
+fn the_page_moves_by_its_step() {
+    use SettingsSection::{Appearance as Look, Browsing, Transfers};
+    let on = Page::Settings;
+    assert_eq!(page::step(Page::Files, PageEvent::OpenSettings), on(Look), "it opens on Appearance");
+    assert_eq!(page::step(on(Transfers), PageEvent::OpenSettings), on(Transfers), "opening it again keeps it");
+    assert_eq!(page::step(on(Look), PageEvent::Section(Browsing)), on(Browsing));
+    assert_eq!(page::step(Page::Files, PageEvent::Section(Browsing)), Page::Files, "no section without the page");
+    assert_eq!(page::step(on(Browsing), PageEvent::Leave), Page::Files);
+    assert_eq!(page::step(Page::Files, PageEvent::Leave), Page::Files);
+    assert_eq!(Page::default(), Page::Files);
+    assert_eq!(SettingsSection::ALL.map(SettingsSection::title), ["Appearance", "Transfers", "Browsing"]);
+}
+
+/// Pick a palette row by its key, the query typed first (an empty query may not list it).
+fn pick(s: &mut App, query: &str, key: &str) {
+    s.act(Action::Palette(PaletteAction::Toggle));
+    s.ui.palette.edit = rune::TextEdit::new(query);
+    s.act(Action::Palette(PaletteAction::Edited));
+    s.act(Action::Palette(PaletteAction::Pick(key.into())));
 }
 
 #[test]
-fn cmd_comma_opens_settings_over_whatever_is_modal_here() {
+fn every_entry_point_opens_the_page_and_opening_again_keeps_it() {
+    let appearance = Page::Settings(SettingsSection::Appearance);
     let mut s = fixture::app(fixture::demo());
-    let window = Window::default();
-    s.attach_settings_window(Box::new(window.clone()));
+    s.act(Action::OpenSettings);
+    assert_eq!(s.ui.page, appearance, "the gear and the app menu's Settings…");
+    s.act(Action::SettingsSection(SettingsSection::Transfers));
+    s.act(Action::OpenSettings);
+    s.shortcut(Shortcut::Settings, 0.0);
+    assert_eq!(s.ui.page, Page::Settings(SettingsSection::Transfers), "no toggle, and the section stays");
+
+    let mut s = fixture::app(fixture::demo());
+    s.shortcut(Shortcut::Settings, 0.0);
+    assert_eq!(s.ui.page, appearance, "⌘, / Ctrl+,");
+
+    let mut s = fixture::app(fixture::demo());
+    pick(&mut s, "settings", "pal-settings");
+    assert_eq!(s.ui.page, appearance, "the palette's Settings…");
+    assert!(!s.ui.palette.is_open());
+}
+
+#[test]
+fn cmd_comma_opens_the_page_under_whatever_is_modal_here() {
+    let mut s = fixture::app(fixture::demo());
     s.act(Action::QuickConnect);
     s.shortcut(Shortcut::Settings, 0.0);
     assert!(s.ui.quick.open, "the popover stays");
-    assert!(window.calls().last().is_some_and(|(opened, _)| *opened));
+    assert!(s.on_settings());
+}
+
+/// What the window's folder view is: host, folder, history, selection, filter, rows.
+fn folder_view(s: &App) -> (Option<HostId>, String, bool, Vec<String>, bool, Vec<String>) {
+    let c = s.conn().expect("a host on screen");
+    let selected = c.selection.iter().map(str::to_owned).collect();
+    let rows = c.row_names().into_iter().map(str::to_owned).collect();
+    (s.active.clone(), c.cwd.to_string(), c.history.can_back(), selected, c.filter.is_on(), rows)
+}
+
+/// prod, back from releases, index.html and robots.txt selected, the filter on "t".
+fn browsing() -> App {
+    let mut s = fixture::app(fixture::demo());
+    s.act(Action::SelectHost(HostId("prod".into())));
+    s.act(Action::Open("releases".into()));
+    s.act(Action::GoUp);
+    s.act(Action::OpenFilter);
+    s.ui.filter_edit = rune::TextEdit::new("t");
+    s.act(Action::FilterChanged("t".into()));
+    s.act(Action::Click { name: "index.html".into(), extend: false, toggle: false });
+    s.act(Action::Click { name: "robots.txt".into(), extend: false, toggle: true });
+    s
+}
+
+#[test]
+fn back_and_escape_leave_the_page_for_the_folder_view_as_it_was() {
+    let mut s = browsing();
+    let before = folder_view(&s);
+    assert_eq!(before.3.len(), 2);
+    s.act(Action::OpenSettings);
+    // The folder view's keys wait while the page is up: nothing moves, opens or downloads.
+    let sent = Recorder::default();
+    s.backend = Box::new(sent.clone());
+    for sc in [
+        Shortcut::Move { delta: 1, extend: false },
+        Shortcut::Open,
+        Shortcut::Back,
+        Shortcut::Up,
+        Shortcut::SelectAll,
+        Shortcut::Download,
+        Shortcut::ToggleHidden,
+        Shortcut::Filter,
+        Shortcut::Type("a".into()),
+    ] {
+        assert_eq!(s.shortcut(sc.clone(), 0.0), Vec::new(), "{sc:?}");
+    }
+    assert!(sent.sent().is_empty(), "{:?}", sent.sent());
+    assert!(s.on_settings());
+    assert_eq!(folder_view(&s), before);
+    // Escape leaves the page (it doesn't clear the selection, as it would on the list).
+    s.shortcut(Shortcut::Escape, 0.0);
+    assert_eq!(s.ui.page, Page::Files);
+    assert_eq!(folder_view(&s), before);
+    // The back button.
+    s.act(Action::OpenSettings);
+    s.act(Action::LeaveSettings);
+    assert_eq!(s.ui.page, Page::Files);
+    assert_eq!(folder_view(&s), before);
+}
+
+#[test]
+fn a_host_picked_anywhere_leaves_the_page_and_goes_there() {
+    let nas = HostId("nas".into());
+    // The sidebar (or the active host again: its folder view, as it was).
+    let mut s = browsing();
+    let before = folder_view(&s);
+    s.act(Action::OpenSettings);
+    s.act(Action::SelectHost(HostId("prod".into())));
+    assert_eq!((s.ui.page, folder_view(&s)), (Page::Files, before));
+    s.act(Action::OpenSettings);
+    s.act(Action::SelectHost(nas.clone()));
+    assert_eq!((s.ui.page, s.active.clone()), (Page::Files, Some(nas.clone())));
+    // ⌘1 … ⌘9.
+    let mut s = browsing();
+    s.act(Action::OpenSettings);
+    let n = s.sidebar_order().iter().position(|h| *h == nas).unwrap() + 1;
+    s.shortcut(Shortcut::Host(n), 0.0);
+    assert_eq!((s.ui.page, s.active.clone()), (Page::Files, Some(nas.clone())));
+    // The palette: any row but Settings… is about the folder view.
+    let mut s = browsing();
+    s.act(Action::OpenSettings);
+    pick(&mut s, "settings", "pal-settings");
+    assert!(s.on_settings(), "Settings… keeps it");
+    pick(&mut s, "nas", "pal-host-nas");
+    assert_eq!((s.ui.page, s.active.clone()), (Page::Files, Some(nas)));
+    // A host that isn't there changes nothing.
+    let mut s = browsing();
+    s.act(Action::OpenSettings);
+    s.act(Action::SelectHost(HostId("nope".into())));
+    assert!(s.on_settings());
+}
+
+#[test]
+fn escape_closes_the_palette_or_the_popover_before_the_page() {
+    let mut s = browsing();
+    s.act(Action::OpenSettings);
+    s.shortcut(Shortcut::Palette, 0.0);
+    assert!(s.ui.palette.is_open(), "⌘K works on the page");
+    s.shortcut(Shortcut::Escape, 0.0);
+    assert!(!s.ui.palette.is_open() && s.on_settings());
+    s.shortcut(Shortcut::QuickConnect, 0.0);
+    assert!(s.ui.quick.open, "so does ⌘⇧K");
+    s.shortcut(Shortcut::Escape, 0.0);
+    assert!(!s.ui.quick.open && s.on_settings());
+    s.shortcut(Shortcut::Escape, 0.0);
+    assert!(!s.on_settings());
+}
+
+#[test]
+fn opening_the_page_closes_what_floats_over_the_folder_view() {
+    let mut s = browsing();
+    s.act(Action::ToggleTransfers);
+    s.ui.settings_page.error = Some("no portal".into());
+    s.act(Action::OpenSettings);
+    assert!(!s.transfers.open, "the transfers popover hangs from the toolbar, which the page covers");
+    assert_eq!(s.ui.settings_page.error, None);
+    // The folder picker's error goes with the next change.
+    s.ui.settings_page.error = Some("no portal".into());
+    set(&mut s, SettingsChange::TransfersAtOnce(4));
+    assert_eq!(s.ui.settings_page.error, None);
+}
+
+/// Peers that keep the windows ⌘N opens, the news told and the themes the frames were given.
+#[derive(Clone, Default)]
+struct Windows {
+    opened: Rc<RefCell<Vec<App>>>,
+    news: Rc<RefCell<Vec<(WindowId, News)>>>,
+    themes: Rc<RefCell<Vec<Appearance>>>,
+}
+
+impl Peers for Windows {
+    fn can_open(&self) -> bool {
+        true
+    }
+    fn open_window(&self, _: WindowId, app: App) {
+        self.opened.borrow_mut().push(app);
+    }
+    fn tell(&self, from: WindowId, news: News) {
+        self.news.borrow_mut().push((from, news));
+    }
+    fn frame(&self, _: WindowId) -> Option<Frame> {
+        None
+    }
+    fn closed(&self, _: WindowId) {}
+    fn theme(&self, theme: Appearance) {
+        self.themes.borrow_mut().push(theme);
+    }
+}
+
+impl Windows {
+    /// Hands the news to `to`, as `crate::windows` does.
+    fn deliver(&self, to: &mut App) {
+        for (from, news) in std::mem::take(&mut *self.news.borrow_mut()) {
+            if from != to.window {
+                to.hear(news);
+            }
+        }
+    }
+}
+
+#[test]
+fn each_window_has_its_own_page_and_a_change_shows_on_every_one() {
+    let mut a = fixture::app(fixture::demo());
+    let peers = Windows::default();
+    a.set_peers(Rc::new(peers.clone()));
+    a.act(Action::OpenSettings);
+    a.act(Action::NewWindow);
+    let mut b = peers.opened.borrow_mut().pop().expect("⌘N opened a window");
+    assert_eq!(b.ui.page, Page::Files, "a new window opens on its folder view");
+    b.act(Action::OpenSettings);
+    b.act(Action::SettingsSection(SettingsSection::Transfers));
+    assert_eq!(a.ui.page, Page::Settings(SettingsSection::Appearance), "a's page is its own");
+
+    // A change on a's page reaches b's, which shows it, on the section it was on.
+    set(&mut a, SettingsChange::TransfersAtOnce(6));
+    peers.deliver(&mut b);
+    assert_eq!(b.settings_view().settings.transfers_at_once, 6);
+    assert_eq!(b.ui.page, Page::Settings(SettingsSection::Transfers));
+    // And back: the theme from b's page repaints a, and the windows' frames follow it once.
+    set(&mut b, SettingsChange::Theme(Appearance::Light));
+    peers.deliver(&mut a);
+    assert_eq!((a.settings.theme, a.ui.appearance), (Appearance::Light, Appearance::Light));
+    set(&mut b, SettingsChange::Density(Density::Compact));
+    assert_eq!(*peers.themes.borrow(), [Appearance::Light], "only a theme change reaches the frames");
 }
 
 #[test]

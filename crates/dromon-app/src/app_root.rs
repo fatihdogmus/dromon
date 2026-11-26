@@ -11,7 +11,6 @@ mod persist;
 mod reveal;
 mod scenes;
 pub mod service;
-mod settings_window;
 pub mod state;
 #[allow(dead_code)]
 mod theme;
@@ -103,9 +102,8 @@ fn spec() -> AppSpec<App> {
 }
 
 /// The app's first main window with its chrome: one 44 pt band for title bar and toolbar
-/// (§6.2), its hooks and menus (`windows.rs`), and the Settings window beside it
-/// (`settings_window.rs`). Its state starts on the demo fixture; [`run`] gives it the real
-/// service or `--fixture`'s instead. (⌘N's windows open only in a real run.)
+/// (§6.2), its hooks and menus (`windows.rs`). Its state starts on the demo fixture; [`run`]
+/// gives it the real service or `--fixture`'s instead. (⌘N's windows open only in a real run.)
 pub fn app() -> RuneApp<App> {
     windows::first(&windows::Fleet::default())
 }

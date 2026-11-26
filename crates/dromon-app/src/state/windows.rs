@@ -29,6 +29,7 @@ use super::ops::Ops;
 use super::service::{Command, Silent, WindowId};
 use super::settings::Settings;
 use super::{App, Effect};
+use crate::theme::Appearance;
 
 #[cfg(test)]
 #[path = "windows_tests.rs"]
@@ -37,7 +38,7 @@ mod tests;
 /// What one window tells the others when it changed something they show too.
 #[derive(Clone, Debug, PartialEq)]
 pub enum News {
-    /// The settings now (a Settings window change, applied in the window that got it).
+    /// The settings now (a change on one window's Settings page, applied there already).
     Settings(Settings),
     /// The Recent section, newest first.
     Recent(Vec<HostSpec>),
@@ -60,6 +61,9 @@ pub trait Peers {
     fn frame(&self, window: WindowId) -> Option<Frame>;
     /// `window` closed: nothing goes to it any more.
     fn closed(&self, window: WindowId);
+    /// The theme is `theme` now (at launch, and after a change on a Settings page): every
+    /// window's own frame (title bar, the macOS appearance) follows it.
+    fn theme(&self, _theme: Appearance) {}
 }
 
 /// No other windows: scenes, tests and headless runs.
@@ -129,7 +133,8 @@ impl App {
         app.ui.sidebar_width = self.ui.sidebar_width;
         app.show_hidden_default = self.settings.show_hidden;
         app.sort = self.common.saved().sort.unwrap_or(self.sort);
-        app.settings_window = self.settings_window.another();
+        // Its Settings page writes the download folder as this one's does.
+        app.ui.settings_page.home = self.ui.settings_page.home.clone();
         app.wall_ms = self.wall_ms;
         app.downloads = self.downloads.clone();
         app.transfers.jobs = self.transfers.jobs.clone();

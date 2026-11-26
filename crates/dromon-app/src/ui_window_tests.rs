@@ -147,6 +147,20 @@ fn cmd_n_works_while_a_sheet_is_up() {
     assert!(!two.state.ui.sheets.is_open(), "the sheet is the first window's");
 }
 
+#[test]
+fn each_window_shows_its_own_settings_page() {
+    let (mut one, peers) = first();
+    click(&mut one, "host-prod");
+    let mut two = new_window(&mut one, &peers);
+    key(&mut two, Key::Command(','), primary());
+    assert!(two.find("settings").is_some(), "⌘, shows the page in the window it's pressed in");
+    assert!(!one.state.on_settings() && one.find("settings").is_none(), "the other keeps its folder view");
+    assert_eq!(cwd(&one), "/var/www/site");
+    // A window opened from one showing Settings opens on its folder view.
+    let three = new_window(&mut two, &peers);
+    assert!(!three.state.on_settings() && three.find("welcome").is_some());
+}
+
 fn running() -> dromon_transfer::JobView {
     use dromon_transfer::{JobId, JobKind, JobView, Progress, TaskState};
     JobView {

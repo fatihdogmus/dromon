@@ -32,7 +32,7 @@ pub struct Saved {
     /// From before Settings: ⌘⇧.'s last state, read once as the hidden-files default while
     /// `settings` is missing, and dropped when Settings is first saved.
     pub show_hidden: Option<bool>,
-    /// The Settings window's values (§8); missing in prefs from before it.
+    /// The Settings page's values (§8); missing in prefs from before it.
     pub settings: Option<Settings>,
     pub sidebar_width: Option<f32>,
     /// The host last opened, by host id: offered on the welcome screen at launch, never

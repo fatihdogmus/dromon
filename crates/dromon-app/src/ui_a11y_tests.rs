@@ -7,9 +7,7 @@
 use rune::{Env, Runtime};
 use serde_json::Value;
 
-use crate::settings_window::pane_app;
 use crate::state::{Action, App, ServiceEvent};
-use crate::views::settings::{self, Pane};
 use crate::{app, scenes};
 
 const SIZE: (f32, f32) = (1080.0, 680.0);
@@ -21,24 +19,15 @@ pub fn scene_runtime(scene: fn(&mut App)) -> Runtime<App> {
     rt
 }
 
+/// The scene named `name` in [`scenes::SCENES`].
+pub fn scene(name: &str) -> fn(&mut App) {
+    scenes::SCENES.iter().find(|(n, _)| *n == name).map(|(_, f)| *f).unwrap_or_else(|| panic!("no scene {name:?}"))
+}
+
 pub fn settle<S: 'static>(rt: &mut Runtime<S>) {
     for _ in 0..4 {
         rt.frame(0.25);
     }
-}
-
-/// The Settings window on the demo's settings, as `settings` and `settings-light` show it.
-pub fn pane_runtime(light: bool) -> Runtime<Pane> {
-    let mut s = scenes::base();
-    if light {
-        s.act(Action::Setting(crate::state::SettingsChange::Theme(crate::theme::Appearance::Light)));
-    }
-    let mut pane = Pane::new(|_| {});
-    pane.home = None;
-    pane.view = s.settings_view();
-    let mut rt = pane_app(pane).headless_runtime(settings::SIZE, Env::new(true, 1.0));
-    settle(&mut rt);
-    rt
 }
 
 /// One node of the tree, flattened.
@@ -234,14 +223,48 @@ fn table(rows: &[(String, Offence)]) -> String {
     s
 }
 
-/// Every scene's tree, and the Settings window's.
+/// Every scene's tree (the Settings page's among them), and the Settings page's last section.
 fn trees() -> Vec<(String, Vec<Node>)> {
     let mut out: Vec<(String, Vec<Node>)> = scenes::SCENES.iter().map(|(name, scene)| ((*name).to_owned(), tree(&scene_runtime(*scene)))).collect();
     // The reconnecting banner's Sign in is a state of its own (not a golden scene).
     out.push(("reconnect-sign-in".into(), tree(&scene_runtime(needs_sign_in))));
-    out.push(("settings-window".into(), tree(&pane_runtime(false))));
-    out.push(("settings-window-light".into(), tree(&pane_runtime(true))));
+    out.push(("settings-browsing".into(), tree(&scene_runtime(settings_browsing))));
     out
+}
+
+/// The Settings page on Browsing (not a golden scene).
+pub(crate) fn settings_browsing(s: &mut App) {
+    scenes::welcome(s);
+    s.act(Action::OpenSettings);
+    s.act(Action::SettingsSection(crate::state::SettingsSection::Browsing));
+}
+
+/// The Settings page (§6.9): its sections are a tablist whose chosen tab says so and names the
+/// panel it controls; the panel is that tab's; the folder view under the page is out of the
+/// tree, the sidebar isn't.
+#[test]
+fn the_settings_page_is_a_tablist_beside_the_sidebar() {
+    let nodes = tree(&scene_runtime(scene("settings-transfers")));
+    let list = node(&nodes, "settings-sections");
+    assert_eq!((list.role.as_str(), list.name.as_str()), ("tab-list", "Settings sections"));
+    assert_eq!(list.raw["orientation"].as_str(), Some("vertical"), "{list:?}");
+    let tabs: Vec<_> = children(&nodes, "settings-sections").into_iter().map(|n| (n.role.clone(), n.name.clone(), n.has_state("selected"))).collect();
+    let tab = |name: &str, on| ("tab".to_owned(), name.to_owned(), on);
+    assert_eq!(tabs, [tab("Appearance", false), tab("Transfers", true), tab("Browsing", false)]);
+    let chosen = node(&nodes, "settings-tab-transfers");
+    assert!(chosen.acts("click") && chosen.acts("focus"), "{chosen:?}");
+    assert!(chosen.raw["controls"].as_array().is_some_and(|c| c.iter().any(|k| k.as_str() == Some("settings-panel"))), "{chosen:?}");
+    let panel = node(&nodes, "settings-panel");
+    assert_eq!((panel.role.as_str(), panel.name.as_str()), ("tab-panel", "Transfers"));
+    let back = node(&nodes, "settings-back");
+    assert_eq!((back.role.as_str(), back.name.as_str()), ("button", "Back"));
+    assert!(back.acts("click") && back.acts("focus"));
+    let gear = node(&nodes, "sidebar-settings");
+    assert_eq!((gear.role.as_str(), gear.name.as_str()), ("button", "Settings"));
+    assert!(nodes.iter().any(|n| n.key == "host-prod"), "the sidebar stays");
+    for hidden in ["toolbar", "file-grid", "rows", "status-conn"] {
+        assert!(!nodes.iter().any(|n| n.key == hidden), "{hidden} is under the page");
+    }
 }
 
 #[test]
