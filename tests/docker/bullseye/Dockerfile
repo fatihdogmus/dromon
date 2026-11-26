@@ -9,7 +9,8 @@
 # Bullseye has left the Debian mirrors (its security pool already 404s), so the packages come from
 # a fixed snapshot.debian.org date: the image is reproducible. Check-Valid-Until is off because a
 # snapshot's Release files expire.
-FROM debian:bullseye-slim
+# Through Google's mirror of Docker Hub (no anonymous pull limit; see ../Dockerfile).
+FROM mirror.gcr.io/library/debian:bullseye-slim
 
 RUN printf '%s\n' \
         'deb http://snapshot.debian.org/archive/debian/20260824T000000Z bullseye main' \

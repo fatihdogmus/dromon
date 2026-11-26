@@ -7,7 +7,8 @@
 # context; they run under busybox), with an sshd_config of its own (alpine/sshd_config).
 #
 # Pinned to one Alpine release; bump the tag to follow the latest.
-FROM alpine:3.24
+# Through Google's mirror of Docker Hub (no anonymous pull limit; see ../Dockerfile).
+FROM mirror.gcr.io/library/alpine:3.24
 
 # busybox adduser leaves the password "!" (locked), which a sshd without PAM refuses even for
 # public keys; "*" only disables passwords.

@@ -7,7 +7,8 @@
 # 9999: the lifeline, as in ../entrypoint.sh.
 FROM ghcr.io/shopify/toxiproxy:2.12.0 AS toxiproxy
 
-FROM debian:trixie-slim
+# Through Google's mirror of Docker Hub (no anonymous pull limit; see ../Dockerfile).
+FROM mirror.gcr.io/library/debian:trixie-slim
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends socat \
     && rm -rf /var/lib/apt/lists/*
