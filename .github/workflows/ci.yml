@@ -197,7 +197,38 @@ jobs:
         with:
           distribution: Ubuntu-24.04
           wsl-version: 2
-          additional-packages: docker.io docker-buildx
+      # Docker in WSL from cached .deb files, as .github/actions/apt-install does on Linux:
+      # Ubuntu's mirror can be slow (setup-wsl's own apt-get install once took 20+ minutes).
+      # The key is the exact files apt resolves; apt checks each cached file against the signed
+      # package lists. Single-line `bash -c` commands: multi-line scripts reach WSL with CRLFs.
+      - id: wsl-apt
+        name: Docker packages for WSL (which .deb files)
+        shell: pwsh
+        run: |
+          $files = wsl.exe -d Ubuntu-24.04 -u root -- bash -c 'apt-get update -qq > /dev/null && apt-get install -y --no-install-recommends --print-uris -qq docker.io docker-buildx | cut -d" " -f2 | sort'
+          if ($LASTEXITCODE -ne 0) { throw 'apt-get in WSL failed' }
+          $bytes = [Text.Encoding]::UTF8.GetBytes(($files -join "`n"))
+          $hash = ([BitConverter]::ToString([Security.Cryptography.SHA256]::HashData($bytes)) -replace '-', '').Substring(0, 16).ToLower()
+          "key=wsl-apt-ubuntu2404-$hash" >> $env:GITHUB_OUTPUT
+          "$(@($files).Count) .deb files"
+          New-Item -ItemType Directory -Force (Join-Path $env:RUNNER_TEMP 'wsl-apt-debs') | Out-Null
+      - id: wsl-apt-restore
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}\wsl-apt-debs
+          key: ${{ steps.wsl-apt.outputs.key }}
+      - name: Docker in WSL
+        shell: pwsh
+        timeout-minutes: 20
+        run: |
+          $debs = wsl.exe -d Ubuntu-24.04 -- wslpath -u (Join-Path $env:RUNNER_TEMP 'wsl-apt-debs')
+          wsl.exe -d Ubuntu-24.04 -u root -- bash -c "set -e; cp $debs/*.deb /var/cache/apt/archives/ 2> /dev/null || true; DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends -o APT::Keep-Downloaded-Packages=true docker.io docker-buildx; cp /var/cache/apt/archives/*.deb $debs/ 2> /dev/null || true"
+          if ($LASTEXITCODE -ne 0) { throw 'Docker did not install in WSL' }
+      - if: github.ref == 'refs/heads/main' && steps.wsl-apt-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}\wsl-apt-debs
+          key: ${{ steps.wsl-apt.outputs.key }}
       # WSL stops an idle distro, and dockerd with it.
       - name: Keep the distro running
         shell: pwsh
