@@ -26,6 +26,10 @@ pub fn view(s: &App, p: Paint) -> El {
     type Handler = fn(&mut App, &mut Tx);
     let back = icon_button(p, "tb-back", "Back", &icons::CHEVRON_LEFT, can_back.then_some(go_back as Handler));
     let forward = icon_button(p, "tb-forward", "Forward", &icons::CHEVRON_RIGHT, can_forward.then_some(go_forward as Handler));
+    fn pick_upload(s: &mut App, tx: &mut Tx) {
+        run(s, Action::PickUpload, tx)
+    }
+    let upload = icon_button(p, "tb-upload", "Upload", &icons::UPLOAD, live.then_some(pick_upload as Handler));
     let mut bar = row()
         .key("toolbar")
         .role("toolbar")
@@ -44,7 +48,7 @@ pub fn view(s: &App, p: Paint) -> El {
     if let Some(c) = c {
         bar = bar.child(filter(s, c, p));
     }
-    bar.child(transfers::button(s, p)).child(palette_button(p))
+    bar.child(upload).child(transfers::button(s, p)).child(palette_button(p))
 }
 
 /// The ⌘K hint: a button that opens the command palette.

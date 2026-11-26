@@ -207,7 +207,8 @@ fn straight_edges_are_pixel_exact_at_both_scales() {
 /// a fraction of a point. Rune rounds a resting icon's origin to the device grid when it paints
 /// (`runtime/paint/content.rs`), so these still land on whole device pixels; only a y or an x
 /// outside this list would put the grid at risk.
-const TEXT_FLOWED: [&str; 7] = ["tb-path", "col-", "welcome-quick-connect", "state-go-up", "tb-transfers", "tb-filter", "drop-pill"];
+const TEXT_FLOWED: [&str; 8] =
+    ["tb-path", "col-", "welcome-quick-connect", "state-go-up", "tb-upload", "tb-transfers", "tb-filter", "drop-pill"];
 
 /// The icon elements every scene builds begin on whole points (the views put them in 28 pt
 /// rows and buttons, past whole-point paddings), at both scales, except where text flows
