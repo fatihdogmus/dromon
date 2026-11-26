@@ -34,7 +34,8 @@ runs:
       with:
         path: ${{ runner.temp }}/apt-debs
         key: ${{ steps.plan.outputs.key }}
-    - shell: bash
+    - id: install
+      shell: bash
       env:
         PACKAGES: ${{ inputs.packages }}
       run: |
@@ -46,7 +47,9 @@ runs:
         if compgen -G "/var/cache/apt/archives/*.deb" > /dev/null; then
           cp /var/cache/apt/archives/*.deb "$RUNNER_TEMP/apt-debs/"
         fi
-    - if: inputs.save == 'true' && steps.restore.outputs.cache-hit != 'true'
+        echo "debs=$(find "$RUNNER_TEMP/apt-debs" -name '*.deb' | wc -l | tr -d ' ')" >> "$GITHUB_OUTPUT"
+    # Never an empty cache (all packages preinstalled): it would be a hit from then on.
+    - if: inputs.save == 'true' && steps.restore.outputs.cache-hit != 'true' && steps.install.outputs.debs != '0'
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ runner.temp }}/apt-debs

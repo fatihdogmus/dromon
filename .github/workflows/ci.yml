@@ -217,14 +217,21 @@ jobs:
         with:
           path: ${{ runner.temp }}\wsl-apt-debs
           key: ${{ steps.wsl-apt.outputs.key }}
-      - name: Docker in WSL
+      - id: wsl-docker
+        name: Docker in WSL
         shell: pwsh
         timeout-minutes: 20
         run: |
-          $debs = wsl.exe -d Ubuntu-24.04 -- wslpath -u (Join-Path $env:RUNNER_TEMP 'wsl-apt-debs')
+          # Forward slashes: wsl.exe hands its arguments to a shell, which eats backslashes.
+          $debs = wsl.exe -d Ubuntu-24.04 -- wslpath -u ((Join-Path $env:RUNNER_TEMP 'wsl-apt-debs') -replace '\\', '/')
+          if ($LASTEXITCODE -ne 0 -or "$debs" -notmatch '^/') { throw "no WSL path for the .deb folder: $debs" }
           wsl.exe -d Ubuntu-24.04 -u root -- bash -c "set -e; cp $debs/*.deb /var/cache/apt/archives/ 2> /dev/null || true; DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends -o APT::Keep-Downloaded-Packages=true docker.io docker-buildx; cp /var/cache/apt/archives/*.deb $debs/ 2> /dev/null || true"
           if ($LASTEXITCODE -ne 0) { throw 'Docker did not install in WSL' }
-      - if: github.ref == 'refs/heads/main' && steps.wsl-apt-restore.outputs.cache-hit != 'true'
+          $count = @(Get-ChildItem (Join-Path $env:RUNNER_TEMP 'wsl-apt-debs\*.deb')).Count
+          "$count .deb files kept"
+          "debs=$count" >> $env:GITHUB_OUTPUT
+      # Never an empty cache: it would be a hit from then on, and nothing would be cached.
+      - if: github.ref == 'refs/heads/main' && steps.wsl-apt-restore.outputs.cache-hit != 'true' && steps.wsl-docker.outputs.debs != '0'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}\wsl-apt-debs
