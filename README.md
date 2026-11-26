@@ -26,6 +26,70 @@ Native-feeling, GPU-rendered, and built around the SSH you already use.
 
 Dromon does one thing and does it extremely well: **SFTP over the SSH you already have**, in one clean pane. Open it, pick a host from your SSH config, and you're in. No accounts, no bookmarks to re-create, no second copy of your keys.
 
+<a name="install"></a>
+
+## 📦 Install
+
+**Quick install**
+
+```sh
+# macOS (Apple silicon) and Linux (Debian/Ubuntu, Arch; x86_64)
+curl -fsSL https://raw.githubusercontent.com/fatihdogmus/dromon/main/install.sh | sh
+```
+
+```powershell
+# Windows
+irm https://raw.githubusercontent.com/fatihdogmus/dromon/main/install.ps1 | iex
+```
+
+Each one finds the latest release, downloads the right package, checks its SHA-256 against the release's `SHA256SUMS` and installs it silently; set `DROMON_VERSION` (for example `0.1.0`) to pin a version.
+
+On macOS, Homebrew works too, and `brew upgrade` keeps Dromon current:
+
+```sh
+brew install --cask fatihdogmus/tap/dromon
+```
+
+Or download a file yourself from the [Releases page](https://github.com/fatihdogmus/dromon/releases):
+
+| Platform | File | Notes |
+|---|---|---|
+| macOS 14+, Apple silicon | `Dromon-<version>-macos-arm64.dmg` | Drag Dromon to Applications |
+| Windows 11 (x64; Arm runs it emulated) | `Dromon-<version>-windows-x64.msi` | If SmartScreen asks: **More info → Run anyway** |
+| Debian 12+, Ubuntu 22.04+ (x86_64) | `Dromon-<version>-linux-x64.deb` | `sudo apt install ./Dromon-….deb` (pulls in `openssh-client`) |
+| Arch Linux (x86_64) | `Dromon-<version>-linux-x64.pkg.tar.zst` | `sudo pacman -U Dromon-….pkg.tar.zst` |
+
+Dromon uses your system `ssh` (OpenSSH 8.4 or newer; on Windows, the built-in OpenSSH client). On an Intel Mac or Arm Linux, [build it from source](#source).
+
+<details>
+<summary><b>Verifying a download</b></summary>
+
+Every file has a build-provenance attestation from GitHub Actions, and the checksums are signed with the release key in [`KEYS`](KEYS):
+
+```sh
+gh attestation verify Dromon-<version>-linux-x64.deb --repo fatihdogmus/dromon
+
+gpg --import KEYS          # 61AA 2003 0B81 70BE 3527  E4BA 1E54 8E51 E3AD 8C38
+gpg --verify SHA256SUMS.asc SHA256SUMS
+sha256sum --check --ignore-missing SHA256SUMS
+```
+
+</details>
+
+<a name="source"></a>
+
+<details>
+<summary><b>Build from source</b></summary>
+
+```sh
+git clone https://github.com/fatihdogmus/dromon && cd dromon
+cargo run --release -p dromon-app      # the toolchain is pinned in rust-toolchain.toml
+```
+
+Linux needs `libxkbcommon-dev` and `libwayland-dev`. Want to look around without a server? `DROMON_MOCK=1 cargo run -p dromon-app` opens a built-in demo.
+
+</details>
+
 ## ✨ Why Dromon
 
 - **Your SSH setup, as is.** Hosts come straight from `~/.ssh/config`, `Include`s and all, and every connection runs through your own `ssh`: keys, agent, `ProxyJump`, `Match` blocks. Edit your config and the sidebar updates on its own.
@@ -91,67 +155,6 @@ Dromon does one thing and does it extremely well: **SFTP over the SSH you alread
 </table>
 
 On Windows and Linux, <kbd>Ctrl</kbd> takes the place of <kbd>⌘</kbd>; Delete deletes and <kbd>F5</kbd> refreshes. Or just start typing a file's name to jump to it.
-
-<a name="install"></a>
-
-## 📦 Install
-
-**Quick install**
-
-```sh
-# macOS (Apple silicon) and Linux (Debian/Ubuntu, Arch; x86_64)
-curl -fsSL https://raw.githubusercontent.com/fatihdogmus/dromon/main/install.sh | sh
-```
-
-```powershell
-# Windows
-irm https://raw.githubusercontent.com/fatihdogmus/dromon/main/install.ps1 | iex
-```
-
-Each one finds the latest release, downloads the right package, checks its SHA-256 against the release's `SHA256SUMS` and installs it silently; set `DROMON_VERSION` (for example `0.1.0`) to pin a version.
-
-On macOS, Homebrew works too, and `brew upgrade` keeps Dromon current:
-
-```sh
-brew install --cask fatihdogmus/tap/dromon
-```
-
-Or download a file yourself from the [Releases page](https://github.com/fatihdogmus/dromon/releases):
-
-| Platform | File | Notes |
-|---|---|---|
-| macOS 14+, Apple silicon | `Dromon-<version>-macos-arm64.dmg` | Drag Dromon to Applications |
-| Windows 11 (x64; Arm runs it emulated) | `Dromon-<version>-windows-x64.msi` | If SmartScreen asks: **More info → Run anyway** |
-| Debian 12+, Ubuntu 22.04+ (x86_64) | `Dromon-<version>-linux-x64.deb` | `sudo apt install ./Dromon-….deb` (pulls in `openssh-client`) |
-| Arch Linux (x86_64) | `Dromon-<version>-linux-x64.pkg.tar.zst` | `sudo pacman -U Dromon-….pkg.tar.zst` |
-
-Dromon uses your system `ssh` (OpenSSH 8.4 or newer; on Windows, the built-in OpenSSH client). On an Intel Mac or Arm Linux, [build it from source](#source).
-
-<details>
-<summary><b>Verifying a download</b></summary>
-
-Every file has a build-provenance attestation from GitHub Actions, and the checksums are signed with the release key in [`KEYS`](KEYS):
-
-```sh
-gh attestation verify Dromon-<version>-linux-x64.deb --repo fatihdogmus/dromon
-
-gpg --import KEYS          # 61AA 2003 0B81 70BE 3527  E4BA 1E54 8E51 E3AD 8C38
-gpg --verify SHA256SUMS.asc SHA256SUMS
-sha256sum --check --ignore-missing SHA256SUMS
-```
-
-</details>
-
-<a name="source"></a>
-
-### Build from source
-
-```sh
-git clone https://github.com/fatihdogmus/dromon && cd dromon
-cargo run --release -p dromon-app      # the toolchain is pinned in rust-toolchain.toml
-```
-
-Linux needs `libxkbcommon-dev` and `libwayland-dev`. Want to look around without a server? `DROMON_MOCK=1 cargo run -p dromon-app` opens a built-in demo.
 
 ## 🐛 Found a bug?
 
