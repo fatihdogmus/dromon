@@ -179,18 +179,19 @@ fn shift_f10_opens_the_cursor_rows_menu_at_the_row_and_the_menu_key_too() {
     let row_items = ["Open", "Download", "Copy", "Cut", "Paste", "Copy path", "New folder", "Rename", "Delete"];
     for (key, mods) in [(Key::Function(10), SHIFT), (Key::ContextMenu, Mods::default())] {
         let mut rt = runtime();
-        click(&mut rt, "rows/index.html");
+        // A row near the top, so the whole menu fits below it (lower down it flips above).
+        click(&mut rt, "rows/assets");
         assert!(!shown(&rt, "ctx-menu"));
         press(&mut rt, key, mods);
         assert!(shown(&rt, "ctx-menu"), "the menu opens");
         assert_eq!(items(&rt), row_items);
         // Anchored below the cursor row's bottom-left, as a right-click's is at the pointer.
         let (list, menu) = (rect_of(&rt, "list"), rect_of(&rt, "ctx-menu"));
-        let (_, centre) = at(&rt, "rows/index.html");
+        let (_, centre) = at(&rt, "rows/assets");
         let bottom = centre + rt.state.settings.density.row() / 2.0;
         assert!((menu[0] - list[0]).abs() < 1.5, "menu x {} at the row's left {}", menu[0], list[0]);
         assert!((menu[1] - (bottom + 2.0)).abs() < 1.5, "menu y {} below the row's bottom {bottom}", menu[1]);
-        assert_eq!(rt.state.conn().unwrap().selection.cursor(), Some("index.html"));
+        assert_eq!(rt.state.conn().unwrap().selection.cursor(), Some("assets"));
         press(&mut rt, Key::Escape, Mods::default());
         assert!(!shown(&rt, "ctx-menu"));
     }
