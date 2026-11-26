@@ -46,7 +46,8 @@ app="$mount/Dromon.app"
 [ "$(readlink "$mount/Applications")" = /Applications ] || fail "$(basename "$dmg") has no /Applications link"
 # The installer window: Finder's layout (.DS_Store) and the background it points at.
 [ -s "$mount/.DS_Store" ] || fail "$(basename "$dmg") has no window layout (.DS_Store)"
-compgen -G "$mount/.background/*" > /dev/null || fail "$(basename "$dmg") has no background image"
+# dmgbuild writes it at the top of the volume as .background.tiff (a .background/ folder by hand).
+compgen -G "$mount/.background*" > /dev/null || fail "$(basename "$dmg") has no background image"
 
 plist() { /usr/libexec/PlistBuddy -c "Print :$1" "$2"; }
 [ "$(plist CFBundleIdentifier "$app/Contents/Info.plist")" = "$(plist CFBundleIdentifier "$template")" ] || fail "wrong bundle identifier"
