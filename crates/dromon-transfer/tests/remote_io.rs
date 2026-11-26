@@ -41,9 +41,11 @@ async fn session(fixture: &Fixture) -> Conn {
     let stdout = ssh.stdout.take().unwrap();
     let stdin = ssh.stdin.take().unwrap();
     let sftp = Sftp::new(tokio::io::join(stdout, stdin)).await.expect("SFTP session");
-    // These tests check the copy logic, not the reply timeout: on Windows CI every byte goes
-    // through WSL's port forwarding with the binary's tests copying megabytes at once, and a
-    // reply past the default 10 s read as a lost connection (CI run 45752298056).
+    // These tests check the copy logic, not the reply timeout. On Windows CI every byte goes
+    // through WSL's localhost relay into Docker, which now and then stalls a connection busy
+    // both ways (a streamed same-session copy: runs 45752298056, 45753756067). Windows' own
+    // ssh.exe doesn't: windows_sshd.rs streams the same way against the runner's native sshd
+    // with the app's 10 s timeout, five times, without a stall.
     sftp.set_timeout(60);
     Conn { sftp, _ssh: ssh }
 }

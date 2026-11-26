@@ -76,6 +76,7 @@ Tracks where implementation stands against `dromon-plan.md`. Newest first.
 - Transfer engine robustness: work cut off by drops is replayed as itself and at once on a replaced session; runs tagged so a stale Finished can't start a second copy; stress test kills sessions at varying moments (`transfers_e2e`, ignored by default).
 - M5 server matrix (`DROMON_SERVER_MATRIX=1`, CI linux): Debian trixie (OpenSSH 10), bullseye (8.4, no copy-data: streamed copies), Alpine 3.24, toxiproxy (latency, caps, reset mid-transfer → resume); 100 / 10k / 100k folders, symlink loops, unreadable folders. CI windows: the runner's own OpenSSH Server, `/C:/` paths, round trip, rename, copy, delete.
 
+- Windows streaming: a copy streamed through one session (servers without copy-data) runs fine with Windows' `ssh.exe` against the runner's native sshd (5 × 16 MiB, ~1.5 s each, the app's 10 s timeout: `windows_sshd.rs`). The Docker fixture's path on Windows CI goes through WSL's localhost relay, which occasionally stalls such a connection (2 runs): a CI-only flake in `remote_io`'s streamed test, not the app. Fixture base images come from `mirror.gcr.io` (Docker Hub rate-limited CI with 429s).
 - Launch (§12 "Restore window/sidebar/last host; never auto-connect"): the host opened last is saved (`Saved.last_host`) and offered on the welcome screen as "Connect to <host>"; nothing connects by itself.
 - M5 performance (`scripts/perf.sh`, one table; this Linux box, release builds):
   - First rows of a 10k folder: 14 ms over the sshd (gate 150 ms) ✅
