@@ -63,7 +63,11 @@ fn shown(rt: &Runtime<App>, k: &str) -> bool {
 }
 
 fn text_of(rt: &Runtime<App>, k: &str) -> String {
-    rt.elements().into_iter().find(|e| e.key.as_deref() == Some(k) && !e.exiting).and_then(|e| e.text).unwrap_or_default()
+    rt.elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some(k) && !e.exiting)
+        .and_then(|e| e.text)
+        .unwrap_or_default()
 }
 
 /// The answers the app sent, in order.
@@ -209,7 +213,9 @@ fn the_logs_verbose_switch_asks_for_ssh_with_dash_v_and_says_it_reconnects() {
     let switch = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("log-verbose")).expect("the switch");
     assert_eq!((switch.role, switch.label.as_deref()), ("switch", Some("Verbose logging (reconnects)")));
     assert_eq!(text_of(&rt, "log-verbose-note"), "reconnects");
-    let track = |rt: &Runtime<App>| rt.elements().into_iter().find(|e| e.key.as_deref() == Some("log-verbose-track")).unwrap().fill;
+    let track = |rt: &Runtime<App>| {
+        rt.elements().into_iter().find(|e| e.key.as_deref() == Some("log-verbose-track")).unwrap().fill
+    };
     let off = track(&rt);
 
     click(&mut rt, "log-verbose");
@@ -270,7 +276,11 @@ fn the_banners_sign_in_brings_this_windows_queued_prompt_forward() {
     let sent = rec.sent().len();
     rt.update(|s, _| drop(s.act(Action::SignIn(prod()))));
     settle(&mut rt);
-    assert_eq!(rt.state.ui.sheets.open().and_then(|s| s.prompt()).map(|p| p.id.0), Some(2), "prod's prompt is in front");
+    assert_eq!(
+        rt.state.ui.sheets.open().and_then(|s| s.prompt()).map(|p| p.id.0),
+        Some(2),
+        "prod's prompt is in front"
+    );
     assert_eq!(rt.state.ui.sheets.queued().map(|p| p.id.0).collect::<Vec<_>>(), [1], "the other waits its turn");
     assert_eq!(rec.sent().len(), sent, "nothing was asked of the service");
     assert_eq!(text_of(&rt, "sheet-title"), "Sign in to prod");

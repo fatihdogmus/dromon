@@ -20,7 +20,9 @@ fn window(visible: bool, focused: bool) -> Command {
 async fn refreshed(fx: &mut Fixture, path: &RemotePath, name: &str) {
     let (path, name) = (path.clone(), name.to_owned());
     fx.until(&format!("a refresh of {path} with {name}"), |ev| match ev {
-        ServiceEvent::Refreshed { path: p, entries, .. } if *p == path && entries.iter().any(|e| e.name == name) => Some(()),
+        ServiceEvent::Refreshed { path: p, entries, .. } if *p == path && entries.iter().any(|e| e.name == name) => {
+            Some(())
+        }
         _ => None,
     })
     .await
@@ -84,15 +86,26 @@ async fn a_prompt_shows_in_the_focused_window_and_answering_it_there_closes_it_e
     fx.send_from(B, window(true, true));
     // A connects while B has the focus: the prompt is B's.
     fx.send_from(A, Command::Connect { host: host("pw") });
-    let (to, p) = fx.until_for("a prompt", |to, ev| if let ServiceEvent::Prompt(p) = ev { Some((to, p.clone())) } else { None }).await;
+    let (to, p) = fx
+        .until_for("a prompt", |to, ev| if let ServiceEvent::Prompt(p) = ev { Some((to, p.clone())) } else { None })
+        .await;
     assert_eq!(to, Some(B));
     // A wrong answer in B: asked again in B, even with A focused now.
     fx.send_from(A, window(true, true));
     fx.send_from(B, window(true, false));
     fx.send_from(B, Command::AnswerPrompt { id: p.id, answer: PromptAnswer::Text("wrong".into()) });
-    let closed = fx.until_for("its PromptClosed", |to, ev| matches!(ev, ServiceEvent::PromptClosed(id) if *id == p.id).then_some(to)).await;
+    let closed = fx
+        .until_for("its PromptClosed", |to, ev| {
+            matches!(ev, ServiceEvent::PromptClosed(id) if *id == p.id).then_some(to)
+        })
+        .await;
     assert_eq!(closed, None, "closed in every window");
-    let (to, again) = fx.until_for("the prompt again", |to, ev| if let ServiceEvent::Prompt(p) = ev { Some((to, p.clone())) } else { None }).await;
+    let (to, again) = fx
+        .until_for(
+            "the prompt again",
+            |to, ev| if let ServiceEvent::Prompt(p) = ev { Some((to, p.clone())) } else { None },
+        )
+        .await;
     assert_eq!(to, Some(B));
     fx.send_from(B, Command::AnswerPrompt { id: again.id, answer: PromptAnswer::Text("secret".into()) });
     // Up: the host opens in every window (its first connection).
@@ -106,12 +119,19 @@ async fn a_window_that_closes_hands_its_prompt_on() {
     fx.send_from(A, window(true, true));
     fx.send_from(B, window(true, false));
     fx.send_from(A, Command::Connect { host: host("pw") });
-    let (to, p) = fx.until_for("a prompt", |to, ev| if let ServiceEvent::Prompt(p) = ev { Some((to, p.clone())) } else { None }).await;
+    let (to, p) = fx
+        .until_for("a prompt", |to, ev| if let ServiceEvent::Prompt(p) = ev { Some((to, p.clone())) } else { None })
+        .await;
     assert_eq!(to, Some(A));
     // A closes before answering: nobody is focused, the window that connected is gone, so it
     // shows in every window that's left.
     fx.send_from(A, Command::WindowClosed);
-    let (to, moved) = fx.until_for("the prompt again", |to, ev| if let ServiceEvent::Prompt(p) = ev { Some((to, p.clone())) } else { None }).await;
+    let (to, moved) = fx
+        .until_for(
+            "the prompt again",
+            |to, ev| if let ServiceEvent::Prompt(p) = ev { Some((to, p.clone())) } else { None },
+        )
+        .await;
     assert_eq!((to, moved.id), (None, p.id), "the same prompt");
     fx.send_from(B, Command::AnswerPrompt { id: p.id, answer: PromptAnswer::Text("secret".into()) });
     assert_eq!(opened(&mut fx).await, None);
@@ -123,18 +143,34 @@ async fn show_prompts_sends_the_open_prompt_to_the_asking_window_and_answering_t
     fx.send_from(A, window(true, true));
     fx.send_from(B, window(true, false));
     fx.send_from(A, Command::Connect { host: host("pw") });
-    let (to, p) = fx.until_for("a prompt", |to, ev| if let ServiceEvent::Prompt(p) = ev { Some((to, p.clone())) } else { None }).await;
+    let (to, p) = fx
+        .until_for("a prompt", |to, ev| if let ServiceEvent::Prompt(p) = ev { Some((to, p.clone())) } else { None })
+        .await;
     assert_eq!(to, Some(A), "the focused window's");
     // B's Sign in: the same prompt, to B alone.
     fx.send_from(B, Command::ShowPrompts { host: host("pw") });
-    let (to, again) = fx.until_for("the prompt in B", |to, ev| if let ServiceEvent::Prompt(p) = ev { Some((to, p.clone())) } else { None }).await;
+    let (to, again) = fx
+        .until_for(
+            "the prompt in B",
+            |to, ev| if let ServiceEvent::Prompt(p) = ev { Some((to, p.clone())) } else { None },
+        )
+        .await;
     assert_eq!((to, again.id), (Some(B), p.id));
     // A wrong answer in B closes it in every window, and ssh asks again in B (the asking
     // window is the host's target now), though A is focused.
     fx.send_from(B, Command::AnswerPrompt { id: p.id, answer: PromptAnswer::Text("wrong".into()) });
-    let closed = fx.until_for("its PromptClosed", |to, ev| matches!(ev, ServiceEvent::PromptClosed(id) if *id == p.id).then_some(to)).await;
+    let closed = fx
+        .until_for("its PromptClosed", |to, ev| {
+            matches!(ev, ServiceEvent::PromptClosed(id) if *id == p.id).then_some(to)
+        })
+        .await;
     assert_eq!(closed, None, "closed in every window");
-    let (to, next) = fx.until_for("the prompt again", |to, ev| if let ServiceEvent::Prompt(p) = ev { Some((to, p.clone())) } else { None }).await;
+    let (to, next) = fx
+        .until_for(
+            "the prompt again",
+            |to, ev| if let ServiceEvent::Prompt(p) = ev { Some((to, p.clone())) } else { None },
+        )
+        .await;
     assert_eq!(to, Some(B));
     // Signing in from B: up for both.
     fx.send_from(B, Command::AnswerPrompt { id: next.id, answer: PromptAnswer::Text("secret".into()) });

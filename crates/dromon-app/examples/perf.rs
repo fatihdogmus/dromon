@@ -36,7 +36,10 @@ use rune::{Env, Key, KeyEvent, Mods, Runtime};
 /// Counts allocations (and reallocations) of the whole process. The example's frames run on
 /// one thread and nothing else runs meanwhile, so the difference across a frame is that
 /// frame's. Rune's own counter (`procwatch::alloc::Counting`) isn't a dependency of this crate.
-#[allow(unsafe_code)]
+#[expect(
+    unsafe_code,
+    reason = "`GlobalAlloc` is an unsafe trait; this one only counts and hands every call to `System`"
+)]
 mod counting {
     use std::alloc::{GlobalAlloc, Layout, System};
     use std::sync::atomic::AtomicU64;
@@ -237,7 +240,7 @@ fn measure(rt: &mut Runtime<App>, input: impl FnOnce(&mut Runtime<App>)) -> Cost
     input(rt);
     let handled = cpu_ms() - c0;
     let more = rt.frame(DT);
-    #[allow(unused_mut)]
+    #[allow(unused_mut, reason = "only `--features perf` writes the frame phases into it")]
     let mut cost = Cost {
         cpu: cpu_ms() - c0,
         wall: ms(t0),
@@ -423,7 +426,15 @@ fn refresh_gate(m: &mut Metrics) {
     let mut all = entries(100_000);
     stream(&mut rt, &all);
     settle(&mut rt);
-    all.push(Entry { name: "new-upload.bin".into(), kind: EntryKind::File, size: 1, mtime: Some(1_790_000_000), mode: None, owner: None, group: None });
+    all.push(Entry {
+        name: "new-upload.bin".into(),
+        kind: EntryKind::File,
+        size: 1,
+        mtime: Some(1_790_000_000),
+        mode: None,
+        owner: None,
+        group: None,
+    });
     // Its parts on their own: the listing diff and the sort.
     let t = Instant::now();
     let changes = dromon_sftp::diff(rt.state.conn().map_or(&[], |c| c.entries()), &all);

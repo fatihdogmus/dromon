@@ -19,9 +19,18 @@ pub enum Shortcut {
     Upload,
     /// Escape: close the filter, else clear the selection.
     Escape,
-    Move { delta: isize, extend: bool },
-    Page { down: bool, extend: bool },
-    End { last: bool, extend: bool },
+    Move {
+        delta: isize,
+        extend: bool,
+    },
+    Page {
+        down: bool,
+        extend: bool,
+    },
+    End {
+        last: bool,
+        extend: bool,
+    },
     /// Printable text with no command modifier: type-to-select.
     Type(String),
     /// File operations (§7). Never while a text field has focus.
@@ -106,6 +115,10 @@ fn command(key: &Key, c: char) -> bool {
     matches!(key, Key::Command(k) if *k == c || *k == alt_form)
 }
 
+#[expect(
+    clippy::cognitive_complexity,
+    reason = "the shortcut table (§7): one guarded check per chord, in the order they win; split up, the order is lost"
+)]
 pub fn shortcut(ev: &KeyEvent, platform: KeyPlatform) -> Option<Shortcut> {
     let m = ev.mods;
     let mac = matches!(platform, KeyPlatform::Mac);

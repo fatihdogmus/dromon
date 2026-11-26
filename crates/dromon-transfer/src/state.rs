@@ -61,10 +61,7 @@ pub enum TaskState {
 impl TaskState {
     /// Queued, Preparing, Running or Paused.
     pub fn is_active(&self) -> bool {
-        matches!(
-            self,
-            Self::Queued | Self::Preparing { .. } | Self::Running | Self::Paused
-        )
+        matches!(self, Self::Queued | Self::Preparing { .. } | Self::Running | Self::Paused)
     }
 
     /// Done, Failed or Cancelled.
@@ -137,9 +134,7 @@ mod tests {
             S::Running,
             S::Paused,
             S::Done,
-            S::Failed {
-                error: "boom".into(),
-            },
+            S::Failed { error: "boom".into() },
             S::Cancelled,
         ]
     }
@@ -164,18 +159,10 @@ mod tests {
         vec![
             (S::Queued, E::Start, S::Preparing { files_found: 0 }),
             (S::Queued, E::Cancel, S::Cancelled),
-            (
-                S::Preparing { files_found: 7 },
-                E::ScanProgress(42),
-                S::Preparing { files_found: 42 },
-            ),
+            (S::Preparing { files_found: 7 }, E::ScanProgress(42), S::Preparing { files_found: 42 }),
             (S::Preparing { files_found: 7 }, E::ScanDone, S::Running),
             (S::Preparing { files_found: 7 }, E::Pause, S::Paused),
-            (
-                S::Preparing { files_found: 7 },
-                E::Fail("err".into()),
-                failed("err"),
-            ),
+            (S::Preparing { files_found: 7 }, E::Fail("err".into()), failed("err")),
             (S::Preparing { files_found: 7 }, E::Cancel, S::Cancelled),
             (S::Running, E::Pause, S::Paused),
             (S::Running, E::Complete, S::Done),
@@ -239,14 +226,7 @@ mod tests {
     #[test]
     fn full_happy_path_with_pause() {
         let mut s = S::Queued;
-        for ev in [
-            E::Start,
-            E::ScanProgress(10),
-            E::ScanDone,
-            E::Pause,
-            E::Resume,
-            E::Complete,
-        ] {
+        for ev in [E::Start, E::ScanProgress(10), E::ScanDone, E::Pause, E::Resume, E::Complete] {
             s = step(&s, ev).unwrap();
         }
         assert_eq!(s, S::Done);
@@ -256,12 +236,7 @@ mod tests {
     fn fail_retry_cycle() {
         let mut s = S::Running;
         s = step(&s, E::Fail("net".into())).unwrap();
-        assert_eq!(
-            s,
-            S::Failed {
-                error: "net".into()
-            }
-        );
+        assert_eq!(s, S::Failed { error: "net".into() });
         s = step(&s, E::Retry).unwrap();
         assert_eq!(s, S::Queued);
         s = step(&s, E::Start).unwrap();
@@ -276,13 +251,7 @@ mod tests {
             (S::Running, true, false),
             (S::Paused, true, false),
             (S::Done, false, true),
-            (
-                S::Failed {
-                    error: String::new(),
-                },
-                false,
-                true,
-            ),
+            (S::Failed { error: String::new() }, false, true),
             (S::Cancelled, false, true),
         ];
         for (s, active, finished) in cases {

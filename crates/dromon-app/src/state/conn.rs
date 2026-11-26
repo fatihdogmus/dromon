@@ -456,7 +456,11 @@ impl ConnView {
         };
         self.rows.clear();
         self.rows.extend(
-            entries.iter().enumerate().filter(|(_, e)| (show_hidden || !e.hidden()) && shown(&e.name)).map(|(i, _)| i as u32),
+            entries
+                .iter()
+                .enumerate()
+                .filter(|(_, e)| (show_hidden || !e.hidden()) && shown(&e.name))
+                .map(|(i, _)| i as u32),
         );
         self.rows_version = self.rows_version.wrapping_add(1);
     }

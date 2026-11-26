@@ -15,9 +15,9 @@ use std::collections::HashSet;
 
 use dromon_core::{Error, HostId, RemotePath};
 
+use super::App;
 use super::conn::{Listing, Nav};
 use super::service::Command;
-use super::App;
 
 #[cfg(test)]
 #[path = "refresh_tests.rs"]

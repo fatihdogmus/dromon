@@ -18,8 +18,8 @@
 
 use dromon_core::{Entry, EntryKind, Error, HostId, LinkTarget, RemotePath};
 
-use super::service::{Command, ServiceEvent, SizeId, SizeTotal};
 use super::App;
+use super::service::{Command, ServiceEvent, SizeId, SizeTotal};
 
 #[cfg(test)]
 #[path = "properties_tests.rs"]
@@ -150,7 +150,9 @@ pub fn owner_text(e: &Entry) -> String {
 
 /// "12 files, 3 folders" (with 1 file, 1 folder in the singular).
 pub fn counts_text(t: &SizeTotal) -> String {
-    let n = |count: u64, one: &str, many: &str| format!("{} {}", crate::fmt::thousands(count), if count == 1 { one } else { many });
+    let n = |count: u64, one: &str, many: &str| {
+        format!("{} {}", crate::fmt::thousands(count), if count == 1 { one } else { many })
+    };
     format!("{}, {}", n(t.files, "file", "files"), n(t.folders, "folder", "folders"))
 }
 

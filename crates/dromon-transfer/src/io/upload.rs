@@ -146,11 +146,8 @@ pub(super) async fn finish(sftp: &Sftp, part: &RemotePath, dst: &RemotePath, ove
         }
         return Ok(dst.clone());
     }
-    let target = if sftp.exists(dst).await? {
-        folder.join(&free_remote_name(sftp, &folder, name).await?)
-    } else {
-        dst.clone()
-    };
+    let target =
+        if sftp.exists(dst).await? { folder.join(&free_remote_name(sftp, &folder, name).await?) } else { dst.clone() };
     match sftp.rename(part, &target).await {
         Ok(()) => Ok(target),
         Err(Error::AlreadyExists(_)) => {

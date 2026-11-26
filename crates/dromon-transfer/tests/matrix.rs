@@ -255,10 +255,14 @@ async fn same_host_copy_uses_copy_data_or_streams() {
 
         // Replace overwrites; Keep both lands beside.
         write_remote(s, &dst, b"old").await;
-        let replace = FilePlan::Copy { src: src.clone(), dst: dst.clone(), size: 3 * MIB, mtime: Some(MTIME), overwrite: true };
+        let replace =
+            FilePlan::Copy { src: src.clone(), dst: dst.clone(), size: 3 * MIB, mtime: Some(MTIME), overwrite: true };
         assert_eq!(copy_remote(s, &replace, CopyOptions::default(), |_| {}).await.unwrap().dst, dst);
         assert_eq!(sha(fx, &dst), sha(fx, &src));
-        assert_eq!(copy_remote(s, &plan, CopyOptions::default(), |_| {}).await.unwrap().dst, dir.join("out/big (1).bin"));
+        assert_eq!(
+            copy_remote(s, &plan, CopyOptions::default(), |_| {}).await.unwrap().dst,
+            dir.join("out/big (1).bin")
+        );
         assert!(remote_parts(s, &dir).await.is_empty());
         rm_rf(s, &dir).await;
         Outcome::Ok(how.into())
@@ -317,8 +321,9 @@ async fn scans_skip_symlink_loops() {
         write_remote(s, &loops.join("file.txt"), b"file").await;
         // `self -> .`, `inner/parent -> ..` (its own parent), `inner/top -> ../..` (out of the
         // tree), and the cycle `a -> b -> a`.
-        let script =
-            format!("cd '{loops}' && ln -s . self && ln -s b a && ln -s a b && ln -s .. inner/parent && ln -s ../.. inner/top");
+        let script = format!(
+            "cd '{loops}' && ln -s . self && ln -s b a && ln -s a b && ln -s .. inner/parent && ln -s ../.. inner/top"
+        );
         fx.exec(&["sh", "-c", &script]).unwrap();
         let want_skipped = [
             "loops/a: a broken link",
@@ -377,7 +382,11 @@ impl Drop for TestToxics<'_> {
 
 /// Runs `transfer` (a download or upload) in its own task, resets every connection
 /// through toxiproxy once it reported `at` bytes, and returns its result.
-async fn reset_midway<F>(fx: &Fixture, at: u64, transfer: impl FnOnce(mpsc::UnboundedSender<u64>) -> F) -> dromon_core::Result<()>
+async fn reset_midway<F>(
+    fx: &Fixture,
+    at: u64,
+    transfer: impl FnOnce(mpsc::UnboundedSender<u64>) -> F,
+) -> dromon_core::Result<()>
 where
     F: Future<Output = dromon_core::Result<()>> + Send + 'static,
 {
@@ -392,7 +401,8 @@ where
         }
     }
     toxi.reset_peers().unwrap();
-    let res = tokio::time::timeout(Duration::from_secs(60), task).await.expect("still running 60 s after the reset").unwrap();
+    let res =
+        tokio::time::timeout(Duration::from_secs(60), task).await.expect("still running 60 s after the reset").unwrap();
     toxi.stop_resets().unwrap();
     res
 }

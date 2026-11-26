@@ -65,12 +65,14 @@ pub fn area(s: &App, c: &ConnView, body: El, p: Paint) -> El {
 /// Makes a folder row take dropped files for that folder.
 pub fn folder_row(r: El, name: &str) -> El {
     let (target, drop) = (name.to_owned(), name.to_owned());
-    r.on_drop_files(move |s: &mut App, files, tx| run(s, Action::Upload { paths: files.to_vec(), folder: Some(drop.clone()) }, tx))
-        .accepts_drag(|s: &App, _| takes_files(s))
-        .on_drop_hover(move |s: &mut App, over, tx| {
-            let count = count(tx);
-            run(s, Action::DropHover { target: DropTarget::Folder(target.clone()), over, count }, tx)
-        })
+    r.on_drop_files(move |s: &mut App, files, tx| {
+        run(s, Action::Upload { paths: files.to_vec(), folder: Some(drop.clone()) }, tx)
+    })
+    .accepts_drag(|s: &App, _| takes_files(s))
+    .on_drop_hover(move |s: &mut App, over, tx| {
+        let count = count(tx);
+        run(s, Action::DropHover { target: DropTarget::Folder(target.clone()), over, count }, tx)
+    })
 }
 
 /// Whether the drag is over the folder row `name`.
@@ -80,7 +82,11 @@ pub fn over_folder(s: &App, name: &str) -> bool {
 
 /// "Upload 3 items to /var/www", or to the folder row under the drag.
 pub fn pill_text(hover: &DropHover, cwd: &str) -> String {
-    let what = if hover.count == 1 { "1 item".to_owned() } else { format!("{} items", crate::fmt::thousands(hover.count as u64)) };
+    let what = if hover.count == 1 {
+        "1 item".to_owned()
+    } else {
+        format!("{} items", crate::fmt::thousands(hover.count as u64))
+    };
     let to = match &hover.target {
         DropTarget::List => short_path(cwd),
         DropTarget::Folder(name) => name.clone(),

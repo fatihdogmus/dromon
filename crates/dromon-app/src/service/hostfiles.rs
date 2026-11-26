@@ -15,7 +15,10 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use dromon_core::{HostId, HostSource, HostSpec};
-use dromon_ssh::{ConfigSources, append_block, backup_stamp, display_path, host_block, planned_backup, read_hosts_conf, write_hosts_conf};
+use dromon_ssh::{
+    ConfigSources, append_block, backup_stamp, display_path, host_block, planned_backup, read_hosts_conf,
+    write_hosts_conf,
+};
 use tokio::sync::mpsc;
 
 use super::{Config, Sink, hosts};
@@ -90,7 +93,8 @@ impl Book {
                 self.round = round;
                 // A new round's bare aliases keep what the last one resolved, so the sidebar
                 // doesn't lose the addresses until `ssh -G` has run again.
-                let specs = if resolved { specs } else { keep_resolved(specs, self.config.as_deref().unwrap_or_default()) };
+                let specs =
+                    if resolved { specs } else { keep_resolved(specs, self.config.as_deref().unwrap_or_default()) };
                 set_section(known, HostSource::SshConfig, &specs);
                 if self.config.as_ref() != Some(&specs) {
                     self.config = Some(specs.clone());
@@ -128,7 +132,13 @@ pub fn keep_resolved(specs: Vec<HostSpec>, last: &[HostSpec]) -> Vec<HostSpec> {
     specs
         .into_iter()
         .map(|s| match last.iter().find(|l| l.alias == s.alias) {
-            Some(l) => HostSpec { hostname: l.hostname.clone(), user: l.user.clone(), port: l.port, proxy_jump: l.proxy_jump.clone(), ..s },
+            Some(l) => HostSpec {
+                hostname: l.hostname.clone(),
+                user: l.user.clone(),
+                port: l.port,
+                proxy_jump: l.proxy_jump.clone(),
+                ..s
+            },
             None => s,
         })
         .collect()
@@ -234,7 +244,8 @@ impl Task {
         let round = self.round;
         let (specs, watched) = blocking(move || {
             let (specs, files) = hosts::aliases_and_files(&src);
-            let watched: Vec<(PathBuf, Stamp)> = watch_list(&src, &files).into_iter().map(|p| (p.clone(), stamp(&p))).collect();
+            let watched: Vec<(PathBuf, Stamp)> =
+                watch_list(&src, &files).into_iter().map(|p| (p.clone(), stamp(&p))).collect();
             (specs, watched)
         })
         .await;
@@ -255,7 +266,10 @@ impl Task {
     async fn check(&mut self) {
         let paths: Vec<PathBuf> = self.watched.iter().map(|(p, _)| p.clone()).collect();
         let hosts_file = self.hosts_file.clone();
-        let (now, hosts_now) = blocking(move || (paths.iter().map(|p| stamp(p)).collect::<Vec<_>>(), hosts_file.as_deref().and_then(stamp))).await;
+        let (now, hosts_now) = blocking(move || {
+            (paths.iter().map(|p| stamp(p)).collect::<Vec<_>>(), hosts_file.as_deref().and_then(stamp))
+        })
+        .await;
         if now.iter().zip(&self.watched).any(|(n, (_, was))| n != was) {
             self.discover().await;
         }
@@ -312,15 +326,26 @@ impl Task {
 
     /// The user's ssh config and the block for saved host `host`.
     fn plan(&self, host: &HostId) -> Result<(PathBuf, String), String> {
-        let spec = self.saved.iter().find(|h| &h.id == host).ok_or_else(|| format!("“{host}” isn't a saved host any more."))?;
-        let target = self.sources.as_ref().and_then(|s| s.user.clone()).ok_or("Dromon doesn't know where your ssh config is.")?;
+        let spec = self
+            .saved
+            .iter()
+            .find(|h| &h.id == host)
+            .ok_or_else(|| format!("“{host}” isn't a saved host any more."))?;
+        let target = self
+            .sources
+            .as_ref()
+            .and_then(|s| s.user.clone())
+            .ok_or("Dromon doesn't know where your ssh config is.")?;
         let block = host_block(spec).map_err(|e| format!("Its settings can't go in an ssh config: {e}"))?;
         Ok((target, block))
     }
 
     /// The home folder paths are shown under (`~`).
     fn home(&self) -> Option<PathBuf> {
-        self.sources.as_ref().and_then(|s| s.user_ssh_dir.parent().map(Path::to_path_buf)).filter(|h| !h.as_os_str().is_empty())
+        self.sources
+            .as_ref()
+            .and_then(|s| s.user_ssh_dir.parent().map(Path::to_path_buf))
+            .filter(|h| !h.as_os_str().is_empty())
     }
 
     async fn preview(&self, host: &HostId) -> Result<ConfigPreview, String> {

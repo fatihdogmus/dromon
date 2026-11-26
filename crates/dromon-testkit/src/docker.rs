@@ -106,7 +106,10 @@ impl Container {
         let id = self.id.clone();
         let cmd: Vec<String> = command.iter().map(|s| (*s).to_owned()).collect();
         std::thread::spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| format!("runtime: {e}"))?;
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| format!("runtime: {e}"))?;
             rt.block_on(exec_in(&id, cmd))
         })
         .join()
@@ -145,14 +148,21 @@ async fn exec_in(container: &str, cmd: Vec<String>) -> Result<String, String> {
     use testcontainers::bollard::models::ExecConfig;
 
     let docker = docker_client_instance().await.map_err(|e| format!("docker client: {e}"))?;
-    let config = ExecConfig { cmd: Some(cmd.clone()), attach_stdout: Some(true), attach_stderr: Some(true), ..Default::default() };
+    let config = ExecConfig {
+        cmd: Some(cmd.clone()),
+        attach_stdout: Some(true),
+        attach_stderr: Some(true),
+        ..Default::default()
+    };
     let created = docker.create_exec(container, config).await.map_err(|e| format!("docker exec {cmd:?}: {e}"))?;
     let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
     match docker.start_exec(&created.id, None).await.map_err(|e| format!("docker exec {cmd:?}: {e}"))? {
         StartExecResults::Attached { mut output, .. } => {
             while let Some(chunk) = output.next().await {
                 match chunk.map_err(|e| format!("docker exec {cmd:?}: {e}"))? {
-                    LogOutput::StdOut { message } | LogOutput::Console { message } => stdout.extend_from_slice(&message),
+                    LogOutput::StdOut { message } | LogOutput::Console { message } => {
+                        stdout.extend_from_slice(&message)
+                    }
                     LogOutput::StdErr { message } => stderr.extend_from_slice(&message),
                     LogOutput::StdIn { .. } => {}
                 }
@@ -202,7 +212,12 @@ async fn build_image(docker: &Docker, spec: &ImageSpec) -> Result<(GenericImage,
 
 /// A container of `image`, ready once `ready` is on its stderr, with `ports` published on
 /// 127.0.0.1 at random host ports, deleted by Docker once it stops (its lifeline ends it).
-fn container_request(image: GenericImage, ports: &'static [u16], ready: &str, keep: bool) -> ContainerRequest<GenericImage> {
+fn container_request(
+    image: GenericImage,
+    ports: &'static [u16],
+    ready: &str,
+    keep: bool,
+) -> ContainerRequest<GenericImage> {
     let mut image = image.with_wait_for(WaitFor::message_on_stderr(ready));
     for port in ports {
         image = image.with_exposed_port(port.tcp());
@@ -260,7 +275,10 @@ async fn start_container(docker: &Docker, variant: Variant) -> Result<Fixture, S
             .get_host_port_ipv4(toxiproxy::LISTEN_PORT)
             .await
             .map_err(|e| format!("port {}: {e}", toxiproxy::LISTEN_PORT))?;
-        let api = started.get_host_port_ipv4(toxiproxy::API_PORT).await.map_err(|e| format!("port {}: {e}", toxiproxy::API_PORT))?;
+        let api = started
+            .get_host_port_ipv4(toxiproxy::API_PORT)
+            .await
+            .map_err(|e| format!("port {}: {e}", toxiproxy::API_PORT))?;
         let api = SocketAddr::from((Ipv4Addr::LOCALHOST, api));
         let toxi = Toxiproxy::new(api, started.id().to_owned(), lifeline_of(&started, keep).await?);
         toxi.add_base()?;
@@ -283,7 +301,10 @@ async fn start_container(docker: &Docker, variant: Variant) -> Result<Fixture, S
     let short = |id: &str| id[..12.min(id.len())].to_owned();
     let id = short(&c.id);
     let (via, proxy_id) = match &fixture.toxiproxy {
-        Some(t) => (format!(" through toxiproxy {} (API {})", short(&t.container_id), t.api()), format!(" {}", short(&t.container_id))),
+        Some(t) => (
+            format!(" through toxiproxy {} (API {})", short(&t.container_id), t.api()),
+            format!(" {}", short(&t.container_id)),
+        ),
         None => (String::new(), String::new()),
     };
     note(format_args!(

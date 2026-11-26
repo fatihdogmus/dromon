@@ -17,11 +17,7 @@ struct Scaled {
 
 impl Scaled {
     fn unit_name(&self) -> &'static str {
-        if self.unit == 0 && self.is_one {
-            "byte"
-        } else {
-            UNITS[self.unit]
-        }
+        if self.unit == 0 && self.is_one { "byte" } else { UNITS[self.unit] }
     }
 }
 
@@ -36,25 +32,13 @@ fn scale(x: f64) -> Scaled {
         v /= 1000.0;
         unit += 1;
     }
-    let mut r = if unit == 0 || v >= 100.0 {
-        v.round()
-    } else {
-        (v * 10.0).round() / 10.0
-    };
+    let mut r = if unit == 0 || v >= 100.0 { v.round() } else { (v * 10.0).round() / 10.0 };
     if r >= 1000.0 && unit < UNITS.len() - 1 {
         r = 1.0;
         unit += 1;
     }
-    let text = if r.fract() == 0.0 {
-        format!("{r:.0}")
-    } else {
-        format!("{r:.1}")
-    };
-    Scaled {
-        text,
-        unit,
-        is_one: r == 1.0,
-    }
+    let text = if r.fract() == 0.0 { format!("{r:.0}") } else { format!("{r:.1}") };
+    Scaled { text, unit, is_one: r == 1.0 }
 }
 
 /// Formats a byte count: "0 bytes", "1 byte", "999 bytes", "1 KB", "14.8 KB", "120 MB".
@@ -85,11 +69,7 @@ pub fn eta(d: Duration) -> String {
         return "a few seconds".to_owned();
     }
     if secs < 60.0 {
-        let n = if secs < 10.0 {
-            secs.round()
-        } else {
-            (secs / 5.0).round() * 5.0
-        };
+        let n = if secs < 10.0 { secs.round() } else { (secs / 5.0).round() * 5.0 };
         if n < 60.0 {
             return format!("about {n:.0} s");
         }
@@ -105,11 +85,7 @@ pub fn eta(d: Duration) -> String {
     if secs < 36_000.0 {
         let total = ((secs / 600.0).round() * 10.0) as u64;
         let (h, m) = (total / 60, total % 60);
-        return if m == 0 {
-            format!("about {h} h")
-        } else {
-            format!("about {h} h {m} min")
-        };
+        return if m == 0 { format!("about {h} h") } else { format!("about {h} h {m} min") };
     }
     format!("about {:.0} h", (secs / 3600.0).round())
 }
@@ -121,12 +97,7 @@ pub fn eta(d: Duration) -> String {
 ///   ("0 / 80 MB").
 /// - An unknown total (`total == 0`) shows only the done size.
 /// - Missing speed or ETA are omitted together with their separator.
-pub fn progress_line(
-    done: u64,
-    total: u64,
-    speed_bps: Option<f64>,
-    remaining: Option<Duration>,
-) -> String {
+pub fn progress_line(done: u64, total: u64, speed_bps: Option<f64>, remaining: Option<Duration>) -> String {
     let mut parts = Vec::with_capacity(3);
     if total == 0 {
         parts.push(bytes(done));
@@ -136,13 +107,7 @@ pub fn progress_line(
         if done == 0 || d.unit == t.unit {
             parts.push(format!("{} / {} {}", d.text, t.text, t.unit_name()));
         } else {
-            parts.push(format!(
-                "{} {} / {} {}",
-                d.text,
-                d.unit_name(),
-                t.text,
-                t.unit_name()
-            ));
+            parts.push(format!("{} {} / {} {}", d.text, d.unit_name(), t.text, t.unit_name()));
         }
     }
     if let Some(s) = speed_bps {
@@ -268,28 +233,10 @@ mod tests {
     fn progress_line_table() {
         type Case = (u64, u64, Option<f64>, Option<Duration>, &'static str);
         let cases: Vec<Case> = vec![
-            (
-                12_400_000,
-                80_000_000,
-                Some(8_100_000.0),
-                Some(s(9)),
-                "12.4 / 80 MB \u{b7} 8.1 MB/s \u{b7} about 9 s",
-            ),
+            (12_400_000, 80_000_000, Some(8_100_000.0), Some(s(9)), "12.4 / 80 MB \u{b7} 8.1 MB/s \u{b7} about 9 s"),
             (900_000, 1_200_000, None, None, "900 KB / 1.2 MB"),
-            (
-                12_400_000,
-                80_000_000,
-                Some(8_100_000.0),
-                None,
-                "12.4 / 80 MB \u{b7} 8.1 MB/s",
-            ),
-            (
-                12_400_000,
-                80_000_000,
-                None,
-                Some(s(9)),
-                "12.4 / 80 MB \u{b7} about 9 s",
-            ),
+            (12_400_000, 80_000_000, Some(8_100_000.0), None, "12.4 / 80 MB \u{b7} 8.1 MB/s"),
+            (12_400_000, 80_000_000, None, Some(s(9)), "12.4 / 80 MB \u{b7} about 9 s"),
             (0, 80_000_000, None, None, "0 / 80 MB"),
             (0, 500, Some(0.0), None, "0 / 500 bytes \u{b7} 0 bytes/s"),
             (1, 1, None, None, "1 / 1 byte"),
@@ -297,13 +244,7 @@ mod tests {
             (999_999, 1_000_000, None, None, "1 / 1 MB"),
             (5_000, 0, Some(100.0), None, "5 KB \u{b7} 100 bytes/s"),
             (0, 0, None, None, "0 bytes"),
-            (
-                500,
-                2_000_000_000,
-                None,
-                Some(s(4000)),
-                "500 bytes / 2 GB \u{b7} about 1 h 10 min",
-            ),
+            (500, 2_000_000_000, None, Some(s(4000)), "500 bytes / 2 GB \u{b7} about 1 h 10 min"),
         ];
         for (done, total, sp, e, want) in cases {
             assert_eq!(progress_line(done, total, sp, e), want, "{done}/{total}");

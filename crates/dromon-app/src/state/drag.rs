@@ -68,7 +68,9 @@ impl RowDrag {
         let items = self.items.clone();
         let into = over.into.clone();
         Some(match (&over.target, over.copy) {
-            (DragTarget::Host(_), _) => JobRequest::CrossHostCopy { from: self.host.clone(), items, to: over.to.clone(), into },
+            (DragTarget::Host(_), _) => {
+                JobRequest::CrossHostCopy { from: self.host.clone(), items, to: over.to.clone(), into }
+            }
             (_, true) => JobRequest::RemoteCopy { host: self.host.clone(), items, into },
             (_, false) => JobRequest::Move { host: self.host.clone(), items, into },
         })

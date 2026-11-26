@@ -148,13 +148,9 @@ impl Sftp {
         let timeout = cfg.request_timeout_secs;
         let mut raw = RawSftpSession::new_with_config(stream, cfg);
         raw.set_timeout(u64::from(u32::MAX));
-        let version = raw.init().await.map_err(|e| {
-            match map_err(e.clone(), Op::Open, &RemotePath::root()) {
-                Error::ConnectionLost => {
-                    Error::Connect("the connection closed before SFTP started".into())
-                }
-                _ => Error::Connect(format!("SFTP didn't start: {e}")),
-            }
+        let version = raw.init().await.map_err(|e| match map_err(e.clone(), Op::Open, &RemotePath::root()) {
+            Error::ConnectionLost => Error::Connect("the connection closed before SFTP started".into()),
+            _ => Error::Connect(format!("SFTP didn't start: {e}")),
         })?;
         raw.set_timeout(timeout);
         let mut caps = Capabilities::from_extensions(&version.extensions);
@@ -328,11 +324,7 @@ impl Sftp {
         if !self.caps.posix_rename {
             return Err(Error::Unsupported("posix-rename"));
         }
-        self.raw
-            .posix_rename(from.as_str(), to.as_str())
-            .await
-            .map(drop)
-            .map_err(|e| map_err(e, Op::PosixRename, from))
+        self.raw.posix_rename(from.as_str(), to.as_str()).await.map(drop).map_err(|e| map_err(e, Op::PosixRename, from))
     }
 
     pub async fn remove_file(&self, path: &RemotePath) -> Result<()> {
@@ -373,22 +365,14 @@ impl Sftp {
     async fn open(&self, path: &RemotePath, flags: OpenFlags) -> Result<RemoteFile> {
         match self.raw.open(path.as_str(), flags, FileAttributes::empty()).await {
             Ok(h) => Ok(RemoteFile::new(self.raw.clone(), h.handle, path.clone())),
-            Err(e) if flags.contains(OpenFlags::EXCLUDE) => {
-                Err(self.exists_or(e, Op::Open, path, path).await)
-            }
+            Err(e) if flags.contains(OpenFlags::EXCLUDE) => Err(self.exists_or(e, Op::Open, path, path).await),
             Err(e) => Err(map_err(e, Op::Open, path)),
         }
     }
 
     /// Maps `err` from an operation on `path`; a generic `Failure` with something at `target`
     /// becomes [`Error::AlreadyExists`]`(target)`, since SFTP v3 has no status for `EEXIST`.
-    pub(crate) async fn exists_or(
-        &self,
-        err: SftpError,
-        op: Op,
-        path: &RemotePath,
-        target: &RemotePath,
-    ) -> Error {
+    pub(crate) async fn exists_or(&self, err: SftpError, op: Op, path: &RemotePath, target: &RemotePath) -> Error {
         if is_failure(&err) && self.raw.lstat(target.as_str()).await.is_ok() {
             return Error::AlreadyExists(target.clone());
         }
@@ -542,7 +526,8 @@ pub(crate) fn longname_owner(longname: &str) -> Option<(&str, &str)> {
     let (owner, group, size) = (fields.next()?, fields.next()?, fields.next()?);
     let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
     let mode = mode.as_bytes();
-    let mode_like = mode.len() >= 10 && b"-dlcbpsD".contains(&mode[0]) && mode[1..10].iter().all(|b| b"rwxsStTl-".contains(b));
+    let mode_like =
+        mode.len() >= 10 && b"-dlcbpsD".contains(&mode[0]) && mode[1..10].iter().all(|b| b"rwxsStTl-".contains(b));
     (mode_like && digits(links) && digits(size)).then_some((owner, group))
 }
 
@@ -605,7 +590,11 @@ mod tests {
         // Setuid, sticky and ACL marks; numeric names when the server has none for the ids.
         assert_eq!(longname_owner("-rwsr-xr-t+ 3 1001 1002 0 Jan 1 12:00 x"), Some(("1001", "1002")));
         assert_eq!(longname_owner("lrwxrwxrwx 1 bob users 7 Jan 1 12:00 l -> target"), Some(("bob", "users")));
-        let e = entry_from_attrs("notes.txt".into(), &FileAttributes { uid: Some(501), gid: Some(20), ..attrs(Some(0o100_644), 4321, 1) }, line);
+        let e = entry_from_attrs(
+            "notes.txt".into(),
+            &FileAttributes { uid: Some(501), gid: Some(20), ..attrs(Some(0o100_644), 4321, 1) },
+            line,
+        );
         assert_eq!((e.owner.as_deref(), e.group.as_deref()), (Some("alice"), Some("staff")));
     }
 
@@ -672,8 +661,7 @@ mod tests {
         let mut caps = Capabilities::default();
         assert_eq!(caps.chunk_size(), DEFAULT_CHUNK);
         // OpenSSH: 256 KiB packets, 261,120-byte reads and writes.
-        caps.limits =
-            Some(Limits { max_packet: 262_144, max_read: 261_120, max_write: 261_120, max_open_handles: 0 });
+        caps.limits = Some(Limits { max_packet: 262_144, max_read: 261_120, max_write: 261_120, max_open_handles: 0 });
         assert_eq!(caps.chunk_size(), 261_120);
         caps.limits = Some(Limits { max_packet: 0, max_read: 65_536, max_write: 0, max_open_handles: 0 });
         assert_eq!(caps.chunk_size(), 65_536);

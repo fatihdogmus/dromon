@@ -58,7 +58,9 @@ pub fn welcome(s: &App, p: Paint) -> El {
         .center()
         .gap(space::S2)
         .child(text(format!("or press {}", chord("mod+k"))).font(type_::BODY).color(p.t.text_2))
-        .children(last.map(|(h, name)| button(p, "welcome-last-host", &icons::SERVER, &format!("Connect to {name}"), Action::SelectHost(h))))
+        .children(last.map(|(h, name)| {
+            button(p, "welcome-last-host", &icons::SERVER, &format!("Connect to {name}"), Action::SelectHost(h))
+        }))
         .child(button(p, "welcome-quick-connect", &icons::PLUS, "Quick connect", Action::QuickConnect));
     centred("welcome", p, "Pick a host to start", Some(sub))
 }
@@ -141,23 +143,19 @@ pub fn skeleton(p: Paint, row_h: f32) -> El {
     const NAMES: [f32; 12] = [128.0, 184.0, 96.0, 152.0, 220.0, 112.0, 168.0, 140.0, 204.0, 88.0, 176.0, 120.0];
     let bar = |w: f32| el().w(w).h(8.0).radius(4.0).fill(p.t.skeleton);
     let rows = NAMES.iter().enumerate().map(|(i, &w)| {
-        row()
-            .w_full()
-            .h(row_h)
-            .px(space::S1)
-            .child(
-                row()
-                    .w_full()
-                    .h_full()
-                    .pl(space::S2)
-                    .pr(space::S3)
-                    .gap(space::S2)
-                    .center_y()
-                    .child(el().size(size::ICON, size::ICON).radius(4.0).fill(p.t.skeleton))
-                    .child(row().grow(1.0).child(bar(w)))
-                    .child(row().w(size::COL_SIZE).justify_end().child(bar(if i % 3 == 0 { 24.0 } else { 44.0 })))
-                    .child(row().w(size::COL_MODIFIED).pl(space::S4).child(bar(64.0 + (i % 4) as f32 * 6.0))),
-            )
+        row().w_full().h(row_h).px(space::S1).child(
+            row()
+                .w_full()
+                .h_full()
+                .pl(space::S2)
+                .pr(space::S3)
+                .gap(space::S2)
+                .center_y()
+                .child(el().size(size::ICON, size::ICON).radius(4.0).fill(p.t.skeleton))
+                .child(row().grow(1.0).child(bar(w)))
+                .child(row().w(size::COL_SIZE).justify_end().child(bar(if i % 3 == 0 { 24.0 } else { 44.0 })))
+                .child(row().w(size::COL_MODIFIED).pl(space::S4).child(bar(64.0 + (i % 4) as f32 * 6.0))),
+        )
     });
     col()
         .key("skeleton")
@@ -176,9 +174,13 @@ pub fn banner(s: &App, p: Paint) -> Option<El> {
     let c = s.conn()?;
     let host = s.hosts.get(&c.host).map_or(c.host.as_str(), |h| h.display_name()).to_owned();
     let (headline, detail, sign_in) = match c.status {
-        ConnStatus::Reconnecting { attempt } => (format!("Reconnecting to {host}…"), format!("Attempt {attempt}"), false),
+        ConnStatus::Reconnecting { attempt } => {
+            (format!("Reconnecting to {host}…"), format!("Attempt {attempt}"), false)
+        }
         // Signing in the first time is the sheet's business; the banner is for reconnects.
-        ConnStatus::NeedsInput if c.opened => (format!("Reconnecting to {host} needs you to sign in"), String::new(), true),
+        ConnStatus::NeedsInput if c.opened => {
+            (format!("Reconnecting to {host} needs you to sign in"), String::new(), true)
+        }
         _ => return None,
     };
     let mut b = row()

@@ -195,9 +195,8 @@ fn tilde_and_absolute_includes() {
 
 #[test]
 fn tilde_user_form_is_not_followed() {
-    let fs = MemFs::default()
-        .with("/home/u/.ssh/config", "Include ~other/x\n")
-        .with("/home/u/.ssh/~other/x", "Host nope\n");
+    let fs =
+        MemFs::default().with("/home/u/.ssh/config", "Include ~other/x\n").with("/home/u/.ssh/~other/x", "Host nope\n");
     assert!(discover(&fs).aliases.is_empty());
 }
 

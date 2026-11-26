@@ -54,12 +54,19 @@ impl Walks {
         match cmd {
             SizeCmd::Start { id, path } => {
                 let Some(sftp) = sftp else {
-                    let ev = ServiceEvent::FolderSizeFailed { id, host: host.clone(), total: SizeTotal::default(), error: Error::ConnectionLost };
+                    let ev = ServiceEvent::FolderSizeFailed {
+                        id,
+                        host: host.clone(),
+                        total: SizeTotal::default(),
+                        error: Error::ConnectionLost,
+                    };
                     return sink.emit_to(window, ev);
                 };
                 let (host, sink) = (host.clone(), sink.clone());
                 let walk = tokio::spawn(async move {
-                    let progress = |total| sink.emit_to(window, ServiceEvent::FolderSizeProgress { id, host: host.clone(), total });
+                    let progress = |total| {
+                        sink.emit_to(window, ServiceEvent::FolderSizeProgress { id, host: host.clone(), total })
+                    };
                     let ev = match walk(&sftp, &path, progress).await {
                         Ok(total) => ServiceEvent::FolderSizeDone { id, host, total },
                         Err((total, error)) => ServiceEvent::FolderSizeFailed { id, host, total, error },
@@ -103,7 +110,11 @@ pub fn skippable(e: &Error) -> bool {
 /// Walks `root` and everything below it, calling `progress` at most every
 /// `fileops::PROGRESS_EVERY`.
 /// The error comes with what had been counted when it stopped.
-pub async fn walk(sftp: &Sftp, root: &RemotePath, mut progress: impl FnMut(SizeTotal)) -> Result<SizeTotal, (SizeTotal, Error)> {
+pub async fn walk(
+    sftp: &Sftp,
+    root: &RemotePath,
+    mut progress: impl FnMut(SizeTotal),
+) -> Result<SizeTotal, (SizeTotal, Error)> {
     let mut total = SizeTotal::default();
     let mut todo = vec![root.clone()];
     let mut lists = JoinSet::new();

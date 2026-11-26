@@ -6,7 +6,9 @@
 //! press outside closes it.
 
 use dromon_ssh::{QuickField, split_address};
-use rune::{Align, Beat, El, FileDialogOptions, Key, KeyEvent, Sequence, Side, Transition, Tx, col, icon, row, text, text_input};
+use rune::{
+    Align, Beat, El, FileDialogOptions, Key, KeyEvent, Sequence, Side, Transition, Tx, col, icon, row, text, text_input,
+};
 
 use super::widgets::Keyboard;
 use super::{Paint, run, sidebar};
@@ -107,7 +109,15 @@ pub fn popover(s: &App, p: Paint) -> Option<El> {
 /// `f`'s problem, in the danger colour.
 fn error_text(s: &App, p: Paint, f: QuickField) -> Option<El> {
     let e = s.ui.quick.errors.get(&f)?;
-    Some(text(e.clone()).key(format!("quick-{}-error", key_name(f))).role("alert").font(type_::META).color(p.t.danger).w_full().wrap())
+    Some(
+        text(e.clone())
+            .key(format!("quick-{}-error", key_name(f)))
+            .role("alert")
+            .font(type_::META)
+            .color(p.t.danger)
+            .w_full()
+            .wrap(),
+    )
 }
 
 /// A label and the field's box, with its problem under it when `with_error`.
@@ -193,7 +203,9 @@ fn pick_button(p: Paint) -> El {
                 directory: rune::dirs::home().map(|h| h.join(".ssh")),
                 ..FileDialogOptions::default()
             };
-            tx.open_file(options, |s: &mut App, picked, tx| act(s, HostAction::PickedIdentity(picked.map_err(|e| e.to_string())), tx));
+            tx.open_file(options, |s: &mut App, picked, tx| {
+                act(s, HostAction::PickedIdentity(picked.map_err(|e| e.to_string())), tx)
+            });
         })
         .tab_press()
         .child(text("Choose…").font(type_::META_STRONG).color(t.text_2))

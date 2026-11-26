@@ -142,11 +142,10 @@ impl Toxiproxy {
         let mut reply = Vec::new();
         stream.read_to_end(&mut reply).map_err(|e| format!("{what}: {e}"))?;
         let reply = String::from_utf8_lossy(&reply);
-        let status = reply
-            .split_whitespace()
-            .nth(1)
-            .and_then(|s| s.parse::<u16>().ok())
-            .ok_or_else(|| format!("{what}: not an HTTP reply: {:?}", reply.chars().take(200).collect::<String>()))?;
+        let status =
+            reply.split_whitespace().nth(1).and_then(|s| s.parse::<u16>().ok()).ok_or_else(|| {
+                format!("{what}: not an HTTP reply: {:?}", reply.chars().take(200).collect::<String>())
+            })?;
         let content = reply.split_once("\r\n\r\n").map_or("", |(_, b)| b).to_owned();
         if !ok.contains(&status) {
             return Err(format!("{what}: HTTP {status}: {}", content.trim()));

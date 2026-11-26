@@ -34,7 +34,9 @@ impl Pattern {
         }
         let width = match spec {
             "" => 0,
-            _ if spec.len() >= 2 && spec.starts_with('0') && spec.bytes().all(|b| b.is_ascii_digit()) => spec[1..].parse().map_err(|_| bad())?,
+            _ if spec.len() >= 2 && spec.starts_with('0') && spec.bytes().all(|b| b.is_ascii_digit()) => {
+                spec[1..].parse().map_err(|_| bad())?
+            }
             _ => return Err(bad()),
         };
         if width > 20 {
@@ -107,7 +109,15 @@ impl Generator {
                         Some(end - back - jitter)
                     }
                 };
-                Entry { name: self.pattern.name(self.start + i), kind: self.kind, size, mtime, mode, owner: None, group: None }
+                Entry {
+                    name: self.pattern.name(self.start + i),
+                    kind: self.kind,
+                    size,
+                    mtime,
+                    mode,
+                    owner: None,
+                    group: None,
+                }
             })
             .collect()
     }

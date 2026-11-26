@@ -109,7 +109,16 @@ const CONTROLS: &[&str] = &[
 
 /// Items of a composite: the container takes the keyboard (arrows), and many of them may say the
 /// same (two transfers named "logs").
-pub const ITEMS: &[&str] = &["row", "list-box-option", "list-item", "menu-item", "menu-item-check-box", "menu-item-radio", "tab", "radio-button"];
+pub const ITEMS: &[&str] = &[
+    "row",
+    "list-box-option",
+    "list-item",
+    "menu-item",
+    "menu-item-check-box",
+    "menu-item-radio",
+    "tab",
+    "radio-button",
+];
 
 /// Roles that say nothing of what a control is.
 const GENERIC: &[&str] = &["group", "generic-container", "unknown", "label", ""];
@@ -118,7 +127,9 @@ const GENERIC: &[&str] = &["group", "generic-container", "unknown", "label", ""]
 const PLAIN: &[&str] = &["group", "generic-container", "scroll-view"];
 
 pub fn interactive(n: &Node) -> bool {
-    !window_chrome(n) && (["click", "focus", "set-value", "expand", "collapse"].iter().any(|a| n.acts(a)) || CONTROLS.contains(&n.role.as_str()))
+    !window_chrome(n)
+        && (["click", "focus", "set-value", "expand", "collapse"].iter().any(|a| n.acts(a))
+            || CONTROLS.contains(&n.role.as_str()))
 }
 
 /// Rune's own window chrome: the caption buttons it draws for the custom title bar on Windows
@@ -166,7 +177,11 @@ fn reached_through_container(nodes: &[Node], i: usize) -> bool {
         }
         found
     };
-    list.is_some_and(|k| nodes.iter().any(|n| n.acts("focus") && n.raw["controls"].as_array().is_some_and(|c| c.iter().any(|x| x.as_str() == Some(&k)))))
+    list.is_some_and(|k| {
+        nodes.iter().any(|n| {
+            n.acts("focus") && n.raw["controls"].as_array().is_some_and(|c| c.iter().any(|x| x.as_str() == Some(&k)))
+        })
+    })
 }
 
 #[derive(Debug)]
@@ -180,7 +195,8 @@ pub struct Offence {
 /// What's wrong with a tree.
 pub fn audit(nodes: &[Node]) -> Vec<Offence> {
     let mut out = Vec::new();
-    let mut flag = |kind, n: &Node| out.push(Offence { kind, role: n.role.clone(), key: n.key.clone(), name: n.name.clone() });
+    let mut flag =
+        |kind, n: &Node| out.push(Offence { kind, role: n.role.clone(), key: n.key.clone(), name: n.name.clone() });
     for (i, n) in nodes.iter().enumerate() {
         if n.role == "image" && n.name.trim().is_empty() {
             flag("unnamed image", n);
@@ -205,7 +221,11 @@ pub fn audit(nodes: &[Node]) -> Vec<Offence> {
         if !item && !n.name.is_empty() {
             let c = container(nodes, i);
             let twin = nodes.iter().enumerate().any(|(j, m)| {
-                j < i && interactive(m) && !ITEMS.contains(&m.role.as_str()) && m.name == n.name && container(nodes, j) == c
+                j < i
+                    && interactive(m)
+                    && !ITEMS.contains(&m.role.as_str())
+                    && m.name == n.name
+                    && container(nodes, j) == c
             });
             if twin {
                 flag("same name", n);
@@ -225,7 +245,8 @@ fn table(rows: &[(String, Offence)]) -> String {
 
 /// Every scene's tree (the Settings page's among them), and the Settings page's last section.
 fn trees() -> Vec<(String, Vec<Node>)> {
-    let mut out: Vec<(String, Vec<Node>)> = scenes::SCENES.iter().map(|(name, scene)| ((*name).to_owned(), tree(&scene_runtime(*scene)))).collect();
+    let mut out: Vec<(String, Vec<Node>)> =
+        scenes::SCENES.iter().map(|(name, scene)| ((*name).to_owned(), tree(&scene_runtime(*scene)))).collect();
     // The reconnecting banner's Sign in is a state of its own (not a golden scene).
     out.push(("reconnect-sign-in".into(), tree(&scene_runtime(needs_sign_in))));
     out.push(("settings-browsing".into(), tree(&scene_runtime(settings_browsing))));
@@ -248,12 +269,18 @@ fn the_settings_page_is_a_tablist_beside_the_sidebar() {
     let list = node(&nodes, "settings-sections");
     assert_eq!((list.role.as_str(), list.name.as_str()), ("tab-list", "Settings sections"));
     assert_eq!(list.raw["orientation"].as_str(), Some("vertical"), "{list:?}");
-    let tabs: Vec<_> = children(&nodes, "settings-sections").into_iter().map(|n| (n.role.clone(), n.name.clone(), n.has_state("selected"))).collect();
+    let tabs: Vec<_> = children(&nodes, "settings-sections")
+        .into_iter()
+        .map(|n| (n.role.clone(), n.name.clone(), n.has_state("selected")))
+        .collect();
     let tab = |name: &str, on| ("tab".to_owned(), name.to_owned(), on);
     assert_eq!(tabs, [tab("Appearance", false), tab("Transfers", true), tab("Browsing", false)]);
     let chosen = node(&nodes, "settings-tab-transfers");
     assert!(chosen.acts("click") && chosen.acts("focus"), "{chosen:?}");
-    assert!(chosen.raw["controls"].as_array().is_some_and(|c| c.iter().any(|k| k.as_str() == Some("settings-panel"))), "{chosen:?}");
+    assert!(
+        chosen.raw["controls"].as_array().is_some_and(|c| c.iter().any(|k| k.as_str() == Some("settings-panel"))),
+        "{chosen:?}"
+    );
     let panel = node(&nodes, "settings-panel");
     assert_eq!((panel.role.as_str(), panel.name.as_str()), ("tab-panel", "Transfers"));
     let back = node(&nodes, "settings-back");
@@ -307,7 +334,14 @@ fn the_file_list_is_a_grid_with_sortable_column_headers() {
     assert_eq!((header.role.as_str(), int(header, "rowIndex")), ("row", Some(1)));
     let heads: Vec<_> = children(&nodes, "list-header");
     let names: Vec<_> = heads.iter().map(|h| (h.role.as_str(), h.name.as_str(), int(h, "columnIndex"))).collect();
-    assert_eq!(names, [("column-header", "Name", Some(1)), ("column-header", "Size", Some(2)), ("column-header", "Modified", Some(3))]);
+    assert_eq!(
+        names,
+        [
+            ("column-header", "Name", Some(1)),
+            ("column-header", "Size", Some(2)),
+            ("column-header", "Modified", Some(3))
+        ]
+    );
     let sort: Vec<_> = heads.iter().map(|h| h.raw["sort"].as_str().unwrap_or("none")).collect();
     assert_eq!(sort, ["ascending", "none", "none"]);
     assert!(heads.iter().all(|h| h.acts("click") && h.acts("focus")), "the headers are pressed and focused: {heads:?}");
@@ -331,7 +365,8 @@ fn the_file_list_is_a_grid_with_sortable_column_headers() {
 
     // Sorted by size, descending: only Size says so.
     let nodes = tree(&scene_runtime(scenes::listing_sorted_size));
-    let sort: Vec<_> = children(&nodes, "list-header").iter().map(|h| h.raw["sort"].as_str().unwrap_or("none").to_owned()).collect();
+    let sort: Vec<_> =
+        children(&nodes, "list-header").iter().map(|h| h.raw["sort"].as_str().unwrap_or("none").to_owned()).collect();
     assert_eq!(sort, ["none", "descending", "none"]);
 }
 
@@ -351,12 +386,15 @@ fn a_virtualized_folder_reports_every_row_and_where_each_is() {
 /// offers Sign in.
 pub(crate) fn needs_sign_in(s: &mut App) {
     scenes::reconnecting(s);
-    s.apply(ServiceEvent::Status { host: dromon_core::HostId("prod".into()), status: dromon_core::ConnStatus::NeedsInput });
+    s.apply(ServiceEvent::Status {
+        host: dromon_core::HostId("prod".into()),
+        status: dromon_core::ConnStatus::NeedsInput,
+    });
 }
 
-/// Status and errors in words or shape, not colour alone (§6.9).
+/// Status and errors in words or shape, not colour alone (§6.9): the connection's status.
 #[test]
-fn states_are_said_in_words_not_colour_alone() {
+fn connection_states_are_said_in_words_not_colour_alone() {
     // The connection dot: the status bar says it, and the sidebar's rows too.
     let nodes = tree(&scene_runtime(scenes::listing));
     assert!(node(&nodes, "status-conn").name.starts_with("Connected"));
@@ -373,7 +411,11 @@ fn states_are_said_in_words_not_colour_alone() {
     assert_eq!((sign_in.role.as_str(), sign_in.name.as_str()), ("button", "Sign in"));
     assert!(!sign_in.has_state("disabled"), "{sign_in:?}");
     assert!(sign_in.acts("click") && sign_in.acts("focus"), "{sign_in:?}");
+}
 
+/// What the icons and dimming show, in words too (§6.9).
+#[test]
+fn kinds_and_cut_rows_are_said_in_words() {
     // Kinds the icons show: a folder, a link.
     let nodes = tree(&scene_runtime(scenes::listing));
     assert!(node(&nodes, "assets").description.contains("Folder"), "{:?}", node(&nodes, "assets"));
@@ -384,7 +426,11 @@ fn states_are_said_in_words_not_colour_alone() {
     let nodes = tree(&scene_runtime(scenes::cut_rows));
     assert!(node(&nodes, "robots.txt").name.ends_with("(cut)"), "{:?}", node(&nodes, "robots.txt"));
     assert!(!node(&nodes, "assets").name.contains("cut"));
+}
 
+/// Errors in words, not a red outline alone (§6.9).
+#[test]
+fn errors_are_said_in_words_as_alerts() {
     // Errors: in words, as alerts.
     let nodes = tree(&scene_runtime(scenes::auth_password_error));
     assert_eq!(node(&nodes, "sheet-error").role, "alert");
@@ -397,7 +443,11 @@ fn states_are_said_in_words_not_colour_alone() {
     assert!(node(&nodes, "edit-input").has_state("invalid"));
     let nodes = tree(&scene_runtime(scenes::delete_failed));
     assert!(nodes.iter().any(|n| n.role == "alert" && n.name.starts_with("Couldn't delete")));
+}
 
+/// A transfer's state in words, not its bar's colour alone (§6.9).
+#[test]
+fn transfer_states_are_said_in_words() {
     // Transfers: failed and done in words; the newer date says "newer".
     let nodes = tree(&scene_runtime(scenes::transfers));
     assert!(node(&nodes, "tr-3").name.contains("Failed"));
@@ -413,7 +463,11 @@ fn a_selected_row_has_a_fill_and_says_so() {
     let rt = scene_runtime(scenes::listing);
     let fill = |name: &str| {
         let row = rt.elements().into_iter().find(|e| e.key.as_deref() == Some(name)).unwrap();
-        rt.elements().into_iter().filter(|e| e.parent.is_some() && e.path.starts_with(&row.path) && e.path != row.path).map(|e| e.fill.a).fold(0.0, f32::max)
+        rt.elements()
+            .into_iter()
+            .filter(|e| e.parent.is_some() && e.path.starts_with(&row.path) && e.path != row.path)
+            .map(|e| e.fill.a)
+            .fold(0.0, f32::max)
     };
     assert!(fill("index.html") > 0.05, "the selected row is filled");
     assert!(fill("assets") < 0.01, "an unselected one isn't");
@@ -422,7 +476,13 @@ fn a_selected_row_has_a_fill_and_says_so() {
 fn announced(rt: &Runtime<App>) -> String {
     let root = rt.accessibility_json();
     // The window's own live region: the last child of the root.
-    root["children"].as_array().and_then(|c| c.last()).and_then(|n| n["name"].as_str()).unwrap_or_default().trim_end_matches('\u{200B}').to_owned()
+    root["children"]
+        .as_array()
+        .and_then(|c| c.last())
+        .and_then(|n| n["name"].as_str())
+        .unwrap_or_default()
+        .trim_end_matches('\u{200B}')
+        .to_owned()
 }
 
 fn after(rt: &mut Runtime<App>, f: impl FnOnce(&mut App) + 'static) -> String {
@@ -454,7 +514,9 @@ fn finished_work_and_lost_connections_are_announced() {
     assert_eq!(failed, "Upload of logs failed: 1 file failed");
 
     // The connection drops and comes back.
-    let lost = after(&mut rt, move |s| s.apply(ServiceEvent::Status { host: prod(), status: ConnStatus::Reconnecting { attempt: 1 } }));
+    let lost = after(&mut rt, move |s| {
+        s.apply(ServiceEvent::Status { host: prod(), status: ConnStatus::Reconnecting { attempt: 1 } })
+    });
     assert_eq!(lost, "Connection to prod lost. Reconnecting…");
     let back = after(&mut rt, move |s| s.apply(ServiceEvent::Status { host: prod(), status: ConnStatus::Ready }));
     assert_eq!(back, "Reconnected to prod");
@@ -483,8 +545,15 @@ fn finished_work_and_lost_connections_are_announced() {
         use dromon_core::RemotePath;
         s.backend = Box::new(crate::state::Silent::default());
         let gone = RemotePath::new("/var/www/site/releases");
-        s.apply(ServiceEvent::ListFailed { host: prod(), path: gone.clone(), error: dromon_core::Error::NotFound(gone) });
-        let mut entries = crate::fixture::active().server("prod").and_then(|srv| srv.list(&RemotePath::new("/var/www/site")).ok()).unwrap_or_default();
+        s.apply(ServiceEvent::ListFailed {
+            host: prod(),
+            path: gone.clone(),
+            error: dromon_core::Error::NotFound(gone),
+        });
+        let mut entries = crate::fixture::active()
+            .server("prod")
+            .and_then(|srv| srv.list(&RemotePath::new("/var/www/site")).ok())
+            .unwrap_or_default();
         entries.retain(|e| e.name != "releases");
         s.apply(ServiceEvent::Listing { host: prod(), path: RemotePath::new("/var/www/site"), entries });
     });

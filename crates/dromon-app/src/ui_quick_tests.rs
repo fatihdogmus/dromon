@@ -55,7 +55,11 @@ fn shown(rt: &Runtime<App>, k: &str) -> bool {
 }
 
 fn text_of(rt: &Runtime<App>, k: &str) -> String {
-    rt.elements().into_iter().find(|e| e.key.as_deref() == Some(k) && !e.exiting).and_then(|e| e.text).unwrap_or_default()
+    rt.elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some(k) && !e.exiting)
+        .and_then(|e| e.text)
+        .unwrap_or_default()
 }
 
 fn field(rt: &Runtime<App>, f: dromon_ssh::QuickField) -> String {
@@ -71,7 +75,10 @@ fn the_plus_opens_quick_connect_and_a_pasted_address_connects() {
     rt.paste("deploy@prod.example.com:22");
     settle(&mut rt);
     use dromon_ssh::QuickField::{Host, Port, User};
-    assert_eq!((field(&rt, Host), field(&rt, User), field(&rt, Port)), ("prod.example.com".into(), "deploy".into(), "22".into()));
+    assert_eq!(
+        (field(&rt, Host), field(&rt, User), field(&rt, Port)),
+        ("prod.example.com".into(), "deploy".into(), "22".into())
+    );
     key(&mut rt, Key::Enter);
     assert!(!shown(&rt, "quick"), "Return connects and closes it");
     let new = HostId("deploy@prod.example.com:22".into());

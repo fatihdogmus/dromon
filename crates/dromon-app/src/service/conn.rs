@@ -2,9 +2,8 @@
 //! [`Lifecycle`] machine, and carries out the machine's effects. Everything about the host
 //! happens here, in order, on one task.
 //!
-//! A [`Session`] is one connection attempt: a fresh askpass token, a fresh `AuthAttempt`, the
-//! ssh child, the SFTP handshake and then the session, and the folder listing in flight.
-//! Dropping it unregisters the token, cancels its open prompts and kills ssh.
+//! A [`Session`] is one connection attempt (`conn_session.rs`): the ssh child, its prompts,
+//! the SFTP session and the folder listing in flight.
 //!
 //! The host is one connection for every main window (`windows.rs`): each window's folder on
 //! screen here is listed for it, polled while it shows, and listed again after a reconnect or
@@ -15,26 +14,25 @@
 
 #[path = "conn_checks.rs"]
 mod checks;
+#[path = "conn_session.rs"]
+mod session;
 
 use std::collections::VecDeque;
 use std::future::pending;
-use std::io;
-use std::process::ExitStatus;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use dromon_core::{ConnStatus, Entry, Error, HostId, HostSpec, PromptAnswer, PromptId, RemotePath};
 use dromon_sftp::{Sftp, Visibility};
-use dromon_ssh::{AskpassEnv, AskpassRequest, AskpassServer, PasswordStore, SshCommand, spawn};
-use tokio::sync::{mpsc, oneshot};
-use tokio::task::{JoinError, JoinHandle};
+use dromon_ssh::{AskpassRequest, AskpassServer, PasswordStore};
+use tokio::sync::mpsc;
 use tokio::time::Instant;
-use zeroize::Zeroizing;
 
-use super::auth::{self, AttemptPrompts, PromptIds, Routed};
+use self::session::{ListRun, Session, SessionEvent, session_next};
+use super::auth::{self, PromptIds, Routed};
 use super::fileops::{FileOps, Finished};
 use super::lifecycle::{Effect, Event, Lifecycle, Phase, step};
-use super::poll::{Collector, Outcome};
+use super::poll::Outcome;
 use super::sizes::{SizeCmd, Walks};
 use super::transfers::EngineMsg;
 use super::wake::{ProbeGate, Why};
@@ -44,8 +42,6 @@ use crate::state::{FileOp, OpId, ServiceEvent, WindowId};
 
 /// Entries per listing page (§4.4).
 pub const PAGE: usize = 512;
-/// stderr lines kept per attempt for reading why ssh exited.
-const TAIL: usize = 64;
 /// How long to wait for ssh's last stderr lines once it exited.
 const DRAIN: Duration = Duration::from_millis(300);
 
@@ -117,191 +113,6 @@ pub fn start<S: Sink>(spec: HostSpec, shared: Shared, sink: S) -> ConnHandle {
     ConnHandle { cmds, asks }
 }
 
-/// A folder being listed: for the UI (pages go on as they come), or a poll (pages collect
-/// quietly and the whole is compared with what the UI has). One per host at a time.
-struct ListRun {
-    path: RemotePath,
-    pages: mpsc::Receiver<Result<Vec<Entry>, Error>>,
-    first: bool,
-    poll: bool,
-    started: Instant,
-    got: Collector,
-}
-
-impl ListRun {
-    fn new(sftp: &Sftp, path: RemotePath, poll: bool) -> ListRun {
-        ListRun { pages: sftp.list_paged(&path, PAGE), path, first: true, poll, started: Instant::now(), got: Collector::default() }
-    }
-}
-
-/// One connection attempt.
-struct Session {
-    askpass: Option<Arc<AskpassServer>>,
-    token: Zeroizing<String>,
-    prompts: AttemptPrompts,
-    stderr: Option<mpsc::Receiver<String>>,
-    tail: VecDeque<String>,
-    /// Resolves when ssh exits; dropping `kill` kills it.
-    exit: Option<JoinHandle<io::Result<ExitStatus>>>,
-    _kill: oneshot::Sender<()>,
-    handshake: Option<JoinHandle<Result<(Sftp, RemotePath), Error>>>,
-    sftp: Option<Sftp>,
-    home: RemotePath,
-    listing: Option<ListRun>,
-}
-
-impl Drop for Session {
-    fn drop(&mut self) {
-        if let Some(server) = &self.askpass {
-            server.unregister(&self.token);
-        }
-        if let Some(h) = &self.handshake {
-            h.abort();
-        }
-        if let Some(sftp) = &self.sftp {
-            sftp.close();
-        }
-    }
-}
-
-enum SessionEvent {
-    Stderr(String),
-    StderrClosed,
-    Exited(Result<io::Result<ExitStatus>, JoinError>),
-    Up(Result<Result<(Sftp, RemotePath), Error>, JoinError>),
-    HungUp(PromptId),
-    Page(Option<Result<Vec<Entry>, Error>>),
-}
-
-async fn recv_opt<T>(rx: &mut Option<mpsc::Receiver<T>>) -> Option<T> {
-    match rx {
-        Some(rx) => rx.recv().await,
-        None => pending().await,
-    }
-}
-
-async fn join_opt<T>(h: &mut Option<JoinHandle<T>>) -> Result<T, JoinError> {
-    match h {
-        Some(h) => h.await,
-        None => pending().await,
-    }
-}
-
-async fn page_opt(run: &mut Option<ListRun>) -> Option<Result<Vec<Entry>, Error>> {
-    match run {
-        Some(run) => run.pages.recv().await,
-        None => pending().await,
-    }
-}
-
-impl Session {
-    /// Starts ssh for `spec` (with `-v` if `verbose`) with a fresh token, and the SFTP handshake
-    /// on its stdio.
-    async fn start(spec: &HostSpec, shared: &Shared, verbose: bool) -> Result<(Session, String), String> {
-        let cfg = &shared.cfg;
-        let (env, askpass) = match &shared.askpass {
-            Some(server) => {
-                let env = server.register(spec.id.clone(), &cfg.helper_exe).map_err(|e| format!("Couldn't set up sign-in prompts: {e}"))?;
-                (env, Some(server.clone()))
-            }
-            // No askpass endpoint: ssh's prompts are cancelled, keys and agents still work.
-            None => (AskpassEnv { exe: cfg.helper_exe.clone(), endpoint: String::new(), token: String::new() }, None),
-        };
-        let token = Zeroizing::new(env.token.clone());
-        let unregister = |askpass: &Option<Arc<AskpassServer>>| {
-            if let Some(server) = askpass {
-                server.unregister(&token);
-            }
-        };
-        let built = SshCommand::sftp(spec, &env, verbose).and_then(|cmd| match &cfg.config_file {
-            Some(file) => cmd.with_config_file(file),
-            None => Ok(cmd),
-        });
-        let mut cmd = match built {
-            Ok(cmd) => cmd,
-            Err(e) => {
-                unregister(&askpass);
-                return Err(e.to_string());
-            }
-        };
-        cmd.program = cfg.ssh.clone();
-        for name in &cfg.without_env {
-            cmd = cmd.without_env(name.clone());
-        }
-        let line = std::iter::once(cmd.program.to_string_lossy().into_owned())
-            .chain(cmd.args.iter().map(|a| a.to_string_lossy().into_owned()))
-            .collect::<Vec<_>>()
-            .join(" ");
-        let mut child = match spawn(&cmd).await {
-            Ok(child) => child,
-            Err(e) => {
-                unregister(&askpass);
-                return Err(format!("Couldn't run {}: {e}", cmd.program.display()));
-            }
-        };
-        let stream = child.take_stream();
-        let stderr = child.take_stderr();
-        let (kill, killed) = oneshot::channel::<()>();
-        let exit = tokio::spawn(async move {
-            tokio::select! {
-                status = child.wait() => status,
-                _ = killed => {
-                    child.kill().await?;
-                    Err(io::Error::other("stopped"))
-                }
-            }
-        });
-        let handshake = stream.map(|stream| {
-            tokio::spawn(async move {
-                let sftp = Sftp::new(stream).await?;
-                let home = sftp.home().await?;
-                Ok((sftp, home))
-            })
-        });
-        let session = Session {
-            askpass,
-            token,
-            prompts: AttemptPrompts::new(spec.id.clone(), shared.ids.clone()),
-            stderr,
-            tail: VecDeque::new(),
-            exit: Some(exit),
-            _kill: kill,
-            handshake,
-            sftp: None,
-            home: RemotePath::root(),
-            listing: None,
-        };
-        Ok((session, format!("Running {line}")))
-    }
-
-    async fn next(&mut self) -> SessionEvent {
-        tokio::select! {
-            line = recv_opt(&mut self.stderr) => match line {
-                Some(line) => SessionEvent::Stderr(line),
-                None => SessionEvent::StderrClosed,
-            },
-            status = join_opt(&mut self.exit) => SessionEvent::Exited(status),
-            up = join_opt(&mut self.handshake) => SessionEvent::Up(up),
-            id = self.prompts.hung_up() => SessionEvent::HungUp(id),
-            page = page_opt(&mut self.listing) => SessionEvent::Page(page),
-        }
-    }
-
-    fn keep(&mut self, line: &str) {
-        if self.tail.len() == TAIL {
-            self.tail.pop_front();
-        }
-        self.tail.push_back(line.to_owned());
-    }
-}
-
-async fn session_next(s: &mut Option<Session>) -> SessionEvent {
-    match s {
-        Some(s) => s.next().await,
-        None => pending().await,
-    }
-}
-
 async fn retry_due(retry: &Option<(u32, Instant)>) -> u32 {
     match retry {
         Some((attempt, at)) => {
@@ -359,7 +170,11 @@ struct Task<S: Sink> {
 }
 
 impl<S: Sink> Task<S> {
-    async fn run(mut self, mut cmds: mpsc::UnboundedReceiver<ConnCmd>, mut asks: mpsc::UnboundedReceiver<AskpassRequest>) {
+    async fn run(
+        mut self,
+        mut cmds: mpsc::UnboundedReceiver<ConnCmd>,
+        mut asks: mpsc::UnboundedReceiver<AskpassRequest>,
+    ) {
         loop {
             let poll_at = self.poll_at();
             let input = tokio::select! {
@@ -415,6 +230,16 @@ impl<S: Sink> Task<S> {
         if s.sftp.is_some() {
             let _ = self.shared.engine.send(EngineMsg::HostDown(self.host.clone()));
             self.ops.fail_queued(&self.host, &self.sink);
+        }
+    }
+
+    /// The session `s` is over: tells the transfer engine, and closes its open prompts in
+    /// every window.
+    fn session_ended(&mut self, s: &mut Session) {
+        self.session_gone(s);
+        for id in s.prompts.close_all() {
+            self.route.gone(id);
+            self.emit(ServiceEvent::PromptClosed(id));
         }
     }
 
@@ -559,7 +384,8 @@ impl<S: Sink> Task<S> {
     /// under way or waiting (exactly one per host).
     fn poll_at(&self) -> Option<Instant> {
         let s = self.session.as_ref()?;
-        let idle = s.sftp.is_some() && s.listing.is_none() && self.waiting.is_empty() && self.life.phase == Phase::Ready;
+        let idle =
+            s.sftp.is_some() && s.listing.is_none() && self.waiting.is_empty() && self.life.phase == Phase::Ready;
         if idle { self.watch.due() } else { None }
     }
 
@@ -716,11 +542,7 @@ impl<S: Sink> Task<S> {
     /// ssh is gone (or SFTP couldn't start): collects its last words and tells the machine.
     async fn finish(&mut self, error: Option<String>) {
         let Some(mut s) = self.session.take() else { return };
-        self.session_gone(&s);
-        for id in s.prompts.close_all() {
-            self.route.gone(id);
-            self.emit(ServiceEvent::PromptClosed(id));
-        }
+        self.session_ended(&mut s);
         if let Some(mut rx) = s.stderr.take() {
             while let Ok(Some(line)) = tokio::time::timeout(DRAIN, rx.recv()).await {
                 s.keep(&line);
@@ -757,11 +579,7 @@ impl<S: Sink> Task<S> {
                     }
                     Effect::Kill => {
                         if let Some(mut s) = self.session.take() {
-                            self.session_gone(&s);
-                            for id in s.prompts.close_all() {
-                                self.route.gone(id);
-                                self.emit(ServiceEvent::PromptClosed(id));
-                            }
+                            self.session_ended(&mut s);
                         }
                     }
                     Effect::Status(status) => {
@@ -787,7 +605,10 @@ impl<S: Sink> Task<S> {
                         }
                         let start = self.session.as_ref().map_or_else(RemotePath::root, |s| s.home.clone());
                         for window in std::mem::take(&mut self.route.joining) {
-                            self.sink.emit_to(window, ServiceEvent::Opened { host: self.host.clone(), start: start.clone() });
+                            self.sink.emit_to(
+                                window,
+                                ServiceEvent::Opened { host: self.host.clone(), start: start.clone() },
+                            );
                         }
                         self.session_up();
                     }

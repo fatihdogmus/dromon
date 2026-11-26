@@ -47,7 +47,10 @@ fn view(s: &App) -> &PropertiesView {
 }
 
 fn sizes_sent(rec: &Recorder) -> Vec<Command> {
-    rec.sent().into_iter().filter(|c| matches!(c, Command::FolderSize { .. } | Command::CancelFolderSize { .. })).collect()
+    rec.sent()
+        .into_iter()
+        .filter(|c| matches!(c, Command::FolderSize { .. } | Command::CancelFolderSize { .. }))
+        .collect()
 }
 
 fn total(bytes: u64, files: u64, folders: u64, unreadable: u64) -> SizeTotal {
@@ -79,15 +82,21 @@ fn entry(kind: EntryKind, mode: Option<u32>) -> Entry {
 }
 
 #[test]
-fn kinds_permissions_and_owners_read_as_words() {
+fn kinds_read_as_words() {
     assert_eq!(kind_text(&entry(EntryKind::Dir, None)), "Folder");
     assert_eq!(kind_text(&entry(EntryKind::File, None)), "File");
-    assert_eq!(kind_text(&entry(EntryKind::Symlink { target: Some(LinkTarget::Dir) }, None)), "Symbolic link to a folder");
+    assert_eq!(
+        kind_text(&entry(EntryKind::Symlink { target: Some(LinkTarget::Dir) }, None)),
+        "Symbolic link to a folder"
+    );
     assert_eq!(kind_text(&entry(EntryKind::Symlink { target: None }, None)), "Symbolic link (target missing)");
     assert_eq!(kind_text(&entry(EntryKind::Other, Some(0o140_755))), "Socket");
     assert_eq!(kind_text(&entry(EntryKind::Other, Some(0o010_644))), "Named pipe");
     assert_eq!(kind_text(&entry(EntryKind::Other, None)), "Special file");
+}
 
+#[test]
+fn permissions_read_as_letters_and_octal() {
     assert_eq!(permissions_text(Some(0o040_755)), "rwxr-xr-x (755)");
     assert_eq!(permissions_text(Some(0o100_644)), "rw-r--r-- (644)");
     assert_eq!(permissions_text(Some(0o100_600)), "rw------- (600)");
@@ -95,7 +104,10 @@ fn kinds_permissions_and_owners_read_as_words() {
     assert_eq!(permissions_text(Some(0o041_777)), "rwxrwxrwt (1777)");
     assert_eq!(permissions_text(Some(0o102_640)), "rw-r-S--- (2640)");
     assert_eq!(permissions_text(None), "—");
+}
 
+#[test]
+fn owners_read_as_owner_and_group() {
     let mut e = entry(EntryKind::File, None);
     assert_eq!(owner_text(&e), "—");
     e.owner = Some("alice".into());
@@ -106,7 +118,10 @@ fn kinds_permissions_and_owners_read_as_words() {
     assert_eq!(owner_text(&e), ":staff");
     let ids = Entry { owner: Some("1001".into()), group: Some("1002".into()), ..e };
     assert_eq!(owner_text(&ids), "1001:1002", "numeric ids when the server gave no names");
+}
 
+#[test]
+fn counts_read_as_words() {
     assert_eq!(counts_text(&total(0, 1, 1, 0)), "1 file, 1 folder");
     assert_eq!(counts_text(&total(0, 12_000, 3, 0)), "12,000 files, 3 folders");
     assert_eq!(unreadable_text(&total(0, 0, 0, 0)), None);
@@ -151,7 +166,10 @@ fn calculate_shows_progress_then_the_total() {
     file(&mut s, FileAction::Calculate);
     let id = view(&s).walking().expect("walking");
     assert_eq!(id.0 >> 32, u64::from(s.window.0), "numbered in this window's own range");
-    assert_eq!(sizes_sent(&rec), [Command::FolderSize { id, host: prod(), path: RemotePath::new("/var/www/site/releases") }]);
+    assert_eq!(
+        sizes_sent(&rec),
+        [Command::FolderSize { id, host: prod(), path: RemotePath::new("/var/www/site/releases") }]
+    );
     assert!(!s.can_calculate(), "not twice at once");
     file(&mut s, FileAction::Calculate);
     assert_eq!(sizes_sent(&rec).len(), 1);
@@ -166,7 +184,12 @@ fn calculate_shows_progress_then_the_total() {
     file(&mut s, FileAction::Calculate);
     let again = view(&s).walking().expect("walking again");
     assert_ne!(again, id);
-    s.apply(ServiceEvent::FolderSizeFailed { id: again, host: prod(), total: total(9, 1, 0, 0), error: Error::ConnectionLost });
+    s.apply(ServiceEvent::FolderSizeFailed {
+        id: again,
+        host: prod(),
+        total: total(9, 1, 0, 0),
+        error: Error::ConnectionLost,
+    });
     assert_eq!(view(&s).size, SizePhase::Failed { total: total(9, 1, 0, 0), error: Error::ConnectionLost });
     s.act(Action::DismissSheet);
     assert_eq!(sizes_sent(&rec).len(), 2, "nothing to cancel: {:?}", sizes_sent(&rec));
@@ -247,5 +270,9 @@ fn the_fixture_walks_the_folder_at_once() {
     s.act(Action::GoTo(RemotePath::new("/var")));
     opened(&mut s, "lib");
     file(&mut s, FileAction::Calculate);
-    assert!(matches!(view(&s).size, SizePhase::Done { total: SizeTotal { unreadable: 1, folders: 1, .. } }), "{:?}", view(&s).size);
+    assert!(
+        matches!(view(&s).size, SizePhase::Done { total: SizeTotal { unreadable: 1, folders: 1, .. } }),
+        "{:?}",
+        view(&s).size
+    );
 }

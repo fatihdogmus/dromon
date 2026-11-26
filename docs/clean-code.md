@@ -48,17 +48,25 @@ One mechanical format, so diffs show only real changes and nobody argues about l
   (`max_width = 120`, `use_small_heuristics = "Max"`). Wide lines are the house style: short
   expressions stay on one line up to 120 columns.
 - CI checks it: `cargo fmt --all --check` is part of `cargo lint`. Run `cargo fmt --all` before
-  every commit.
+  every commit. After a large edit it may need a second run before `--check` passes: rustfmt
+  doesn't always settle in one pass.
+- rustfmt follows `mod` declarations but not `include!`, which is how `lib.rs` and `hot.rs`
+  take in `app_root.rs`. The never-compiled `#[cfg(any())] #[path = "app_root.rs"]` module in
+  `crates/dromon-app/src/lib.rs` is what lets `cargo fmt` reach dromon-app's modules, so it
+  stays.
 - Never hand-format against rustfmt: no manual alignment it would undo, no `#[rustfmt::skip]`
   to keep a layout you prefer. Change `rustfmt.toml` only in its own pull request.
-- A pure reformat (after a rustfmt or config change) is its own commit with nothing else in it,
-  and its hash goes into `.git-blame-ignore-revs`, so `git blame` skips it.
+- A pure reformat (after a rustfmt or config change) is its own pull request with nothing else
+  in it. Once it is squash merged, its commit on `main` goes into `.git-blame-ignore-revs`, so
+  blame skips it (GitHub reads the file itself; locally run
+  `git config blame.ignoreRevsFile .git-blame-ignore-revs` once). Only the squash commit's hash
+  works: the branch's commits never reach `main`.
 
 ### Agent checklist
 
 - Did `cargo fmt --all --check` pass before committing?
 - Does the diff contain formatting changes outside the lines you meant to touch? Then they belong
-  in a separate reformat commit.
+  in a separate reformat pull request.
 
 ## Standard: Files and Their Tests
 
@@ -70,8 +78,11 @@ Files short enough to read whole, with their tests next to them.
 
 ### Rules
 
-- Keep a file under about 800 lines. Before it grows past that, split it along a real seam (a
-  sub-machine, a group of actions, one platform's transport), not into arbitrary halves.
+- No `.rs` file in the workspace has more than 800 lines. `cargo lint` checks every one under
+  `crates/` and `xtask/` and fails naming each file over it, with no list of exceptions: a file
+  that size is no longer read whole. Before a file grows past it, split it along a real seam (a
+  sub-machine, a group of actions, one platform's transport, production code from its tests),
+  not into arbitrary halves, keeping the paths callers use (re-export from the parent).
 - Tests go in a sibling file, wired from the module:
   ```rust
   #[cfg(test)]
@@ -85,7 +96,7 @@ Files short enough to read whole, with their tests next to them.
 
 ### Agent checklist
 
-- Is any touched file over ~800 lines after the change?
+- Is any touched file near 800 lines after the change? Split it now, along a seam.
 - Are new tests in the sibling test file?
 
 ## Pattern: Phases Are Enums With a Pure Step
@@ -220,21 +231,47 @@ The window answers on the frame the user presses, always.
 
 ### Purpose
 
-Warnings are errors, everywhere, the same way CI checks them.
+Warnings are errors, everywhere, the same way CI checks them; functions and files stay small
+enough to read.
 
 ### Rules
 
-- `cargo lint` runs `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --
-  -D warnings`. It must pass before every push.
+- `cargo lint [--locked]` runs, in order and stopping at the first failure:
+  `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings` (given
+  `--locked` and any other arguments), and the 800-line file limit
+  ([Files and Their Tests](#standard-files-and-their-tests)). CI runs it; it must pass before
+  every push.
 - `unsafe_code` is denied workspace-wide; `dbg!` and `todo!` are clippy warnings, so errors
   under `-D warnings`.
-- Fix the code rather than silencing a lint. An `#[allow(...)]` is narrow (one item) and says
-  why in a comment.
+- Complexity lints, in `Cargo.toml`'s `[workspace.lints.clippy]` with their thresholds in the
+  root `clippy.toml`: `cognitive_complexity` (25), `too_many_lines` (100 lines of a function
+  body), `excessive_nesting` (6 levels), `struct_excessive_bools` and
+  `fn_params_excessive_bools` (Clippy's defaults; several flags are usually one enum). Lints
+  are enabled one by one, never as whole groups such as `pedantic` or `nursery`.
+- A hit is refactored when that makes the code clearer: a well-named function, early returns, a
+  helper per group of match arms, a test that checks several things split into one test each.
+- Where the long or complex shape is the clearest form (a flat `match` dispatching actions, a
+  shortcut table, a table-driven test), that one item gets
+  `#[expect(clippy::<lint>, reason = "…")]` with a concrete reason. `#[expect]` fails once the
+  lint no longer fires, so no stale suppression stays behind.
+- Any suppression, of any lint, is `#[expect(<lint>, reason = "…")]` when the lint fires in
+  every build that compiles the item. `#[allow(<lint>, reason = "…")]` is only for a lint that
+  fires in some builds but not others (code compiled into both the library and `dromon-hot`
+  through `include!`, dead code only some test binary or feature uses, a `cfg` that changes
+  what is used), where an `#[expect]` would fail in the other builds, and for a module's
+  deliberate exception such as the Windows FFI's `unsafe_code` (`askpass/win32.rs`). Check the
+  choice by building every target that compiles the item (the test binaries, the examples,
+  `--features hot --bin dromon-hot`, `--features perf`).
+- No module- or crate-wide suppression except such a deliberate exception (win32.rs, and
+  `dromon-hot`'s unused library surface in `hot.rs`), and never a higher threshold to get past
+  a hit.
 
 ### Agent checklist
 
 - Does `cargo lint` pass?
-- Does every new `#[allow]` carry its reason?
+- Was each complexity hit refactored, or does its one `#[expect]` give a reason that holds?
+- Is every `#[allow]` one that the builds differ on, or a module's deliberate exception, with
+  its reason?
 
 ## Standard: Review Checklist
 

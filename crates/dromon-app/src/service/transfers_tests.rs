@@ -345,7 +345,14 @@ impl Rig {
                 assert_eq!(file_sha1(&dl.join("x.bin")).unwrap(), orig, "{case}");
             }
             Job::Upload => {
-                want.extend(seeded.iter().chain(&["./b", "./b/tree", "./b/tree/sub", "./b/tree/sub/deep.txt", "./b/up.txt", "./b/x.bin"]));
+                want.extend(seeded.iter().chain(&[
+                    "./b",
+                    "./b/tree",
+                    "./b/tree/sub",
+                    "./b/tree/sub/deep.txt",
+                    "./b/up.txt",
+                    "./b/x.bin",
+                ]));
             }
             Job::Copy | Job::CrossCopy => want.extend(seeded.iter().chain(&["./b"]).chain(&kept_both)),
             Job::CrossMove => want.extend(["./b"].iter().chain(&kept_both)),
@@ -524,7 +531,12 @@ async fn tidying_cut_off_by_a_drop_runs_again() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_file_that_finished_as_its_connection_dropped_is_not_copied_again() {
     let Some(mut rig) = Rig::new("finished-as-dropped").await else { return };
-    let req = JobRequest::CrossHostCopy { from: a(), items: vec![rig.item("a/x.bin", EntryKind::File)], to: b(), into: rig.dir.join("c") };
+    let req = JobRequest::CrossHostCopy {
+        from: a(),
+        items: vec![rig.item("a/x.bin", EntryKind::File)],
+        to: b(),
+        into: rig.dir.join("c"),
+    };
     let job = rig.engine.queue.add(req.clone(), rig.engine.now());
     rig.engine.requests.insert(job, req);
     rig.drive(job, &mut None).await;
@@ -571,7 +583,8 @@ async fn work_cut_off_on_a_connection_that_stays_up_runs_again_later() {
     engine.requests.insert(job, req);
     engine.drive();
     for round in 0..2 {
-        let outcome = tokio::time::timeout(HUNG, engine.outcomes.1.recv()).await.expect("the check reports back").unwrap();
+        let outcome =
+            tokio::time::timeout(HUNG, engine.outcomes.1.recv()).await.expect("the check reports back").unwrap();
         assert!(matches!(&outcome, Outcome::Exists { existing: Err(Error::ConnectionLost), .. }), "round {round}");
         engine.on_outcome(outcome);
         engine.drive();

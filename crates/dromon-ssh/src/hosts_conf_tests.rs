@@ -95,13 +95,20 @@ fn parsing_skips_what_isnt_a_saved_host() {
                 ForwardAgent yes\n  User\nMatch all\n  User leaked\nHost ok\n  HostName second\nHost good\n  User \"a b\"\n";
     let got = parse_hosts_conf(text);
     assert_eq!(got.len(), 2, "{got:?}");
-    assert_eq!((got[0].alias.as_str(), got[0].hostname.as_deref(), got[0].port, got[0].user.as_deref()), ("ok", Some("1.2.3.4"), None, None));
+    assert_eq!(
+        (got[0].alias.as_str(), got[0].hostname.as_deref(), got[0].port, got[0].user.as_deref()),
+        ("ok", Some("1.2.3.4"), None, None)
+    );
     assert_eq!((got[1].id.as_str(), got[1].user.as_deref(), got[1].source), ("good", Some("a b"), HostSource::Saved));
 }
 
 #[test]
 fn quick_hosts_always_make_a_block() {
-    let i = QuickInput { alias: "lab".into(), identity_file: "/k/id ed".into(), ..QuickInput { host: "u@h:2".into(), ..Default::default() } };
+    let i = QuickInput {
+        alias: "lab".into(),
+        identity_file: "/k/id ed".into(),
+        ..QuickInput { host: "u@h:2".into(), ..Default::default() }
+    };
     let spec = quick_host(&i, HostSource::Saved).unwrap();
     let block = host_block(&spec).unwrap();
     assert_eq!(parse_hosts_conf(&block), [spec]);
@@ -169,7 +176,11 @@ fn append_block_backs_up_then_appends() {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        assert_eq!(fs::metadata(&config).unwrap().permissions().mode() & 0o777, 0o640, "the file keeps its permissions");
+        assert_eq!(
+            fs::metadata(&config).unwrap().permissions().mode() & 0o777,
+            0o640,
+            "the file keeps its permissions"
+        );
     }
     // The same minute again: the first backup stays, the next one is -2.
     assert_eq!(planned_backup(&config, stamp), Some(dir.path().join("config.dromon-backup-20261125-1342-2")));
@@ -177,7 +188,8 @@ fn append_block_backs_up_then_appends() {
     assert_eq!(again.backup, Some(dir.path().join("config.dromon-backup-20261125-1342-2")));
     assert_eq!(fs::read_to_string(&planned).unwrap(), before, "the first backup is untouched");
     assert!(fs::read_to_string(&config).unwrap().ends_with("HostName h\r\n\r\nHost pi\r\n"));
-    let names: Vec<String> = fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    let names: Vec<String> =
+        fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
     assert!(!names.iter().any(|n| n.contains("dromon-tmp")), "{names:?}");
 }
 
@@ -240,12 +252,18 @@ fn a_failed_write_leaves_the_config_untouched() {
 #[test]
 fn paths_show_under_home_as_the_platform_writes_it() {
     assert_eq!(display_path_str("/home/u/.ssh/config", "/home/u", false), "~/.ssh/config");
-    assert_eq!(display_path_str("/home/u/.ssh/config.dromon-backup-1", "/home/u/", false), "~/.ssh/config.dromon-backup-1");
+    assert_eq!(
+        display_path_str("/home/u/.ssh/config.dromon-backup-1", "/home/u/", false),
+        "~/.ssh/config.dromon-backup-1"
+    );
     assert_eq!(display_path_str("/home/user2/.ssh/config", "/home/u", false), "/home/user2/.ssh/config");
     assert_eq!(display_path_str("/etc/ssh/ssh_config", "", false), "/etc/ssh/ssh_config");
     assert_eq!(display_path_str(r"C:\Users\Fatih\.ssh\config", r"C:\Users\Fatih", true), r"%USERPROFILE%\.ssh\config");
     assert_eq!(display_path_str(r"c:\users\fatih\.ssh\config", r"C:\Users\Fatih\", true), r"%USERPROFILE%\.ssh\config");
-    assert_eq!(display_path_str(r"C:\Users\Fatih2\.ssh\config", r"C:\Users\Fatih", true), r"C:\Users\Fatih2\.ssh\config");
+    assert_eq!(
+        display_path_str(r"C:\Users\Fatih2\.ssh\config", r"C:\Users\Fatih", true),
+        r"C:\Users\Fatih2\.ssh\config"
+    );
     assert_eq!(display_path_str(r"D:\cfg\config", r"C:\Users\Fatih", true), r"D:\cfg\config");
     assert_eq!(display_path(Path::new("/x/y"), None), "/x/y");
 }
@@ -255,5 +273,8 @@ fn paths_show_under_home_as_the_platform_writes_it() {
 #[test]
 fn windows_backup_names() {
     let p = Path::new(r"C:\Users\Fatih\.ssh\config");
-    assert_eq!(backup_name(p, "20261125-1342", 3), Path::new(r"C:\Users\Fatih\.ssh\config.dromon-backup-20261125-1342-3"));
+    assert_eq!(
+        backup_name(p, "20261125-1342", 3),
+        Path::new(r"C:\Users\Fatih\.ssh\config.dromon-backup-20261125-1342-3")
+    );
 }

@@ -98,7 +98,9 @@ impl Outcome {
     fn ready(&self) -> &Sftp {
         match &self.sftp {
             Ok(sftp) => sftp,
-            Err(e) => panic!("connection failed: {e}\nprompts: {:#?}\nssh stderr:\n{}", self.seen, self.stderr.join("\n")),
+            Err(e) => {
+                panic!("connection failed: {e}\nprompts: {:#?}\nssh stderr:\n{}", self.seen, self.stderr.join("\n"))
+            }
         }
     }
 }
@@ -208,7 +210,8 @@ impl Fixture {
     async fn connect(&mut self, host: &HostSpec, config: &str, agent: Option<&Path>, user: User<'_>) -> Outcome {
         let config = self.config_file(config);
         let env = self.server.register(host.id.clone(), Path::new(HELPER)).unwrap();
-        let mut cmd = SshCommand::sftp(host, &env, true).unwrap().with_config_file(&config).unwrap().without_env("SSH_AUTH_SOCK");
+        let mut cmd =
+            SshCommand::sftp(host, &env, true).unwrap().with_config_file(&config).unwrap().without_env("SSH_AUTH_SOCK");
         if let Some(agent) = agent {
             cmd.env.push(("SSH_AUTH_SOCK".into(), agent.into()));
         }
@@ -468,7 +471,8 @@ async fn proxy_jump_passwords_are_kept_apart() {
     };
     let first = f.connect(&host, PASSWORD_ONLY, None, &mut user).await;
     assert_eq!(first.ready().home().await.unwrap(), f.home(Role::Password));
-    let passwords: Vec<_> = first.seen.iter().filter(|s| s.kind == PromptKind::Password).map(|s| s.prompt.as_str()).collect();
+    let passwords: Vec<_> =
+        first.seen.iter().filter(|s| s.kind == PromptKind::Password).map(|s| s.prompt.as_str()).collect();
     assert_eq!(passwords, [format!("{jump}'s password: "), format!("{target}'s password: ")]);
     assert_eq!(first.seen.iter().filter(|s| host_key(&s.kind)).count(), 2);
     assert_eq!(f.store.get(&host.id, &jump).unwrap().expose_secret(), PASSWORD);
@@ -508,7 +512,11 @@ async fn second_factor_after_public_key() {
     assert_eq!(out.seen[1].prompt, format!("Enter passphrase for key '{key}': "));
     assert_eq!(out.seen[2].prompt, format!("{keypw}'s password: "));
     assert_eq!(password_identity(&out.seen[2].prompt), keypw);
-    assert!(out.stderr.iter().any(|l| l.contains("Authenticated using \"publickey\" with partial success.")), "{:#?}", out.stderr);
+    assert!(
+        out.stderr.iter().any(|l| l.contains("Authenticated using \"publickey\" with partial success.")),
+        "{:#?}",
+        out.stderr
+    );
 
     // The password alone is not enough: the server only offers publickey first.
     let mut user = |kind: &PromptKind, prompt: &str, _: Option<&str>| panic!("unexpected {kind:?}: {prompt:?}");
@@ -558,11 +566,7 @@ async fn keyboard_interactive_password_then_verification_code() {
     assert_eq!(first.seen[2].prompt, code_prompt);
     assert!(first.seen.iter().all(|s| s.hint.is_none()), "{:#?}", first.seen);
     assert_eq!(password_identity(&password_prompt), kbd);
-    assert!(
-        first.stderr.iter().any(|l| l.contains("using \"keyboard-interactive\"")),
-        "{:#?}",
-        first.stderr
-    );
+    assert!(first.stderr.iter().any(|l| l.contains("using \"keyboard-interactive\"")), "{:#?}", first.stderr);
     assert_eq!(f.store.get(&host.id, &kbd).unwrap().expose_secret(), PASSWORD);
 
     // Reconnect: the password is answered from memory, the code is asked again.

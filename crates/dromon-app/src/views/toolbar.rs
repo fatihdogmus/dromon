@@ -26,7 +26,8 @@ pub fn view(s: &App, p: Paint) -> El {
     }
     type Handler = fn(&mut App, &mut Tx);
     let back = icon_button(p, "tb-back", "Back", &icons::CHEVRON_LEFT, can_back.then_some(go_back as Handler));
-    let forward = icon_button(p, "tb-forward", "Forward", &icons::CHEVRON_RIGHT, can_forward.then_some(go_forward as Handler));
+    let forward =
+        icon_button(p, "tb-forward", "Forward", &icons::CHEVRON_RIGHT, can_forward.then_some(go_forward as Handler));
     fn pick_upload(s: &mut App, tx: &mut Tx) {
         run(s, Action::PickUpload, tx)
     }
@@ -79,7 +80,15 @@ fn palette_button(p: Paint) -> El {
 fn path_bar(s: &App, p: Paint) -> El {
     let t = p.t;
     // Clipped, so a path longer than the room fades out under the filter instead of over it.
-    let bar = row().key("tb-path").role("navigation").label("Folder path").grow(1.0).min_w(0.0).h(28.0).center_y().clip_soft(0.0);
+    let bar = row()
+        .key("tb-path")
+        .role("navigation")
+        .label("Folder path")
+        .grow(1.0)
+        .min_w(0.0)
+        .h(28.0)
+        .center_y()
+        .clip_soft(0.0);
     let Some(c) = s.conn() else {
         return bar;
     };
@@ -87,11 +96,9 @@ fn path_bar(s: &App, p: Paint) -> El {
     let signing_in = !c.opened && matches!(c.status, ConnStatus::NeedsInput);
     if c.status == ConnStatus::Connecting || signing_in {
         let spinner = icon(icons::SPINNER.at(p.scale), size::ICON).color(t.text_3).looping(LoopSpec::rotation(0.9));
-        return bar
-            .gap(space::S2)
-            .px(space::S1)
-            .child(spinner)
-            .child(text(format!("Connecting to {host}…")).key("tb-connecting").font(type_::BODY).color(t.text_2).truncate());
+        return bar.gap(space::S2).px(space::S1).child(spinner).child(
+            text(format!("Connecting to {host}…")).key("tb-connecting").font(type_::BODY).color(t.text_2).truncate(),
+        );
     }
     let crumbs = c.cwd.ancestors_from_root();
     let last = crumbs.len() - 1;
@@ -136,7 +143,11 @@ fn crumb(p: Paint, i: usize, label: String, path: RemotePath, current: bool, liv
     }
     e = e.role("link");
     if live {
-        e = e.hover(t.hover).press(t.press).on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, Action::GoTo(path.clone()), tx)).tab_press();
+        e = e
+            .hover(t.hover)
+            .press(t.press)
+            .on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, Action::GoTo(path.clone()), tx))
+            .tab_press();
     } else {
         e = e.disabled(true);
     }

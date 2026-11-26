@@ -10,7 +10,9 @@
 use std::path::PathBuf;
 
 use dromon_core::{HostId, RemotePath};
-use dromon_transfer::{ConflictView, JobId, JobKind, JobRequest, JobView, Progress, RemoteItem, Reveal, TaskState, aggregate};
+use dromon_transfer::{
+    ConflictView, JobId, JobKind, JobRequest, JobView, Progress, RemoteItem, Reveal, TaskState, aggregate,
+};
 
 use super::conn::Nav;
 use super::{Action, App, Command, Effect, TransferCommand};
@@ -331,7 +333,9 @@ impl App {
             let live = self.conn().is_some_and(|c| c.interactive());
             let folder_ok = match &target {
                 DropTarget::List => true,
-                DropTarget::Folder(name) => self.conn().and_then(|c| c.find(name)).is_some_and(|e| e.kind.is_dir_like()),
+                DropTarget::Folder(name) => {
+                    self.conn().and_then(|c| c.find(name)).is_some_and(|e| e.kind.is_dir_like())
+                }
             };
             self.transfers.drop = (live && folder_ok && count > 0).then_some(DropHover { target, count });
         } else if self.transfers.drop.as_ref().is_some_and(|d| d.target == target) {
@@ -342,7 +346,8 @@ impl App {
     /// The selected rows on screen, in order; the cursor's row when nothing is selected.
     fn picked_rows(&self) -> Vec<String> {
         let Some(c) = self.conn() else { return Vec::new() };
-        let selected: Vec<String> = c.rows().filter(|e| c.selection.contains(&e.name)).map(|e| e.name.clone()).collect();
+        let selected: Vec<String> =
+            c.rows().filter(|e| c.selection.contains(&e.name)).map(|e| e.name.clone()).collect();
         if selected.is_empty() { c.selection.cursor().map(str::to_owned).into_iter().collect() } else { selected }
     }
 

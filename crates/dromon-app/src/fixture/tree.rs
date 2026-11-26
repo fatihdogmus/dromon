@@ -60,7 +60,15 @@ pub(super) fn outermost(paths: &[RemotePath]) -> Vec<RemotePath> {
 
 fn dir_entry(name: &str, mtime: Option<i64>) -> Entry {
     let kind = EntryKind::Dir;
-    Entry { name: name.to_owned(), kind, size: default_size(kind), mtime, mode: default_mode(kind), owner: None, group: None }
+    Entry {
+        name: name.to_owned(),
+        kind,
+        size: default_size(kind),
+        mtime,
+        mode: default_mode(kind),
+        owner: None,
+        group: None,
+    }
 }
 
 impl Tree {
@@ -140,7 +148,9 @@ impl Tree {
     /// `entry` appears at `path` under `path`'s name, replacing what was there (and everything
     /// below it).
     fn place(&mut self, host: &HostId, path: &RemotePath, mut entry: Entry) -> Result<(), Error> {
-        let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else { return Err(Error::AlreadyExists(path.clone())) };
+        let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
+            return Err(Error::AlreadyExists(path.clone()));
+        };
         entry.name = name.to_owned();
         let entries = self.edit(host, &dir)?;
         match entries.iter_mut().find(|e| e.name == entry.name) {
@@ -163,7 +173,9 @@ impl Tree {
 
     /// The entry at `path` is now `entry` (a new size or date); what a folder holds stays.
     pub fn retouch(&mut self, host: &HostId, path: &RemotePath, entry: Entry) -> Result<(), Error> {
-        let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else { return Err(Error::NotFound(path.clone())) };
+        let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
+            return Err(Error::NotFound(path.clone()));
+        };
         let entries = self.edit(host, &dir)?;
         match entries.iter_mut().find(|e| e.name == name) {
             Some(e) => *e = Entry { name: name.to_owned(), ..entry },
@@ -182,7 +194,11 @@ impl Tree {
     /// A file of `size` bytes lands at `path` (replacing what was there).
     pub fn put_file(&mut self, host: &HostId, path: &RemotePath, size: u64, mtime: Option<i64>) -> Result<(), Error> {
         let kind = EntryKind::File;
-        self.place(host, path, Entry { name: String::new(), kind, size, mtime, mode: default_mode(kind), owner: None, group: None })
+        self.place(
+            host,
+            path,
+            Entry { name: String::new(), kind, size, mtime, mode: default_mode(kind), owner: None, group: None },
+        )
     }
 
     /// Makes the folder `path` unless one is there; anything else in the way is an error (as
@@ -197,7 +213,9 @@ impl Tree {
 
     /// `path` and everything below it are gone.
     pub fn remove(&mut self, host: &HostId, path: &RemotePath) -> Result<(), Error> {
-        let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else { return Err(Error::PermissionDenied(path.clone())) };
+        let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
+            return Err(Error::PermissionDenied(path.clone()));
+        };
         self.edit(host, &dir)?.retain(|e| e.name != name);
         self.forget(host, path);
         Ok(())
@@ -231,7 +249,14 @@ impl Tree {
 
     /// Copies `entry` (at `src`) to `dst` on the same host: onto a free name (or a file) with
     /// its tree, onto a folder merged into it. A file and a folder never replace each other.
-    fn copy_tree(&mut self, host: &HostId, src: &RemotePath, entry: &Entry, dst: &RemotePath, depth: usize) -> Result<(), Error> {
+    fn copy_tree(
+        &mut self,
+        host: &HostId,
+        src: &RemotePath,
+        entry: &Entry,
+        dst: &RemotePath,
+        depth: usize,
+    ) -> Result<(), Error> {
         let is_dir = entry.kind == EntryKind::Dir;
         match self.entry_at(host, dst) {
             Some(there) if (there.kind == EntryKind::Dir) != is_dir => Err(Error::AlreadyExists(dst.clone())),
@@ -278,7 +303,9 @@ impl Tree {
 
     /// New folder: creates `path`, stamped `mtime`.
     pub fn mkdir(&mut self, host: &HostId, path: &RemotePath, mtime: Option<i64>) -> Result<(), Error> {
-        let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else { return Err(Error::AlreadyExists(path.clone())) };
+        let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+            return Err(Error::AlreadyExists(path.clone()));
+        };
         let siblings = self.list(host, &parent).map_err(|e| for_path(e, path))?;
         if siblings.iter().any(|e| e.name == name) {
             return Err(Error::AlreadyExists(path.clone()));
@@ -288,10 +315,16 @@ impl Tree {
 
     /// Renames `from` to `to` (refusing to replace anything), as OpenSSH's plain rename does.
     pub fn rename(&mut self, host: &HostId, from: &RemotePath, to: &RemotePath) -> Result<(), Error> {
-        let (Some(from_dir), Some(from_name)) = (from.parent(), from.file_name()) else { return Err(Error::PermissionDenied(from.clone())) };
+        let (Some(from_dir), Some(from_name)) = (from.parent(), from.file_name()) else {
+            return Err(Error::PermissionDenied(from.clone()));
+        };
         let siblings = self.list(host, &from_dir).map_err(|e| for_path(e, from))?;
-        let Some(entry) = siblings.into_iter().find(|e| e.name == from_name) else { return Err(Error::NotFound(from.clone())) };
-        let (Some(to_dir), Some(to_name)) = (to.parent(), to.file_name()) else { return Err(Error::AlreadyExists(to.clone())) };
+        let Some(entry) = siblings.into_iter().find(|e| e.name == from_name) else {
+            return Err(Error::NotFound(from.clone()));
+        };
+        let (Some(to_dir), Some(to_name)) = (to.parent(), to.file_name()) else {
+            return Err(Error::AlreadyExists(to.clone()));
+        };
         let targets = self.list(host, &to_dir).map_err(|e| for_path(e, from))?;
         if targets.iter().any(|e| e.name == to_name) {
             return Err(Error::AlreadyExists(to.clone()));
@@ -310,7 +343,9 @@ impl Tree {
         let roots = outermost(paths);
         let mut total = 0;
         for root in &roots {
-            let (Some(dir), Some(name)) = (root.parent(), root.file_name()) else { return Err(Error::PermissionDenied(root.clone())) };
+            let (Some(dir), Some(name)) = (root.parent(), root.file_name()) else {
+                return Err(Error::PermissionDenied(root.clone()));
+            };
             let siblings = self.list(host, &dir).map_err(|e| for_path(e, root))?;
             let entry = siblings.iter().find(|e| e.name == name).ok_or_else(|| Error::NotFound(root.clone()))?;
             total += if entry.kind == EntryKind::Dir { self.count(host, root)? } else { 1 };

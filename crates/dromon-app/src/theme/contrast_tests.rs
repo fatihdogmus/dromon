@@ -116,17 +116,35 @@ fn category(dark: bool, hue: f32) -> Color {
 }
 
 /// The category hues `icons::for_file` hands out.
-const HUES: [(&str, f32); 7] =
-    [("code", 250.0), ("image", 320.0), ("archive", 70.0), ("audio", 150.0), ("video", 200.0), ("pdf", 355.0), ("binary", 20.0)];
+const HUES: [(&str, f32); 7] = [
+    ("code", 250.0),
+    ("image", 320.0),
+    ("archive", 70.0),
+    ("audio", 150.0),
+    ("video", 200.0),
+    ("pdf", 355.0),
+    ("binary", 20.0),
+];
 
 /// Every pair the views draw with `t`, by where it is.
 fn pairs(t: &Tokens) -> Vec<Pair> {
-    use Rule::*;
     let mut a = Audit { out: Vec::new() };
-    let (hv, pr) = (t.hover, t.press);
+    list_pairs(&mut a, t);
+    sidebar_pairs(&mut a, t);
+    toolbar_pairs(&mut a, t);
+    banner_and_states_pairs(&mut a, t);
+    sheet_pairs(&mut a, t);
+    menu_pairs(&mut a, t);
+    transfers_pairs(&mut a, t);
+    focus_ring_pairs(&mut a, t);
+    a.out
+}
 
-    // The list (views/list.rs, edit.rs, drop.rs): a row at rest, hovered, pressed, selected,
-    // as a drop target, under the drop wash; and the header.
+/// The list (views/list.rs, edit.rs, drop.rs): a row at rest, hovered, pressed, selected, as a
+/// drop target, under the drop wash; and the header.
+fn list_pairs(a: &mut Audit, t: &Tokens) {
+    use Rule::*;
+    let (hv, pr) = (t.hover, t.press);
     let row_stacks: Vec<(&str, Vec<Color>)> = vec![
         ("row", vec![t.canvas]),
         ("row · hover", vec![t.canvas, hv]),
@@ -165,8 +183,12 @@ fn pairs(t: &Tokens) -> Vec<Pair> {
     a.states(Text, "header: sorted column (text-2)", t.text_2, &[t.canvas], hv, pr);
     a.states(Tertiary, "header: column (text-3)", t.text_3, &[t.canvas], hv, pr);
     a.add(Graphic, "header: sort caret (text-3)", t.text_3, &[t.canvas]);
+}
 
-    // The sidebar (views/sidebar.rs).
+/// The sidebar (views/sidebar.rs).
+fn sidebar_pairs(a: &mut Audit, t: &Tokens) {
+    use Rule::*;
+    let (hv, pr) = (t.hover, t.press);
     a.add(Tertiary, "sidebar: section caption (text-3)", t.text_3, &[t.sidebar]);
     a.add(Text, "sidebar: app name (text-2)", t.text_2, &[t.sidebar]);
     a.states(Text, "sidebar: host (text-2)", t.text_2, &[t.sidebar], hv, pr);
@@ -182,8 +204,12 @@ fn pairs(t: &Tokens) -> Vec<Pair> {
     a.add(Graphic, "sidebar: drop target's connected dot", t.accent, &[t.sidebar, t.accent.alpha(0.22)]);
     a.states(Text, "sidebar: Quick connect (text-2)", t.text_2, &[t.sidebar], hv, pr);
     a.states(Graphic, "sidebar: Quick connect icon (text-3)", t.text_3, &[t.sidebar], hv, pr);
+}
 
-    // The toolbar (views/toolbar.rs, transfers.rs, widgets.rs).
+/// The toolbar (views/toolbar.rs, transfers.rs, widgets.rs).
+fn toolbar_pairs(a: &mut Audit, t: &Tokens) {
+    use Rule::*;
+    let (hv, pr) = (t.hover, t.press);
     a.states(Graphic, "toolbar: icon button (text-2)", t.text_2, &[t.surface], hv, pr);
     a.add(Info, "toolbar: disabled icon button (text-3 at 60%)", t.text_3.alpha(0.6), &[t.surface]);
     a.add(Text, "toolbar: current crumb (text)", t.text, &[t.surface]);
@@ -207,8 +233,13 @@ fn pairs(t: &Tokens) -> Vec<Pair> {
     a.add(Graphic, "transfers button: progress ring (accent)", t.accent, &[t.surface]);
     a.add(Info, "transfers button: ring track (border-strong)", t.border_strong, &[t.surface]);
     a.add(Text, "transfers button: count badge (on-accent on accent)", t.on_accent, &[t.accent]);
+}
 
-    // The reconnecting banner and the status bar (views/states.rs, status.rs).
+/// The reconnecting banner and the status bar (views/states.rs, status.rs), and the list's
+/// other states.
+fn banner_and_states_pairs(a: &mut Audit, t: &Tokens) {
+    use Rule::*;
+    let (hv, pr) = (t.hover, t.press);
     let banner = [t.canvas, t.banner];
     a.add(Text, "banner: headline (text)", t.text, &banner);
     a.add(Tertiary, "banner: detail (text-3)", t.text_3, &banner);
@@ -216,7 +247,9 @@ fn pairs(t: &Tokens) -> Vec<Pair> {
     a.hovers(Text, "banner: Sign in (text)", t.text, &banner, hv);
     a.add(Text, "status bar: summary (text-2)", t.text_2, &[t.surface]);
     a.add(Tertiary, "status bar: Not connected (text-3)", t.text_3, &[t.surface]);
-    for (dot, color) in [("connected", t.accent), ("reconnecting", t.warning), ("failed", t.danger), ("connecting", t.text_3)] {
+    for (dot, color) in
+        [("connected", t.accent), ("reconnecting", t.warning), ("failed", t.danger), ("connecting", t.text_3)]
+    {
         a.add(Graphic, format!("status bar: {dot} dot"), color, &[t.surface]);
     }
 
@@ -228,8 +261,13 @@ fn pairs(t: &Tokens) -> Vec<Pair> {
     a.states(Graphic, "states: button icon (text-2)", t.text_2, &[t.canvas, t.field], hv, pr);
     a.add(Graphic, "states: lock tile (text-2)", t.text_2, &[t.canvas, t.field]);
     a.add(Info, "states: skeleton bar", t.skeleton, &[t.canvas]);
+}
 
-    // Sheets (views/sheets.rs, conflict.rs, delete.rs, quit.rs).
+/// Sheets (views/sheets.rs, conflict.rs, delete.rs, quit.rs), and toasts, notices, the drop
+/// pill and the name field's error bubble (on `sheet`).
+fn sheet_pairs(a: &mut Audit, t: &Tokens) {
+    use Rule::*;
+    let (hv, pr) = (t.hover, t.press);
     a.add(Text, "sheet: title (text)", t.text, &[t.sheet]);
     a.add(Text, "sheet: prompt (text-2)", t.text_2, &[t.sheet]);
     a.add(Tertiary, "sheet: memory-only note (text-3)", t.text_3, &[t.sheet]);
@@ -265,15 +303,23 @@ fn pairs(t: &Tokens) -> Vec<Pair> {
     a.add(Graphic, "drop pill: icon (accent)", t.accent, &[t.sheet]);
     a.add(Text, "drop pill: text", t.text, &[t.sheet]);
     a.add(Text, "name field error bubble (danger)", t.danger, &[t.sheet]);
+}
 
-    // The drawn context menu (views/menu.rs).
+/// The drawn context menu (views/menu.rs).
+fn menu_pairs(a: &mut Audit, t: &Tokens) {
+    use Rule::*;
+    let (hv, pr) = (t.hover, t.press);
     a.states(Text, "menu: item (text)", t.text, &[t.raised], hv, pr);
     a.states(Text, "menu: Delete (danger)", t.danger, &[t.raised], hv, pr);
     a.states(Tertiary, "menu: shortcut (text-3)", t.text_3, &[t.raised], hv, pr);
     a.states(Graphic, "menu: check (text-2)", t.text_2, &[t.raised], hv, pr);
     a.add(Info, "menu: disabled item (text-3)", t.text_3, &[t.raised]);
+}
 
-    // The transfers popover (views/transfers.rs).
+/// The transfers popover (views/transfers.rs).
+fn transfers_pairs(a: &mut Audit, t: &Tokens) {
+    use Rule::*;
+    let (hv, pr) = (t.hover, t.press);
     let track = [t.raised, t.field];
     a.add(Text, "transfers: open tab (text)", t.text, &[t.raised, t.field, pr]);
     a.add(Tertiary, "transfers: open tab's count (text-3)", t.text_3, &[t.raised, t.field, pr]);
@@ -306,8 +352,10 @@ fn pairs(t: &Tokens) -> Vec<Pair> {
     a.add(Tertiary, "transfers: N active (text-3)", t.text_3, &[t.raised]);
     a.states(Text, "transfers: Clear finished (text-2)", t.text_2, &[t.raised], hv, pr);
     a.add(Info, "transfers: Clear finished, disabled (text-3 at 60%)", t.text_3.alpha(0.6), &[t.raised]);
+}
 
-    // The keyboard focus ring (accent, 2 pt) on every surface it can sit on.
+/// The keyboard focus ring (accent, 2 pt) on every surface it can sit on.
+fn focus_ring_pairs(a: &mut Audit, t: &Tokens) {
     for (name, bg) in [
         ("canvas", vec![t.canvas]),
         ("selected row", vec![t.canvas, t.selection]),
@@ -316,9 +364,8 @@ fn pairs(t: &Tokens) -> Vec<Pair> {
         ("popover", vec![t.raised]),
         ("sheet", vec![t.sheet]),
     ] {
-        a.add(Focus, format!("focus ring on the {name}"), t.focus, &bg);
+        a.add(Rule::Focus, format!("focus ring on the {name}"), t.focus, &bg);
     }
-    a.out
 }
 
 /// Pairs that fail and that no token nudge should fix, because the fix is a design decision
@@ -327,7 +374,9 @@ fn pairs(t: &Tokens) -> Vec<Pair> {
 fn design_exception(what: &str) -> Option<&'static str> {
     let on_accent_fill = what.contains("selected") || what.contains("drop");
     if what.starts_with("transfers button: idle glyph") {
-        Some("the idle transfers glyph is drawn as quiet as a disabled button on purpose (§6.8), though it opens the popover")
+        Some(
+            "the idle transfers glyph is drawn as quiet as a disabled button on purpose (§6.8), though it opens the popover",
+        )
     } else if what.contains("Resolve…") && (what.ends_with("· hover") || what.ends_with("· press")) {
         Some("accent text on its own accent wash: Resolve… would need a neutral or filled hover")
     } else if what.contains("folder icon") && on_accent_fill && !what.contains("hidden") {
@@ -368,7 +417,17 @@ fn cases() -> Vec<Case> {
 
 fn row(case: &Case, rule: &str, r: f32, p: &Pair) -> String {
     let theme = if case.dark { "dark" } else { "light" };
-    format!("{:<10} {:<6} {:<20} {:<11} {:>6.2}  {} ({} on {})", case.accent.name, theme, case.mode, rule, r, p.what, p.fg.hex(), p.backdrop().hex())
+    format!(
+        "{:<10} {:<6} {:<20} {:<11} {:>6.2}  {} ({} on {})",
+        case.accent.name,
+        theme,
+        case.mode,
+        rule,
+        r,
+        p.what,
+        p.fg.hex(),
+        p.backdrop().hex()
+    )
 }
 
 #[test]
@@ -380,7 +439,12 @@ fn every_pair_meets_its_contrast_rule_in_every_theme_accent_and_mode() {
         let held = |p: &&Pair| p.rule == Rule::Info || design_exception(&p.what).is_none();
         // The worst pair of each rule that the audit holds to it (info: of everything reported).
         for rule in Rule::ALL {
-            let worst = pairs.iter().filter(held).filter(|p| p.rule == rule).map(|p| (p.ratio(), p)).min_by(|a, b| a.0.total_cmp(&b.0));
+            let worst = pairs
+                .iter()
+                .filter(held)
+                .filter(|p| p.rule == rule)
+                .map(|p| (p.ratio(), p))
+                .min_by(|a, b| a.0.total_cmp(&b.0));
             if let Some((r, p)) = worst {
                 summary.push(row(&case, rule.name(), r, p));
             }
@@ -388,7 +452,9 @@ fn every_pair_meets_its_contrast_rule_in_every_theme_accent_and_mode() {
         for p in pairs.iter().filter(|p| p.rule != Rule::Info) {
             let r = p.ratio();
             match design_exception(&p.what) {
-                Some(why) if r < p.rule.min() => exceptions.push(format!("{}\n    {why}", row(&case, p.rule.name(), r, p))),
+                Some(why) if r < p.rule.min() => {
+                    exceptions.push(format!("{}\n    {why}", row(&case, p.rule.name(), r, p)))
+                }
                 Some(_) => {}
                 None if r < p.rule.min() => failures.push(row(&case, p.rule.name(), r, p)),
                 None => {}

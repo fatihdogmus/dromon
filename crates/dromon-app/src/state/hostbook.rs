@@ -199,8 +199,13 @@ impl App {
 
     /// Replaces the hosts of `source` with `new`, keeping ones that went but are in use.
     pub(super) fn replace_section(&mut self, source: HostSource, new: Vec<HostSpec>) {
-        let kept: Vec<HostSpec> =
-            self.hosts.hosts.iter().filter(|h| h.source == source && !new.iter().any(|n| n.id == h.id) && self.in_use(&h.id)).cloned().collect();
+        let kept: Vec<HostSpec> = self
+            .hosts
+            .hosts
+            .iter()
+            .filter(|h| h.source == source && !new.iter().any(|n| n.id == h.id) && self.in_use(&h.id))
+            .cloned()
+            .collect();
         let mut hosts: Vec<HostSpec> = self.hosts.hosts.drain(..).filter(|h| h.source != source).collect();
         hosts.extend(new.into_iter().filter(|h| h.source == source));
         hosts.extend(kept);
@@ -242,7 +247,9 @@ impl App {
     fn add_recent(&mut self, spec: HostSpec) {
         let mut list = self.recent_hosts();
         let port = |h: &HostSpec| h.port.unwrap_or(22);
-        list.retain(|h| h.id != spec.id && !(h.hostname == spec.hostname && h.user == spec.user && port(h) == port(&spec)));
+        list.retain(|h| {
+            h.id != spec.id && !(h.hostname == spec.hostname && h.user == spec.user && port(h) == port(&spec))
+        });
         list.insert(0, spec);
         self.set_recent(list);
     }
@@ -281,7 +288,13 @@ impl App {
             HostAction::SaveRecent(id) => self.save_recent(&id),
             HostAction::AddToConfig(id) => {
                 let Some(spec) = self.hosts.get(&id).filter(|h| h.source == HostSource::Saved) else { return };
-                let view = AddToConfigView { host: id.clone(), name: spec.display_name().to_owned(), preview: None, busy: false, error: None };
+                let view = AddToConfigView {
+                    host: id.clone(),
+                    name: spec.display_name().to_owned(),
+                    preview: None,
+                    busy: false,
+                    error: None,
+                };
                 if self.ui.sheets.open_add_to_config(view) {
                     self.send(Command::HostBook(HostBookCommand::PreviewAddToConfig(id)));
                 }
@@ -344,14 +357,19 @@ impl App {
 
     /// Why `spec`'s name can't be used (another SSH Config or saved host has it), if so.
     fn name_taken(&self, spec: &HostSpec, editing: Option<&HostId>) -> Option<String> {
-        let other = self.hosts.hosts.iter().find(|h| h.id == spec.id && h.source != HostSource::Recent && Some(&h.id) != editing)?;
+        let other = self
+            .hosts
+            .hosts
+            .iter()
+            .find(|h| h.id == spec.id && h.source != HostSource::Recent && Some(&h.id) != editing)?;
         let section = if other.source == HostSource::SshConfig { "your ssh config" } else { "Saved" };
         Some(format!("“{}” is already a host in {section}: give this one another name", spec.alias))
     }
 
     /// Shows `spec` under Saved at once and asks the service to write it.
     fn save_host(&mut self, spec: HostSpec, replaces: Option<HostId>) {
-        let mut saved: Vec<HostSpec> = self.hosts.hosts.iter().filter(|h| h.source == HostSource::Saved).cloned().collect();
+        let mut saved: Vec<HostSpec> =
+            self.hosts.hosts.iter().filter(|h| h.source == HostSource::Saved).cloned().collect();
         upsert(&mut saved, spec.clone(), replaces.as_ref());
         self.replace_section(HostSource::Saved, saved);
         self.send(Command::HostBook(HostBookCommand::Save { spec, replaces }));
@@ -377,7 +395,8 @@ impl App {
     fn remove_host(&mut self, id: &HostId) {
         match self.hosts.get(id).map(|h| h.source) {
             Some(HostSource::Saved) => {
-                let saved = self.hosts.hosts.iter().filter(|h| h.source == HostSource::Saved && &h.id != id).cloned().collect();
+                let saved =
+                    self.hosts.hosts.iter().filter(|h| h.source == HostSource::Saved && &h.id != id).cloned().collect();
                 self.replace_section(HostSource::Saved, saved);
                 self.send(Command::HostBook(HostBookCommand::Remove(id.clone())));
             }
@@ -405,16 +424,18 @@ impl App {
                 }
             }
             HostBookEvent::Added { host } => self.ui.sheets.close_add_to_config(&host),
-            HostBookEvent::AddFailed { host, error } => match self.ui.sheets.add_to_config_mut().filter(|v| v.host == host) {
-                Some(v) => {
-                    v.busy = false;
-                    v.error = Some(error);
+            HostBookEvent::AddFailed { host, error } => {
+                match self.ui.sheets.add_to_config_mut().filter(|v| v.host == host) {
+                    Some(v) => {
+                        v.busy = false;
+                        v.error = Some(error);
+                    }
+                    None => {
+                        let name = self.hosts.get(&host).map_or(host.as_str(), |h| h.display_name()).to_owned();
+                        self.files.toasts.push(format!("Couldn't add {name} to your ssh config: {error}"));
+                    }
                 }
-                None => {
-                    let name = self.hosts.get(&host).map_or(host.as_str(), |h| h.display_name()).to_owned();
-                    self.files.toasts.push(format!("Couldn't add {name} to your ssh config: {error}"));
-                }
-            },
+            }
         }
     }
 
@@ -423,7 +444,11 @@ impl App {
     pub fn host_menu(&self, id: &HostId) -> Vec<MenuEntry> {
         let Some(h) = self.hosts.get(id) else { return Vec::new() };
         let live = self.conns.get(id).is_some_and(|c| hosts::is_live(&c.status));
-        let mut out = vec![if live { item("host-disconnect", "Disconnect", true) } else { item("host-connect", "Connect", true) }];
+        let mut out = vec![if live {
+            item("host-disconnect", "Disconnect", true)
+        } else {
+            item("host-connect", "Connect", true)
+        }];
         match h.source {
             HostSource::Saved => out.extend([
                 MenuEntry::Separator,
@@ -433,7 +458,11 @@ impl App {
                 item("host-remove", "Remove", true),
             ]),
             HostSource::Recent => {
-                out.extend([MenuEntry::Separator, item("host-save", "Save", true), item("host-remove", "Remove", true)]);
+                out.extend([
+                    MenuEntry::Separator,
+                    item("host-save", "Save", true),
+                    item("host-remove", "Remove", true),
+                ]);
             }
             HostSource::SshConfig => {}
         }

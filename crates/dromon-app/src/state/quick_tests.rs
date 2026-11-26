@@ -33,9 +33,15 @@ fn an_address_pasted_into_host_splits_across_three_fields() {
     q.open_empty();
     q.set_text(QuickField::User, "old");
     assert!(q.paste_host("deploy@10.0.0.4:2222"));
-    assert_eq!((text(&q, QuickField::Host), text(&q, QuickField::User), text(&q, QuickField::Port)), ("10.0.0.4", "deploy", "2222"));
+    assert_eq!(
+        (text(&q, QuickField::Host), text(&q, QuickField::User), text(&q, QuickField::Port)),
+        ("10.0.0.4", "deploy", "2222")
+    );
     assert!(q.paste_host("[fe80::1]:22"));
-    assert_eq!((text(&q, QuickField::Host), text(&q, QuickField::User), text(&q, QuickField::Port)), ("fe80::1", "deploy", "22"));
+    assert_eq!(
+        (text(&q, QuickField::Host), text(&q, QuickField::User), text(&q, QuickField::Port)),
+        ("fe80::1", "deploy", "22")
+    );
     assert!(!q.paste_host("just-a-host"), "a plain host is the field's own paste");
     assert_eq!(text(&q, QuickField::Host), "fe80::1");
     assert_eq!(focused(&q), [QuickField::Host], "the keyboard stays in Host");
@@ -66,13 +72,20 @@ fn problems_show_under_their_fields_and_the_first_takes_the_keyboard() {
 #[test]
 fn editing_a_saved_host_fills_the_fields_and_shows_more_when_needed() {
     let mut q = QuickConnect::default();
-    let input = QuickInput { host: "10.0.0.4".into(), user: "fatih".into(), port: "2222".into(), alias: "box".into(), ..QuickInput::default() };
+    let input = QuickInput {
+        host: "10.0.0.4".into(),
+        user: "fatih".into(),
+        port: "2222".into(),
+        alias: "box".into(),
+        ..QuickInput::default()
+    };
     let spec = quick_host(&input, HostSource::Saved).unwrap();
     q.open_with(&spec, Some(spec.id.clone()));
     assert_eq!(q.input(), input);
     assert!(q.more, "its name is under More");
     assert_eq!(q.editing, Some(spec.id.clone()));
-    let plain = quick_host(&QuickInput { host: "10.0.0.9".into(), ..QuickInput::default() }, HostSource::Saved).unwrap();
+    let plain =
+        quick_host(&QuickInput { host: "10.0.0.9".into(), ..QuickInput::default() }, HostSource::Saved).unwrap();
     q.open_with(&plain, None);
     assert!(!q.more && q.editing.is_none());
 }

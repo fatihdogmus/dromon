@@ -94,13 +94,8 @@ impl Sftp {
         if !self.caps().copy_data {
             return Err(Error::Unsupported("copy-data"));
         }
-        let payload = encode_copy_data(
-            reader.handle().as_bytes(),
-            read_offset,
-            len,
-            writer.handle().as_bytes(),
-            write_offset,
-        );
+        let payload =
+            encode_copy_data(reader.handle().as_bytes(), read_offset, len, writer.handle().as_bytes(), write_offset);
         let dst = writer.path();
         match self.raw.extended(COPY_DATA, payload).await {
             Ok(Packet::Status(s)) if s.status_code == StatusCode::Ok => Ok(()),

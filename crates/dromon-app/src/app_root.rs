@@ -3,16 +3,16 @@
 
 mod fixture;
 mod fmt;
-// The icon set and the tokens are the spec's whole catalogue (§6.3–6.7); sheets, popovers and
-// transfers use the rest in later milestones.
-#[allow(dead_code)]
+// The icon set and the tokens are the spec's whole catalogue (§6.3–6.7), not all of it drawn yet.
+// The icons' tests draw every icon, so their dead code shows in some builds only: `allow`.
+#[allow(dead_code, reason = "the whole icon catalogue (§6.3–6.7); unused outside the in-crate tests")]
 mod icons;
 mod persist;
 mod reveal;
 mod scenes;
 pub mod service;
 pub mod state;
-#[allow(dead_code)]
+#[expect(dead_code, reason = "the whole token catalogue (§6.3–6.7); not every token is drawn yet")]
 mod theme;
 mod views;
 mod windows;
@@ -59,9 +59,7 @@ const SIZE: (f32, f32) = (1080.0, 680.0);
 const MIN_SIZE: (f32, f32) = (720.0, 420.0);
 
 fn now_secs() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(fixture::DEMO_NOW, |d| d.as_secs() as i64)
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(fixture::DEMO_NOW, |d| d.as_secs() as i64)
 }
 
 /// The app on the active fixture (the demo unless `--fixture` chose one).
@@ -245,7 +243,9 @@ pub fn run() {
     // stops the service (connections close, secrets are wiped), and the settings are written.
     match frame {
         // The displays are known only once the event loop runs: the window fits on one of them.
-        Some(frame) => rune::run_windows(move |displays| [WindowSpec::from_app("main", windows::at_frame(app, Some(frame), displays))]),
+        Some(frame) => rune::run_windows(move |displays| {
+            [WindowSpec::from_app("main", windows::at_frame(app, Some(frame), displays))]
+        }),
         None => app.run(),
     }
 }

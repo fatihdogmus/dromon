@@ -43,7 +43,12 @@ fn id(s: &str) -> HostId {
 }
 
 fn saved(alias: &str, hostname: &str) -> HostSpec {
-    HostSpec { source: HostSource::Saved, hostname: Some(hostname.into()), user: Some("deploy".into()), ..HostSpec::from_config_alias(alias) }
+    HostSpec {
+        source: HostSource::Saved,
+        hostname: Some(hostname.into()),
+        user: Some("deploy".into()),
+        ..HostSpec::from_config_alias(alias)
+    }
 }
 
 impl Files {
@@ -64,14 +69,28 @@ impl Files {
             helper_exe: PathBuf::from("dromon"),
             verbose: false,
             config_file: None,
-            discover: Some(ConfigSources { user: Some(config_path.clone()), system: None, user_ssh_dir: ssh_dir.clone() }),
+            discover: Some(ConfigSources {
+                user: Some(config_path.clone()),
+                system: None,
+                user_ssh_dir: ssh_dir.clone(),
+            }),
             hosts_file: Some(hosts_conf.clone()),
             hosts: Vec::new(),
             without_env: Vec::new(),
         };
         let (book, updates) = Book::start(&cfg);
         let (tx, events) = mpsc::unbounded_channel();
-        Files { _dir: dir, ssh_dir, config: config_path, hosts_conf, book, updates, known: HashMap::new(), sink: TestSink(tx), events }
+        Files {
+            _dir: dir,
+            ssh_dir,
+            config: config_path,
+            hosts_conf,
+            book,
+            updates,
+            known: HashMap::new(),
+            sink: TestSink(tx),
+            events,
+        }
     }
 
     fn send(&mut self, cmd: HostBookCommand) {
@@ -168,7 +187,9 @@ async fn add_to_config_backs_up_appends_and_moves_the_host() {
     f.send(HostBookCommand::PreviewAddToConfig(id("box")));
     let preview = f
         .until("the preview", |ev| match ev {
-            ServiceEvent::HostBook(HostBookEvent::Preview { host, preview }) if *host == id("box") => Some(preview.clone()),
+            ServiceEvent::HostBook(HostBookEvent::Preview { host, preview }) if *host == id("box") => {
+                Some(preview.clone())
+            }
             _ => None,
         })
         .await
@@ -179,11 +200,17 @@ async fn add_to_config_backs_up_appends_and_moves_the_host() {
     assert!(backup.contains("config.dromon-backup-"), "{backup}");
 
     f.send(HostBookCommand::AddToConfig(id("box")));
-    f.until("added", |ev| matches!(ev, ServiceEvent::HostBook(HostBookEvent::Added { host }) if *host == id("box")).then_some(())).await;
+    f.until("added", |ev| {
+        matches!(ev, ServiceEvent::HostBook(HostBookEvent::Added { host }) if *host == id("box")).then_some(())
+    })
+    .await;
     let config = std::fs::read_to_string(&f.config).unwrap();
     assert_eq!(config, "Host prod\n  User deploy\n\nHost box\n    HostName 10.0.0.4\n    User deploy\n");
-    let backups: Vec<PathBuf> =
-        std::fs::read_dir(&f.ssh_dir).unwrap().map(|e| e.unwrap().path()).filter(|p| p.to_string_lossy().contains("dromon-backup")).collect();
+    let backups: Vec<PathBuf> = std::fs::read_dir(&f.ssh_dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.to_string_lossy().contains("dromon-backup"))
+        .collect();
     assert_eq!(backups.len(), 1, "{backups:?}");
     assert_eq!(std::fs::read_to_string(&backups[0]).unwrap(), "Host prod\n  User deploy\n");
     let names: Vec<String> = dromon_ssh::read_hosts_conf(&f.hosts_conf).unwrap().into_iter().map(|h| h.alias).collect();
@@ -249,15 +276,26 @@ fn sections_rank_ssh_config_over_saved_over_recent() {
 
 #[test]
 fn bare_aliases_keep_what_was_resolved() {
-    let resolved = HostSpec { hostname: Some("10.0.0.4".into()), port: Some(2222), ..HostSpec::from_config_alias("prod") };
-    let kept = keep_resolved(vec![HostSpec::from_config_alias("prod"), HostSpec::from_config_alias("new")], std::slice::from_ref(&resolved));
+    let resolved =
+        HostSpec { hostname: Some("10.0.0.4".into()), port: Some(2222), ..HostSpec::from_config_alias("prod") };
+    let kept = keep_resolved(
+        vec![HostSpec::from_config_alias("prod"), HostSpec::from_config_alias("new")],
+        std::slice::from_ref(&resolved),
+    );
     assert_eq!(kept, [resolved, HostSpec::from_config_alias("new")]);
 }
 
 #[test]
 fn the_watch_list_has_the_files_their_folders_and_the_top_files() {
-    let src = ConfigSources { user: Some("/h/.ssh/config".into()), system: Some("/etc/ssh/ssh_config".into()), user_ssh_dir: "/h/.ssh".into() };
+    let src = ConfigSources {
+        user: Some("/h/.ssh/config".into()),
+        system: Some("/etc/ssh/ssh_config".into()),
+        user_ssh_dir: "/h/.ssh".into(),
+    };
     let files = [PathBuf::from("/h/.ssh/config"), PathBuf::from("/h/.ssh/conf.d/a")];
     let list: Vec<String> = watch_list(&src, &files).into_iter().map(|p| p.to_string_lossy().into_owned()).collect();
-    assert_eq!(list, ["/h/.ssh/config", "/h/.ssh", "/h/.ssh/conf.d/a", "/h/.ssh/conf.d", "/etc/ssh/ssh_config", "/etc/ssh"]);
+    assert_eq!(
+        list,
+        ["/h/.ssh/config", "/h/.ssh", "/h/.ssh/conf.d/a", "/h/.ssh/conf.d", "/etc/ssh/ssh_config", "/etc/ssh"]
+    );
 }

@@ -99,7 +99,11 @@ fn shown(rt: &Runtime<App>, k: &str) -> bool {
 }
 
 fn text_of(rt: &Runtime<App>, k: &str) -> String {
-    rt.elements().into_iter().find(|e| e.key.as_deref() == Some(k) && !e.exiting).and_then(|e| e.text).unwrap_or_default()
+    rt.elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some(k) && !e.exiting)
+        .and_then(|e| e.text)
+        .unwrap_or_default()
 }
 
 fn focused(rt: &Runtime<App>, k: &str) -> bool {
@@ -255,10 +259,17 @@ fn a_delete_shows_its_progress_toast_and_a_failure_stays_until_dismissed() {
     settle(&mut rt);
     assert_eq!(text_of(&rt, &format!("{key}-text")), "Deleting… 1,204 of 5,005");
     assert!(!shown(&rt, &format!("{key}-dismiss")), "a running delete can't be dismissed");
-    let ev = ServiceEvent::FileOpFailed { id, host: host("prod"), error: Error::PermissionDenied(p("/var/www/site/uploads")) };
+    let ev = ServiceEvent::FileOpFailed {
+        id,
+        host: host("prod"),
+        error: Error::PermissionDenied(p("/var/www/site/uploads")),
+    };
     rt.update(move |s, _| s.apply(ev));
     settle(&mut rt);
-    assert_eq!(text_of(&rt, &format!("{key}-text")), "Couldn't delete 2 items: You don't have access to /var/www/site/uploads");
+    assert_eq!(
+        text_of(&rt, &format!("{key}-text")),
+        "Couldn't delete 2 items: You don't have access to /var/www/site/uploads"
+    );
     click(&mut rt, &format!("{key}-dismiss"));
     assert!(!shown(&rt, &key));
 }
@@ -270,7 +281,10 @@ fn copy_then_paste_in_the_same_folder_copies_on_the_server() {
     press(&mut rt, Key::Command('c'), primary());
     assert_eq!(board.text().as_deref().map(String::as_str), Some("/var/www/site/index.html"));
     press(&mut rt, Key::Command('v'), primary());
-    assert_eq!(started(&rec), [JobRequest::RemoteCopy { host: host("prod"), items: vec![index_html()], into: p(SITE) }]);
+    assert_eq!(
+        started(&rec),
+        [JobRequest::RemoteCopy { host: host("prod"), items: vec![index_html()], into: p(SITE) }]
+    );
     // ⌥⌘V moves it, and the clip is spent.
     press(&mut rt, Key::Command('v'), with(primary(), |m| m.alt = true));
     assert_eq!(started(&rec)[1], JobRequest::Move { host: host("prod"), items: vec![index_html()], into: p(SITE) });
@@ -291,14 +305,20 @@ fn cut_rows_dim_and_paste_on_another_host_moves_across() {
     let (mut rt, _, rec) = recorded();
     click(&mut rt, "rows/index.html");
     press(&mut rt, Key::Command('x'), primary());
-    let row = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("index.html") && e.role == "row").expect("the row");
+    let row =
+        rt.elements().into_iter().find(|e| e.key.as_deref() == Some("index.html") && e.role == "row").expect("the row");
     assert_eq!(row.opacity, 0.5, "the cut row is dimmed");
     assert_eq!(row.label.as_deref(), Some("index.html (cut)"), "and says so (§6.9)");
     click(&mut rt, "host-nas");
     press(&mut rt, Key::Command('v'), primary());
     assert_eq!(
         started(&rec),
-        [JobRequest::CrossHostMove { from: host("prod"), items: vec![index_html()], to: host("nas"), into: p("/volume1") }]
+        [JobRequest::CrossHostMove {
+            from: host("prod"),
+            items: vec![index_html()],
+            to: host("nas"),
+            into: p("/volume1")
+        }]
     );
     assert_eq!(*rt.state.clip(), None);
 }
@@ -312,7 +332,12 @@ fn copy_on_one_host_pastes_as_a_cross_host_copy() {
     press(&mut rt, Key::Command('v'), primary());
     assert_eq!(
         started(&rec),
-        [JobRequest::CrossHostCopy { from: host("prod"), items: vec![index_html()], to: host("nas"), into: p("/volume1") }]
+        [JobRequest::CrossHostCopy {
+            from: host("prod"),
+            items: vec![index_html()],
+            to: host("nas"),
+            into: p("/volume1")
+        }]
     );
 }
 
@@ -335,7 +360,10 @@ fn finder_files_still_upload_with_a_clip_around() {
     press(&mut rt, Key::Command('c'), primary());
     rt.paste_content(ClipboardContent::default().with_files(vec!["/Users/me/a.pdf".into()]));
     settle(&mut rt);
-    assert_eq!(started(&rec), [JobRequest::Upload { host: host("prod"), items: vec!["/Users/me/a.pdf".into()], into: p(SITE) }]);
+    assert_eq!(
+        started(&rec),
+        [JobRequest::Upload { host: host("prod"), items: vec!["/Users/me/a.pdf".into()], into: p(SITE) }]
+    );
 }
 
 #[test]
@@ -362,7 +390,10 @@ fn dragging_rows_onto_a_folder_moves_them_and_the_pill_says_so() {
     drag(&mut rt, from, to, |rt| {
         assert_eq!(text_of(rt, "drop-pill-text"), "Move 1 item to uploads");
     });
-    assert_eq!(started(&rec), [JobRequest::Move { host: host("prod"), items: vec![index_html()], into: p("/var/www/site/uploads") }]);
+    assert_eq!(
+        started(&rec),
+        [JobRequest::Move { host: host("prod"), items: vec![index_html()], into: p("/var/www/site/uploads") }]
+    );
     assert_eq!(selected(&rt), ["index.html"], "the dragged row was selected first");
     assert!(!shown(&rt, "drop-pill"));
 }
@@ -372,11 +403,15 @@ fn a_held_copy_key_copies_and_a_breadcrumb_takes_the_rows() {
     let (mut rt, _, rec) = recorded();
     let from = at(&rt, "rows/index.html");
     let to = at(&rt, "crumb-2");
-    let copy = if KeyPlatform::current() == KeyPlatform::Mac { Mods { alt: true, ..Mods::default() } } else { primary() };
+    let copy =
+        if KeyPlatform::current() == KeyPlatform::Mac { Mods { alt: true, ..Mods::default() } } else { primary() };
     rt.physical_input(PhysicalInput::Modifiers(copy));
     drag(&mut rt, from, to, |rt| assert_eq!(text_of(rt, "drop-pill-text"), "Copy 1 item to www"));
     rt.physical_input(PhysicalInput::Modifiers(Mods::default()));
-    assert_eq!(started(&rec), [JobRequest::RemoteCopy { host: host("prod"), items: vec![index_html()], into: p("/var/www") }]);
+    assert_eq!(
+        started(&rec),
+        [JobRequest::RemoteCopy { host: host("prod"), items: vec![index_html()], into: p("/var/www") }]
+    );
 }
 
 #[test]
@@ -387,7 +422,12 @@ fn a_sidebar_host_takes_a_copy_into_its_folder_on_screen() {
     drag(&mut rt, from, to, |rt| assert_eq!(text_of(rt, "drop-pill-text"), "Copy 1 item to nas"));
     assert_eq!(
         started(&rec),
-        [JobRequest::CrossHostCopy { from: host("prod"), items: vec![index_html()], to: host("nas"), into: p("/volume1") }]
+        [JobRequest::CrossHostCopy {
+            from: host("prod"),
+            items: vec![index_html()],
+            to: host("nas"),
+            into: p("/volume1")
+        }]
     );
     // A host never opened takes nothing.
     let to = at(&rt, "host-staging");
@@ -436,7 +476,9 @@ fn nothing_changes_the_server_while_reconnecting() {
     let (mut rt, board, rec) = recorded();
     click(&mut rt, "rows/index.html");
     press(&mut rt, Key::Command('c'), primary());
-    rt.update(|s, _| s.apply(ServiceEvent::Status { host: host("prod"), status: ConnStatus::Reconnecting { attempt: 1 } }));
+    rt.update(|s, _| {
+        s.apply(ServiceEvent::Status { host: host("prod"), status: ConnStatus::Reconnecting { attempt: 1 } })
+    });
     settle(&mut rt);
     press(&mut rt, Key::Command('n'), with(primary(), |m| m.shift = true));
     press(&mut rt, Key::Function(2), Mods::default());

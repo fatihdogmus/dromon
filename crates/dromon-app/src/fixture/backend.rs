@@ -138,7 +138,16 @@ impl Core {
         let transfers = Engine::new(fixture.clone());
         let book = Book::new(fixture.clone());
         let windows = BTreeMap::from([(WindowId::FIRST, Visibility::Hidden)]);
-        Core { fixture, conns: BTreeMap::new(), store: PasswordStore::new(), last_prompt: 0, transfers, windows, from: WindowId::FIRST, book }
+        Core {
+            fixture,
+            conns: BTreeMap::new(),
+            store: PasswordStore::new(),
+            last_prompt: 0,
+            transfers,
+            windows,
+            from: WindowId::FIRST,
+            book,
+        }
     }
 
     /// Whether `host`'s session is up (ready, its "ssh" running).
@@ -184,7 +193,12 @@ impl Core {
     /// once. A walk is over by the time its sheet could cancel it, so cancelling does nothing.
     fn folder_size(&mut self, id: SizeId, host: HostId, path: RemotePath, out: &mut Vec<ServiceEvent>) {
         if !self.up(&host) {
-            out.push(ServiceEvent::FolderSizeFailed { id, host, total: SizeTotal::default(), error: Error::ConnectionLost });
+            out.push(ServiceEvent::FolderSizeFailed {
+                id,
+                host,
+                total: SizeTotal::default(),
+                error: Error::ConnectionLost,
+            });
             return;
         }
         match self.transfers.tree.folder_size(&host, &path) {
@@ -259,7 +273,13 @@ impl Core {
         }
     }
 
-    fn effect(&mut self, host: &HostId, fx: lifecycle::Effect, queue: &mut VecDeque<Work>, out: &mut Vec<ServiceEvent>) {
+    fn effect(
+        &mut self,
+        host: &HostId,
+        fx: lifecycle::Effect,
+        queue: &mut VecDeque<Work>,
+        out: &mut Vec<ServiceEvent>,
+    ) {
         use lifecycle::Effect as E;
         match fx {
             E::Spawn => {
@@ -268,8 +288,14 @@ impl Core {
                 let port = self.spec(host).and_then(|h| h.port).unwrap_or(22);
                 let conn = self.conns.entry(host.clone()).or_default();
                 conn.ended = None;
-                conn.attempt =
-                    Some(Attempt { auth: AuthAttempt::new(host.clone()), step: 0, asked: 0, wrong: 0, waiting: None, notices: Vec::new() });
+                conn.attempt = Some(Attempt {
+                    auth: AuthAttempt::new(host.clone()),
+                    step: 0,
+                    asked: 0,
+                    wrong: 0,
+                    waiting: None,
+                    notices: Vec::new(),
+                });
                 let verbose = conn.verbose;
                 Self::log(host, line, out);
                 // What `ssh -v` says first.
@@ -286,7 +312,8 @@ impl Core {
             }
             E::Status(status) => out.push(ServiceEvent::Status { host: host.clone(), status }),
             E::Opened => {
-                let start = self.fixture.server(&self.server_key(host)).map_or_else(RemotePath::root, |s| s.home.clone());
+                let start =
+                    self.fixture.server(&self.server_key(host)).map_or_else(RemotePath::root, |s| s.home.clone());
                 if let Some(c) = self.conns.get_mut(host) {
                     c.watch.forget();
                 }
@@ -369,7 +396,13 @@ impl Core {
                         a.asked = 0;
                     }
                     Self::log(host, format!("ssh asks “{}”", first_line(&text)), out);
-                    out.push(ServiceEvent::Prompt(Prompt { id, host: host.clone(), kind: PromptKind::Notice, text, error: None }));
+                    out.push(ServiceEvent::Prompt(Prompt {
+                        id,
+                        host: host.clone(),
+                        kind: PromptKind::Notice,
+                        text,
+                        error: None,
+                    }));
                     continue;
                 }
                 Step::HostKey { key_type, fingerprint } => {
@@ -381,9 +414,17 @@ impl Core {
                         "The authenticity of host '{name}' can't be established.\n{key_type} key fingerprint is {fingerprint}.\n\
                          This key is not known by any other names.\nAre you sure you want to continue connecting (yes/no/[fingerprint])? "
                     );
-                    (PromptKind::HostKey { key_type: Some(key_type.clone()), fingerprint: Some(fingerprint.clone()) }, text)
+                    (
+                        PromptKind::HostKey {
+                            key_type: Some(key_type.clone()),
+                            fingerprint: Some(fingerprint.clone()),
+                        },
+                        text,
+                    )
                 }
-                Step::Password { prompt, .. } => (PromptKind::Password, prompt.clone().unwrap_or_else(|| format!("{user}@{hostname}'s password: "))),
+                Step::Password { prompt, .. } => {
+                    (PromptKind::Password, prompt.clone().unwrap_or_else(|| format!("{user}@{hostname}'s password: ")))
+                }
                 Step::Passphrase { key_path, .. } => {
                     let text = if a.asked == 0 {
                         format!("Enter passphrase for key '{key_path}': ")
@@ -392,26 +433,43 @@ impl Core {
                     };
                     (PromptKind::Passphrase { key_path: Some(key_path.clone()) }, text)
                 }
-                Step::Code { prompt, .. } => (PromptKind::Other, prompt.clone().unwrap_or_else(|| format!("({user}@{hostname}) Verification code: "))),
+                Step::Code { prompt, .. } => (
+                    PromptKind::Other,
+                    prompt.clone().unwrap_or_else(|| format!("({user}@{hostname}) Verification code: ")),
+                ),
                 Step::Confirm { text } => (PromptKind::Confirm, text.clone()),
             };
-            a.asked += 1;
-            match a.auth.on_prompt(&kind, &text, &mut self.store) {
-                AuthDecision::AnswerFromMemory(secret) => {
-                    Self::log(host, format!("ssh asked “{}”: answered from memory.", first_line(&text)), out);
-                    queue.push_back(Work::Judge(PromptAnswer::Text(secret.expose_secret().to_owned())));
-                }
-                AuthDecision::AskUser { error } => {
-                    let id = self.next_id();
-                    if let Some(a) = self.conns.get_mut(host).and_then(|c| c.attempt.as_mut()) {
-                        a.waiting = Some(Open { id, kind: kind.clone(), text: text.clone(), error: error.clone() });
-                    }
-                    Self::log(host, format!("ssh asks “{}”", first_line(&text)), out);
-                    out.push(ServiceEvent::Prompt(Prompt { id, host: host.clone(), kind, text, error }));
-                    queue.push_back(Work::Life(Event::PromptOpened));
-                }
-            }
+            self.prompt(host, kind, text, queue, out);
             return;
+        }
+    }
+
+    /// ssh asks `text` of the current attempt: answered from memory as the service does, or
+    /// put to the user.
+    fn prompt(
+        &mut self,
+        host: &HostId,
+        kind: PromptKind,
+        text: String,
+        queue: &mut VecDeque<Work>,
+        out: &mut Vec<ServiceEvent>,
+    ) {
+        let Some(a) = self.conns.get_mut(host).and_then(|c| c.attempt.as_mut()) else { return };
+        a.asked += 1;
+        match a.auth.on_prompt(&kind, &text, &mut self.store) {
+            AuthDecision::AnswerFromMemory(secret) => {
+                Self::log(host, format!("ssh asked “{}”: answered from memory.", first_line(&text)), out);
+                queue.push_back(Work::Judge(PromptAnswer::Text(secret.expose_secret().to_owned())));
+            }
+            AuthDecision::AskUser { error } => {
+                let id = self.next_id();
+                if let Some(a) = self.conns.get_mut(host).and_then(|c| c.attempt.as_mut()) {
+                    a.waiting = Some(Open { id, kind: kind.clone(), text: text.clone(), error: error.clone() });
+                }
+                Self::log(host, format!("ssh asks “{}”", first_line(&text)), out);
+                out.push(ServiceEvent::Prompt(Prompt { id, host: host.clone(), kind, text, error }));
+                queue.push_back(Work::Life(Event::PromptOpened));
+            }
         }
     }
 
@@ -447,14 +505,20 @@ impl Core {
         let right = match step {
             Step::HostKey { fingerprint, .. } => given == "yes" || given == *fingerprint,
             Step::Confirm { .. } => given == "yes",
-            Step::Password { accept, .. } | Step::Passphrase { accept, .. } | Step::Code { accept, .. } => given == *accept,
+            Step::Password { accept, .. } | Step::Passphrase { accept, .. } | Step::Code { accept, .. } => {
+                given == *accept
+            }
             Step::Notice { .. } => true,
         };
         given.zeroize();
         if right {
             if let Step::HostKey { key_type, .. } = step {
                 conn.trusted = true;
-                Self::log(host, format!("Warning: Permanently added '{hostname}' ({key_type}) to the list of known hosts."), out);
+                Self::log(
+                    host,
+                    format!("Warning: Permanently added '{hostname}' ({key_type}) to the list of known hosts."),
+                    out,
+                );
             }
             a.step += 1;
             a.asked = 0;
@@ -588,13 +652,22 @@ impl Core {
     fn show_prompts(&self, host: &HostId, out: &mut Vec<ServiceEvent>) {
         let open = self.conns.get(host).and_then(|c| c.attempt.as_ref()).and_then(|a| a.waiting.as_ref());
         if let Some(o) = open {
-            out.push(ServiceEvent::Prompt(Prompt { id: o.id, host: host.clone(), kind: o.kind.clone(), text: o.text.clone(), error: o.error.clone() }));
+            out.push(ServiceEvent::Prompt(Prompt {
+                id: o.id,
+                host: host.clone(),
+                kind: o.kind.clone(),
+                text: o.text.clone(),
+                error: o.error.clone(),
+            }));
         }
     }
 
     /// The host whose open prompt is `id`.
     fn owner(&self, id: PromptId) -> Option<HostId> {
-        self.conns.iter().find(|(_, c)| c.attempt.as_ref().and_then(|a| a.waiting.as_ref()).is_some_and(|o| o.id == id)).map(|(h, _)| h.clone())
+        self.conns
+            .iter()
+            .find(|(_, c)| c.attempt.as_ref().and_then(|a| a.waiting.as_ref()).is_some_and(|o| o.id == id))
+            .map(|(h, _)| h.clone())
     }
 }
 
@@ -611,9 +684,21 @@ pub fn pages(host: &HostId, path: &RemotePath, entries: Vec<dromon_core::Entry>)
     let mut rest = entries.into_iter().peekable();
     while rest.peek().is_some() {
         let page: Vec<_> = rest.by_ref().take(PAGE).collect();
-        out.push(ServiceEvent::ListingPage { host: host.clone(), path: path.clone(), entries: page, first: out.is_empty(), done: false });
+        out.push(ServiceEvent::ListingPage {
+            host: host.clone(),
+            path: path.clone(),
+            entries: page,
+            first: out.is_empty(),
+            done: false,
+        });
     }
-    out.push(ServiceEvent::ListingPage { host: host.clone(), path: path.clone(), entries: Vec::new(), first: out.is_empty(), done: true });
+    out.push(ServiceEvent::ListingPage {
+        host: host.clone(),
+        path: path.clone(),
+        entries: Vec::new(),
+        first: out.is_empty(),
+        done: true,
+    });
     out
 }
 

@@ -71,7 +71,11 @@ fn shown(rt: &Runtime<App>, k: &str) -> bool {
 }
 
 fn text_of(rt: &Runtime<App>, k: &str) -> String {
-    rt.elements().into_iter().find(|e| e.key.as_deref() == Some(k) && !e.exiting).and_then(|e| e.text).unwrap_or_default()
+    rt.elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some(k) && !e.exiting)
+        .and_then(|e| e.text)
+        .unwrap_or_default()
 }
 
 fn apply(rt: &mut Runtime<App>, ev: ServiceEvent) {
@@ -118,7 +122,14 @@ fn job(id: u64, kind: JobKind, state: TaskState, done: u64, total: u64) -> JobVi
 
 /// A clash with index.html in the site folder.
 fn clash(existing: Side, incoming: Side) -> ConflictView {
-    ConflictView { name: "index.html".into(), folder: RemotePath::new(SITE), existing_is_dir: false, existing, incoming, more: 0 }
+    ConflictView {
+        name: "index.html".into(),
+        folder: RemotePath::new(SITE),
+        existing_is_dir: false,
+        existing,
+        incoming,
+        more: 0,
+    }
 }
 
 fn paths(names: &[&str]) -> Vec<PathBuf> {
@@ -139,7 +150,10 @@ fn cmd_d_downloads_the_selection_and_the_ring_follows_the_engine() {
     assert!(!shown(&rt, "tb-ring"));
     key(&mut rt, Key::Command('d'), primary());
     let jobs = &rt.state.transfers.jobs;
-    assert_eq!(jobs.iter().map(|j| (j.title.as_str(), &j.state)).collect::<Vec<_>>(), [("robots.txt", &TaskState::Done)]);
+    assert_eq!(
+        jobs.iter().map(|j| (j.title.as_str(), &j.state)).collect::<Vec<_>>(),
+        [("robots.txt", &TaskState::Done)]
+    );
     assert!(!shown(&rt, "tb-ring") && !shown(&rt, "tb-badge"), "nothing active");
 
     // While the engine reports it running: the ring and a badge counting it.
@@ -157,12 +171,17 @@ fn cmd_d_downloads_the_selection_and_the_ring_follows_the_engine() {
 
 /// `k` on screen (not on its way out).
 fn get(rt: &Runtime<App>, k: &str) -> rune::ElementInfo {
-    rt.elements().into_iter().find(|e| e.key.as_deref() == Some(k) && !e.exiting).unwrap_or_else(|| panic!("no element {k:?}"))
+    rt.elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some(k) && !e.exiting)
+        .unwrap_or_else(|| panic!("no element {k:?}"))
 }
 
 /// Whether a `tb-pulse-*` element is on screen.
 fn pulsing(rt: &Runtime<App>) -> bool {
-    rt.elements().into_iter().any(|e| e.key.as_deref().is_some_and(|k| k.starts_with("tb-pulse-")) && !e.exiting && e.opacity > 0.01)
+    rt.elements()
+        .into_iter()
+        .any(|e| e.key.as_deref().is_some_and(|k| k.starts_with("tb-pulse-")) && !e.exiting && e.opacity > 0.01)
 }
 
 /// The popover open over a download at 40%, then the engine says it's done (as the service
@@ -219,7 +238,10 @@ fn under_reduce_motion_the_check_just_appears_and_nothing_pulses() {
         let mut rt = finishing(forced, system);
         rt.frame(0.0);
         let (check, bar) = (get(&rt, "tr-check-1"), get(&rt, "tr-bar-1"));
-        assert!(check.opacity > 0.999 && (check.scale - 1.0).abs() < 1e-3, "the check is there at once ({forced}, {system})");
+        assert!(
+            check.opacity > 0.999 && (check.scale - 1.0).abs() < 1e-3,
+            "the check is there at once ({forced}, {system})"
+        );
         assert!(bar.opacity < 0.001, "and the bar gone");
         assert!(!shown(&rt, "tb-ring"), "the ring goes with the last active job");
         for _ in 0..30 {
@@ -340,7 +362,10 @@ fn files_dropped_on_the_list_or_a_folder_row_upload_there() {
     rt.drag_files(paths(&["c.png"]), Some((row_x, row_y)));
     rt.drop_files(paths(&["c.png"]), Some((row_x, row_y)));
     settle(&mut rt);
-    assert_eq!(uploads(&rec), [(paths(&["a.txt", "b.txt"]), SITE.to_owned()), (paths(&["c.png"]), format!("{SITE}/uploads"))]);
+    assert_eq!(
+        uploads(&rec),
+        [(paths(&["a.txt", "b.txt"]), SITE.to_owned()), (paths(&["c.png"]), format!("{SITE}/uploads"))]
+    );
     assert_eq!(rt.state.transfers.drop, None);
 }
 
@@ -449,7 +474,10 @@ fn the_conflict_sheet_shows_both_sizes_and_dates_and_says_which_is_newer() {
     swapped.conflict = Some(clash(new, Side { size: None, mtime: Some(1_795_165_920) }));
     apply(&mut rt, ServiceEvent::Transfers(vec![swapped]));
     assert_eq!(text_of(&rt, "conflict-existing-date"), "Nov 25, 2026 · newer");
-    assert_eq!((text_of(&rt, "conflict-incoming-size"), text_of(&rt, "conflict-incoming-date")), ("—".into(), "Nov 20, 2026".into()));
+    assert_eq!(
+        (text_of(&rt, "conflict-incoming-size"), text_of(&rt, "conflict-incoming-date")),
+        ("—".into(), "Nov 20, 2026".into())
+    );
 
     // The same date on both: neither is newer. Unknown on one side: a dash.
     let mut same = j.clone();
@@ -460,7 +488,10 @@ fn the_conflict_sheet_shows_both_sizes_and_dates_and_says_which_is_newer() {
     let mut unknown = j.clone();
     unknown.conflict = Some(clash(old, Side::default()));
     apply(&mut rt, ServiceEvent::Transfers(vec![unknown]));
-    assert_eq!((text_of(&rt, "conflict-incoming-size"), text_of(&rt, "conflict-incoming-date")), ("—".into(), "—".into()));
+    assert_eq!(
+        (text_of(&rt, "conflict-incoming-size"), text_of(&rt, "conflict-incoming-date")),
+        ("—".into(), "—".into())
+    );
     assert!(!text_of(&rt, "conflict-existing-date").contains("newer"));
 
     // Nothing known of either: no comparison, the rest of the sheet stays.
@@ -486,6 +517,10 @@ fn a_clash_waits_in_the_open_popover_until_resolve_brings_its_sheet() {
     click(&mut rt, "conflict-replace");
     assert_eq!(
         transfers(&rec).last(),
-        Some(&TransferCommand::Resolve { job: JobId(7), choice: dromon_transfer::ConflictChoice::Replace, apply_all: false })
+        Some(&TransferCommand::Resolve {
+            job: JobId(7),
+            choice: dromon_transfer::ConflictChoice::Replace,
+            apply_all: false
+        })
     );
 }

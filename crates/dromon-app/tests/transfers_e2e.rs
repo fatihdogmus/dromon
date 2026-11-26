@@ -45,7 +45,7 @@ fn host2() -> HostId {
 /// never run beside another test of this binary.
 static SESSIONS: RwLock<()> = RwLock::new(());
 
-#[allow(dead_code)] // held, never read
+#[expect(dead_code, reason = "the guard is held for its lock, never read")]
 enum SessionsGuard {
     Shared(RwLockReadGuard<'static, ()>),
     Exclusive(RwLockWriteGuard<'static, ()>),
@@ -127,10 +127,14 @@ impl Harness {
         // `exec` runs as root: the folder goes to the user the app signs in as.
         let make = format!("rm -rf '{0}' && mkdir -p '{0}' && chown {1} '{0}'", scratch.as_str(), fx.owner(Role::Key));
         fx.exec(&["sh", "-c", &make]).unwrap();
-        let mut h = Harness { fx, dir, backend, events, jobs: Vec::new(), scratch, log: Vec::new(), _sessions: sessions };
+        let mut h =
+            Harness { fx, dir, backend, events, jobs: Vec::new(), scratch, log: Vec::new(), _sessions: sessions };
         for want in hosts {
             h.backend.send(Command::Connect { host: want.clone() });
-            h.wait_for("the connection to open", |ev, _| matches!(ev, ServiceEvent::Opened { host, .. } if host == want));
+            h.wait_for(
+                "the connection to open",
+                |ev, _| matches!(ev, ServiceEvent::Opened { host, .. } if host == want),
+            );
         }
         Some(h)
     }
@@ -178,7 +182,9 @@ impl Harness {
 
     /// Waits until job `id` has finished, and returns it.
     fn finished(&mut self, id: JobId) -> JobView {
-        self.wait_jobs(&format!("job {} to finish", id.0), |jobs| jobs.iter().any(|j| j.id == id && j.state.is_finished()));
+        self.wait_jobs(&format!("job {} to finish", id.0), |jobs| {
+            jobs.iter().any(|j| j.id == id && j.state.is_finished())
+        });
         self.job(id)
     }
 
@@ -207,9 +213,26 @@ fn write_ssh_config(fx: &Fixture, dir: &Path) -> PathBuf {
     copy_private_key(&fx.key(), &key).unwrap();
     let mut config = String::new();
     for alias in ["fx-key", "fx-key-2"] {
-        writeln!(config, "Host {alias}\n    HostName {}\n    Port {}\n    User {}", fx.host(), fx.port(), fx.user(Role::Key)).unwrap();
-        writeln!(config, "    IdentityFile {}\n    IdentitiesOnly yes\n    PreferredAuthentications publickey", key.display()).unwrap();
-        writeln!(config, "    UserKnownHostsFile {}\n    GlobalKnownHostsFile {NULL_DEVICE}", dir.join("known_hosts").display()).unwrap();
+        writeln!(
+            config,
+            "Host {alias}\n    HostName {}\n    Port {}\n    User {}",
+            fx.host(),
+            fx.port(),
+            fx.user(Role::Key)
+        )
+        .unwrap();
+        writeln!(
+            config,
+            "    IdentityFile {}\n    IdentitiesOnly yes\n    PreferredAuthentications publickey",
+            key.display()
+        )
+        .unwrap();
+        writeln!(
+            config,
+            "    UserKnownHostsFile {}\n    GlobalKnownHostsFile {NULL_DEVICE}",
+            dir.join("known_hosts").display()
+        )
+        .unwrap();
         writeln!(config, "    StrictHostKeyChecking accept-new\n    UpdateHostKeys no").unwrap();
     }
     let path = dir.join("ssh_config");
@@ -231,7 +254,8 @@ fn downloads_land_in_the_folder_with_their_bytes_and_dates() {
     let Some(mut h) = Harness::new("downloads") else { return };
     let into = h.downloads();
     let mixed = h.mixed();
-    let items = vec![item(&format!("{mixed}/file-001.txt"), EntryKind::File), item(&format!("{mixed}/dir-01"), EntryKind::Dir)];
+    let items =
+        vec![item(&format!("{mixed}/file-001.txt"), EntryKind::File), item(&format!("{mixed}/dir-01"), EntryKind::Dir)];
     h.transfer(TransferCommand::Start(JobRequest::Download { host: host(), items, into: into.clone() }));
     let id = h.newest(None);
     let job = h.finished(id);
@@ -313,7 +337,9 @@ fn a_dropped_connection_resumes_the_download_where_it_stopped() {
     h.wait_jobs("the first bytes", |jobs| jobs.iter().any(|j| j.id == id && j.progress.done > 0));
     let before = h.job(id).progress.done;
     assert!(h.fx.kill_sessions(Role::Key).unwrap() > 0);
-    h.wait_jobs("the job to wait for the connection", |jobs| jobs.iter().any(|j| j.id == id && j.waiting_for_connection));
+    h.wait_jobs("the job to wait for the connection", |jobs| {
+        jobs.iter().any(|j| j.id == id && j.waiting_for_connection)
+    });
     h.wait_jobs("the job to move again", |jobs| jobs.iter().any(|j| j.id == id && !j.waiting_for_connection));
     let job = h.finished(id);
     assert_eq!(job.state, TaskState::Done, "{job:#?}");
@@ -384,13 +410,23 @@ fn copies_and_moves_on_one_host_keep_bytes_and_dates_and_a_clash_can_replace() {
     let items = vec![ritem(&h, "src/a.txt", EntryKind::File), ritem(&h, "src/tree", EntryKind::Dir)];
     let job = h.run(JobRequest::RemoteCopy { host: host(), items, into: into.clone() }, false);
     assert_eq!(job.state, TaskState::Done, "{job:#?}");
-    assert_eq!((job.kind, job.files_done, job.reveal.clone()), (JobKind::RemoteCopy, 2, Some(Reveal::Remote(host(), into.join("a.txt")))));
+    assert_eq!(
+        (job.kind, job.files_done, job.reveal.clone()),
+        (JobKind::RemoteCopy, 2, Some(Reveal::Remote(host(), into.join("a.txt"))))
+    );
     assert_eq!(h.cat(&["dst/a.txt", "dst/tree/sub/b.txt"]), "alpha\nbee\n");
     assert_eq!((h.mtime_of("dst/a.txt"), h.mtime_of("dst/tree/sub/b.txt")), (1_600_000_000, 1_600_000_000));
     assert!(h.there("dst/tree/empty") && h.there("src/a.txt"), "the empty folder came along; the source stays");
 
     // A copy into its own folder keeps both, without asking.
-    let job = h.run(JobRequest::RemoteCopy { host: host(), items: vec![ritem(&h, "src/a.txt", EntryKind::File)], into: h.at("src") }, false);
+    let job = h.run(
+        JobRequest::RemoteCopy {
+            host: host(),
+            items: vec![ritem(&h, "src/a.txt", EntryKind::File)],
+            into: h.at("src"),
+        },
+        false,
+    );
     assert_eq!((&job.state, job.conflict.as_ref()), (&TaskState::Done, None));
     assert_eq!(h.cat(&["src/a (1).txt"]), "alpha\n");
 
@@ -414,7 +450,10 @@ fn copies_and_moves_on_one_host_keep_bytes_and_dates_and_a_clash_can_replace() {
     assert_eq!(h.remote(&format!("find '{}' -name '*.dromon-part' | wc -l", h.scratch)).trim(), "0");
 
     // A move into its own folder does nothing.
-    let job = h.run(JobRequest::Move { host: host(), items: vec![ritem(&h, "dst/a.txt", EntryKind::File)], into: into.clone() }, false);
+    let job = h.run(
+        JobRequest::Move { host: host(), items: vec![ritem(&h, "dst/a.txt", EntryKind::File)], into: into.clone() },
+        false,
+    );
     assert_eq!((&job.state, job.skipped.as_slice()), (&TaskState::Done, &["a.txt: already there".to_owned()][..]));
 }
 
@@ -441,14 +480,30 @@ fn copies_and_moves_between_two_hosts_stream_through_the_app() {
     assert!(h.there("a/x.bin"), "a copy keeps the source");
 
     // Move: each file checked on the destination, then deleted; the emptied folders go too.
-    let job = h.run(JobRequest::CrossHostMove { from: host(), items: vec![ritem(&h, "a/gone", EntryKind::Dir)], to: host2(), into: into.clone() }, false);
+    let job = h.run(
+        JobRequest::CrossHostMove {
+            from: host(),
+            items: vec![ritem(&h, "a/gone", EntryKind::Dir)],
+            to: host2(),
+            into: into.clone(),
+        },
+        false,
+    );
     assert_eq!((&job.state, job.kind), (&TaskState::Done, JobKind::CrossHostMove), "{job:#?}");
     assert_eq!(h.cat(&["b/gone/two.txt"]), "two\n");
     assert!(h.there("b/gone/empty"));
     assert!(!h.there("a/gone"), "the source folder is gone with its empty subfolder");
 
     // Moving x.bin again clashes with the copy; Keep both lands it beside, then the source goes.
-    let job = h.run(JobRequest::CrossHostMove { from: host(), items: vec![ritem(&h, "a/x.bin", EntryKind::File)], to: host2(), into }, true);
+    let job = h.run(
+        JobRequest::CrossHostMove {
+            from: host(),
+            items: vec![ritem(&h, "a/x.bin", EntryKind::File)],
+            to: host2(),
+            into,
+        },
+        true,
+    );
     h.transfer(TransferCommand::Resolve { job: job.id, choice: ConflictChoice::KeepBoth, apply_all: false });
     assert_eq!(h.finished(job.id).state, TaskState::Done);
     assert_eq!(h.fx.sha1(h.at("b/x (1).bin").as_str()).unwrap(), want);
@@ -487,7 +542,12 @@ fn every_job_ends_when_the_connections_drop_at_any_moment() {
                 to: host2(),
                 into: b.clone(),
             },
-            JobRequest::CrossHostMove { from: host(), items: vec![at("a/m.bin", EntryKind::File)], to: host2(), into: b.clone() },
+            JobRequest::CrossHostMove {
+                from: host(),
+                items: vec![at("a/m.bin", EntryKind::File)],
+                to: host2(),
+                into: b.clone(),
+            },
             JobRequest::CrossHostMove { from: host(), items: vec![at("a/gone", EntryKind::Dir)], to: host2(), into: b },
             JobRequest::RemoteCopy { host: host(), items: vec![at("a/dir", EntryKind::Dir)], into: c.clone() },
             JobRequest::Upload { host: host2(), items: vec![local.join("up.txt"), local.join("tree")], into: c },
@@ -505,19 +565,7 @@ fn every_job_ends_when_the_connections_drop_at_any_moment() {
         std::thread::sleep(Duration::from_millis(round * 53 % 700));
         h.fx.kill_sessions(Role::Key).unwrap();
 
-        let deadline = Instant::now() + WAIT;
-        loop {
-            let ours: Vec<&JobView> = h.jobs.iter().filter(|j| ids.contains(&j.id)).collect();
-            if ours.len() == ids.len() && ours.iter().all(|j| j.state.is_finished()) {
-                break;
-            }
-            let clashes: Vec<JobId> = ours.iter().filter(|j| j.conflict.is_some()).map(|j| j.id).collect();
-            for job in clashes {
-                h.transfer(TransferCommand::Resolve { job, choice: ConflictChoice::KeepBoth, apply_all: true });
-            }
-            assert!(Instant::now() < deadline, "round {round}: jobs {ids:?} didn't end; jobs: {:#?}\nconnection log:\n{}", h.jobs, h.log.join("\n"));
-            h.wait_for(&format!("round {round}: jobs {ids:?} to end"), |ev, _| matches!(ev, ServiceEvent::Transfers(_)));
-        }
+        end_keeping_both(&mut h, &ids, round);
         for id in &ids {
             let job = h.job(*id);
             assert_eq!(job.state, TaskState::Done, "round {round}: {job:#?}\nconnection log:\n{}", h.log.join("\n"));
@@ -525,14 +573,57 @@ fn every_job_ends_when_the_connections_drop_at_any_moment() {
         // Everything once, in place, no part files left.
         let tree = h.remote(&format!("cd '{}' && find . | LC_ALL=C sort", h.at(&r)));
         let want = [
-            ".", "./a", "./a/dir", "./a/dir/inner", "./a/dir/inner/one.txt", "./a/x.bin", "./b", "./b/dir", "./b/dir/inner",
-            "./b/dir/inner/one.txt", "./b/gone", "./b/gone/empty", "./b/gone/two.txt", "./b/m (1).bin", "./b/m.bin",
-            "./b/x (1).bin", "./b/x.bin", "./c", "./c/dir", "./c/dir/inner", "./c/dir/inner/one.txt", "./c/tree",
-            "./c/tree/sub", "./c/tree/sub/deep.txt", "./c/up.txt",
+            ".",
+            "./a",
+            "./a/dir",
+            "./a/dir/inner",
+            "./a/dir/inner/one.txt",
+            "./a/x.bin",
+            "./b",
+            "./b/dir",
+            "./b/dir/inner",
+            "./b/dir/inner/one.txt",
+            "./b/gone",
+            "./b/gone/empty",
+            "./b/gone/two.txt",
+            "./b/m (1).bin",
+            "./b/m.bin",
+            "./b/x (1).bin",
+            "./b/x.bin",
+            "./c",
+            "./c/dir",
+            "./c/dir/inner",
+            "./c/dir/inner/one.txt",
+            "./c/tree",
+            "./c/tree/sub",
+            "./c/tree/sub/deep.txt",
+            "./c/up.txt",
         ];
         assert_eq!(tree.lines().collect::<Vec<_>>(), want, "round {round}");
         let downloaded: Vec<PathBuf> = walk(&h.downloads().join(&r)).into_iter().collect();
         assert_eq!(downloaded.len(), 4, "round {round}: {downloaded:?}");
+    }
+}
+
+/// Waits until every job of `ids` has ended, answering each name clash Keep both.
+fn end_keeping_both(h: &mut Harness, ids: &[JobId], round: u64) {
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let ours: Vec<&JobView> = h.jobs.iter().filter(|j| ids.contains(&j.id)).collect();
+        if ours.len() == ids.len() && ours.iter().all(|j| j.state.is_finished()) {
+            break;
+        }
+        let clashes: Vec<JobId> = ours.iter().filter(|j| j.conflict.is_some()).map(|j| j.id).collect();
+        for job in clashes {
+            h.transfer(TransferCommand::Resolve { job, choice: ConflictChoice::KeepBoth, apply_all: true });
+        }
+        assert!(
+            Instant::now() < deadline,
+            "round {round}: jobs {ids:?} didn't end; jobs: {:#?}\nconnection log:\n{}",
+            h.jobs,
+            h.log.join("\n")
+        );
+        h.wait_for(&format!("round {round}: jobs {ids:?} to end"), |ev, _| matches!(ev, ServiceEvent::Transfers(_)));
     }
 }
 

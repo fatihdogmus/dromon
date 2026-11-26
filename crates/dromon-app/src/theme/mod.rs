@@ -303,7 +303,11 @@ fn all() -> &'static [Tokens] {
             for dark in [false, true] {
                 for increase_contrast in [false, true] {
                     for reduce_transparency in [false, true] {
-                        v.push(build(dark, accent, Access { reduce_motion: false, reduce_transparency, increase_contrast }));
+                        v.push(build(
+                            dark,
+                            accent,
+                            Access { reduce_motion: false, reduce_transparency, increase_contrast },
+                        ));
                     }
                 }
             }
@@ -315,7 +319,10 @@ fn all() -> &'static [Tokens] {
 /// The tokens for one appearance under `access`, in the chosen accent ([`accent`]).
 pub fn tokens_for(dark: bool, access: Access) -> &'static Tokens {
     let i = CHOSEN.load(Ordering::Relaxed).min(ACCENTS.len() - 1);
-    &all()[i * 8 + usize::from(dark) * 4 + usize::from(access.increase_contrast) * 2 + usize::from(access.reduce_transparency)]
+    &all()[i * 8
+        + usize::from(dark) * 4
+        + usize::from(access.increase_contrast) * 2
+        + usize::from(access.reduce_transparency)]
 }
 
 /// The tokens for one appearance, with no accessibility preference on.

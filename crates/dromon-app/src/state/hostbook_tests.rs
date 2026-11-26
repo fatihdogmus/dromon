@@ -33,7 +33,12 @@ fn fill(s: &mut App, fields: &[(QuickField, &str)]) {
 }
 
 fn section(s: &App, which: Section) -> Vec<String> {
-    s.hosts.sections(&s.conns).into_iter().filter(|(sec, _)| *sec == which).flat_map(|(_, h)| h.into_iter().map(|h| h.id.0.clone())).collect()
+    s.hosts
+        .sections(&s.conns)
+        .into_iter()
+        .filter(|(sec, _)| *sec == which)
+        .flat_map(|(_, h)| h.into_iter().map(|h| h.id.0.clone()))
+        .collect()
 }
 
 fn source(s: &App, h: &str) -> Option<HostSource> {
@@ -61,7 +66,10 @@ fn quick_connect_reaches_the_server_and_becomes_the_newest_recent_host() {
     assert_eq!(c.status, ConnStatus::Ready);
     assert!(matches!(&c.listing, Listing::Ready(_)) && c.find("index.html").is_some(), "prod's server lists");
     let h = s.hosts.get(&new).unwrap();
-    assert_eq!((h.source, h.alias.as_str(), h.user.as_deref()), (HostSource::Recent, "prod.example.com", Some("deploy")));
+    assert_eq!(
+        (h.source, h.alias.as_str(), h.user.as_deref()),
+        (HostSource::Recent, "prod.example.com", Some("deploy"))
+    );
     assert_eq!(s.recent_hosts()[0].id, new);
     assert_eq!(section(&s, Section::Connected), [new.as_str()]);
     // The same server typed another way is the same recent host, moved to the front.
@@ -101,7 +109,9 @@ fn recent_hosts_are_capped_remembered_and_checked_again_when_read_back() {
     assert_eq!(ids.len(), MAX_RECENT - 1);
     assert_eq!(ids[0], id("10.9.0.11:22"));
     assert!(!ids.contains(&id("10.9.0.10:22")));
-    assert!(matches!(&sent.sent()[..], [Command::HostBook(HostBookCommand::Recent(list))] if list.len() == MAX_RECENT - 1));
+    assert!(
+        matches!(&sent.sent()[..], [Command::HostBook(HostBookCommand::Recent(list))] if list.len() == MAX_RECENT - 1)
+    );
 }
 
 #[test]
@@ -186,7 +196,9 @@ fn a_recent_hosts_save_moves_it_to_saved() {
 #[test]
 fn the_host_menu_fits_each_section() {
     let mut s = demo();
-    let titles = |s: &App, h: &str| -> Vec<&'static str> { s.menu(&MenuKind::Host(id(h))).iter().map(|e| e.item().map_or("—", |i| i.title)).collect() };
+    let titles = |s: &App, h: &str| -> Vec<&'static str> {
+        s.menu(&MenuKind::Host(id(h))).iter().map(|e| e.item().map_or("—", |i| i.title)).collect()
+    };
     assert_eq!(titles(&s, "prod"), ["Connect"]);
     assert_eq!(titles(&s, "box"), ["Connect", "—", "Add to SSH config…", "Edit…", "—", "Remove"]);
     assert_eq!(titles(&s, "203.0.113.7"), ["Connect", "—", "Save", "Remove"]);
@@ -196,7 +208,10 @@ fn the_host_menu_fits_each_section() {
     assert_eq!(s.menu_action(&MenuKind::Host(id("box")), "host-connect"), None, "not in the menu now");
     assert_eq!(s.menu_action(&MenuKind::Host(id("prod")), "host-edit"), None);
     // Picking from the drawn menu.
-    s.act(Action::File(crate::state::FileAction::OpenMenu { kind: MenuKind::Host(id("media")), at: Some((10.0, 10.0)) }));
+    s.act(Action::File(crate::state::FileAction::OpenMenu {
+        kind: MenuKind::Host(id("media")),
+        at: Some((10.0, 10.0)),
+    }));
     s.act(Action::File(crate::state::FileAction::Pick { kind: MenuKind::Host(id("media")), id: "host-edit".into() }));
     assert!(s.files.menu.is_none());
     assert_eq!(s.ui.quick.editing, Some(id("media")));
@@ -228,7 +243,10 @@ fn add_to_config_shows_the_block_then_moves_the_host_to_ssh_config() {
     assert_eq!(s.conn().unwrap().status, ConnStatus::Ready);
     // The next one in the same minute gets the next backup name.
     host(&mut s, HostAction::AddToConfig(id("media")));
-    assert_eq!(sheet(&s).unwrap().preview.as_ref().unwrap().backup.as_deref(), Some("~/.ssh/config.dromon-backup-20261125-1400-2"));
+    assert_eq!(
+        sheet(&s).unwrap().preview.as_ref().unwrap().backup.as_deref(),
+        Some("~/.ssh/config.dromon-backup-20261125-1400-2")
+    );
     s.act(Action::DismissSheet);
     assert!(sheet(&s).is_none());
     assert_eq!(source(&s, "media"), Some(HostSource::Saved), "Cancel changes nothing");
@@ -249,7 +267,10 @@ fn add_to_config_problems_show_in_the_sheet() {
     host(&mut s, HostAction::ConfirmAddToConfig);
     assert_eq!(sent.sent().len(), 2, "one Add while busy");
     assert!(sheet(&s).unwrap().busy);
-    s.apply(ServiceEvent::HostBook(HostBookEvent::AddFailed { host: id("box"), error: "Couldn't write ~/.ssh/config: denied".into() }));
+    s.apply(ServiceEvent::HostBook(HostBookEvent::AddFailed {
+        host: id("box"),
+        error: "Couldn't write ~/.ssh/config: denied".into(),
+    }));
     let v = sheet(&s).unwrap();
     assert!(!v.busy);
     assert_eq!(v.error.as_deref(), Some("Couldn't write ~/.ssh/config: denied"));
@@ -309,7 +330,10 @@ fn trace_lines_name_the_event_only() {
     .iter()
     .map(trace_line)
     .collect();
-    assert_eq!(lines, ["Saved count=1", "SaveFailed", "Preview host=box ok=true", "Added host=box", "AddFailed host=box"]);
+    assert_eq!(
+        lines,
+        ["Saved count=1", "SaveFailed", "Preview host=box ok=true", "Added host=box", "AddFailed host=box"]
+    );
 }
 
 #[test]

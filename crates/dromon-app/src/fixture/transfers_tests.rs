@@ -37,7 +37,8 @@ fn send(b: &mut FixtureBackend, cmd: TransferCommand) -> Vec<ServiceEvent> {
 
 /// The jobs of the one `Transfers` snapshot in `evs`.
 fn jobs(evs: &[ServiceEvent]) -> Vec<JobView> {
-    let snaps: Vec<&Vec<JobView>> = evs.iter().filter_map(|e| if let ServiceEvent::Transfers(j) = e { Some(j) } else { None }).collect();
+    let snaps: Vec<&Vec<JobView>> =
+        evs.iter().filter_map(|e| if let ServiceEvent::Transfers(j) = e { Some(j) } else { None }).collect();
     assert_eq!(snaps.len(), 1, "one snapshot per command: {evs:#?}");
     snaps[0].clone()
 }
@@ -59,7 +60,8 @@ fn listed(evs: &[ServiceEvent], path: &str) -> Option<Vec<String>> {
 }
 
 fn download(names: &[(&str, EntryKind, u64)]) -> TransferCommand {
-    let items = names.iter().map(|(n, kind, size)| RemoteItem { path: site().join(n), kind: *kind, size: *size }).collect();
+    let items =
+        names.iter().map(|(n, kind, size)| RemoteItem { path: site().join(n), kind: *kind, size: *size }).collect();
     TransferCommand::Start(JobRequest::Download { host: prod(), items, into: PathBuf::from("/dl") })
 }
 
@@ -74,7 +76,10 @@ fn downloads_finish_at_once_and_a_second_copy_gets_a_chrome_style_name() {
     let first = jobs(&send(&mut b, download(&[("index.html", EntryKind::File, 14812)])));
     assert_eq!(first.len(), 1);
     let j = &first[0];
-    assert_eq!((j.id, j.kind, j.title.as_str(), &j.state), (JobId(1), JobKind::Download, "index.html", &TaskState::Done));
+    assert_eq!(
+        (j.id, j.kind, j.title.as_str(), &j.state),
+        (JobId(1), JobKind::Download, "index.html", &TaskState::Done)
+    );
     assert_eq!((j.progress, j.files_done, j.files_total), (Progress { done: 14812, total: 14812 }, 1, 1));
     assert_eq!(j.reveal, Some(Reveal::Local(PathBuf::from("/dl/index.html"))));
 
@@ -155,7 +160,8 @@ fn replace_overwrites_and_apply_to_all_answers_every_clash() {
 
     let j = jobs(&send(&mut b, upload(&["robots.txt", "favicon.ico", "README.md", "new.txt"], SITE))).remove(0);
     assert_eq!(j.conflict.as_ref().map(|c| (c.name.as_str(), c.more)), Some(("robots.txt", 2)));
-    let j = jobs(&send(&mut b, TransferCommand::Resolve { job: j.id, choice: ConflictChoice::Skip, apply_all: true })).remove(0);
+    let j = jobs(&send(&mut b, TransferCommand::Resolve { job: j.id, choice: ConflictChoice::Skip, apply_all: true }))
+        .remove(0);
     assert_eq!(j.state, TaskState::Done);
     assert_eq!(j.skipped, ["robots.txt", "favicon.ico", "README.md"]);
     assert_eq!(j.files_total, 1);
@@ -196,7 +202,10 @@ fn the_same_commands_give_the_same_events() {
     let run = || {
         let mut b = connected();
         let mut all = send(&mut b, upload(&["index.html", "x.bin"], SITE));
-        all.extend(send(&mut b, TransferCommand::Resolve { job: JobId(1), choice: ConflictChoice::KeepBoth, apply_all: false }));
+        all.extend(send(
+            &mut b,
+            TransferCommand::Resolve { job: JobId(1), choice: ConflictChoice::KeepBoth, apply_all: false },
+        ));
         all.extend(send(&mut b, download(&[("assets", EntryKind::Dir, 4096), ("robots.txt", EntryKind::File, 68)])));
         all
     };
@@ -246,26 +255,44 @@ fn start(b: &mut FixtureBackend, req: JobRequest) -> JobView {
 #[test]
 fn a_copy_into_its_own_folder_keeps_both_with_the_same_size_and_date() {
     let mut b = connected();
-    let req = JobRequest::RemoteCopy { host: prod(), items: vec![ritem("/var/www/site/index.html", EntryKind::File)], into: site() };
+    let req = JobRequest::RemoteCopy {
+        host: prod(),
+        items: vec![ritem("/var/www/site/index.html", EntryKind::File)],
+        into: site(),
+    };
     let evs = send(&mut b, TransferCommand::Start(req));
     let j = jobs(&evs).remove(0);
-    assert_eq!((j.kind, &j.state, j.conflict.as_ref()), (JobKind::RemoteCopy, &TaskState::Done, None), "no question asked");
+    assert_eq!(
+        (j.kind, &j.state, j.conflict.as_ref()),
+        (JobKind::RemoteCopy, &TaskState::Done, None),
+        "no question asked"
+    );
     assert_eq!(j.reveal, Some(Reveal::Remote(prod(), site().join("index (1).html"))));
     let names = listed(&evs, SITE).expect("the site is on screen, so it lists again");
     assert!(names.contains(&"index.html".to_owned()) && names.contains(&"index (1).html".to_owned()), "{names:?}");
     let all = entries(&mut b, prod(), SITE);
     let find = |n: &str| all.iter().find(|e| e.name == n).cloned().unwrap();
-    assert_eq!((find("index (1).html").size, find("index (1).html").mtime), (find("index.html").size, find("index.html").mtime));
+    assert_eq!(
+        (find("index (1).html").size, find("index (1).html").mtime),
+        (find("index.html").size, find("index.html").mtime)
+    );
 }
 
 #[test]
 fn a_folder_copy_lands_with_its_tree_and_a_clash_asks() {
     let mut b = connected();
-    let req = JobRequest::RemoteCopy { host: prod(), items: vec![ritem(RELEASE, EntryKind::Dir)], into: RemotePath::new(UPLOADS) };
+    let req = JobRequest::RemoteCopy {
+        host: prod(),
+        items: vec![ritem(RELEASE, EntryKind::Dir)],
+        into: RemotePath::new(UPLOADS),
+    };
     let j = start(&mut b, req.clone());
     assert_eq!((&j.state, j.files_total), (&TaskState::Done, 3));
     assert_eq!(names(&mut b, prod(), UPLOADS), ["20261125-1348"]);
-    assert_eq!(names(&mut b, prod(), &format!("{UPLOADS}/20261125-1348")), ["app.min.js", "assets", "index.html", "package.json"]);
+    assert_eq!(
+        names(&mut b, prod(), &format!("{UPLOADS}/20261125-1348")),
+        ["app.min.js", "assets", "index.html", "package.json"]
+    );
     assert_eq!(names(&mut b, prod(), &format!("{UPLOADS}/20261125-1348/assets")), Vec::<String>::new());
     assert_eq!(names(&mut b, prod(), RELEASE).len(), 4, "the original stays");
 
@@ -276,7 +303,9 @@ fn a_folder_copy_lands_with_its_tree_and_a_clash_asks() {
     assert_eq!((c.name.as_str(), c.folder.as_str(), c.existing_is_dir, c.more), ("20261125-1348", UPLOADS, true, 0));
     assert_eq!((c.existing.size, c.incoming.size), (None, None));
     assert!(c.existing.mtime.is_some() && c.incoming.mtime.is_some());
-    let j = jobs(&send(&mut b, TransferCommand::Resolve { job: j.id, choice: ConflictChoice::Replace, apply_all: false })).remove(0);
+    let j =
+        jobs(&send(&mut b, TransferCommand::Resolve { job: j.id, choice: ConflictChoice::Replace, apply_all: false }))
+            .remove(0);
     assert_eq!(j.state, TaskState::Done);
     assert_eq!(names(&mut b, prod(), &format!("{UPLOADS}/20261125-1348")).len(), 4, "merged, nothing doubled");
 }
@@ -285,7 +314,11 @@ fn a_folder_copy_lands_with_its_tree_and_a_clash_asks() {
 fn a_move_takes_the_tree_along_and_replace_merges() {
     let mut b = connected();
     // A copy first, so the move clashes with it.
-    let copy = JobRequest::RemoteCopy { host: prod(), items: vec![ritem(RELEASE, EntryKind::Dir)], into: RemotePath::new(UPLOADS) };
+    let copy = JobRequest::RemoteCopy {
+        host: prod(),
+        items: vec![ritem(RELEASE, EntryKind::Dir)],
+        into: RemotePath::new(UPLOADS),
+    };
     start(&mut b, copy);
     let mv = JobRequest::Move {
         host: prod(),
@@ -299,7 +332,10 @@ fn a_move_takes_the_tree_along_and_replace_merges() {
     let j = jobs(&evs).remove(0);
     assert_eq!((&j.state, j.files_done, j.files_total), (&TaskState::Done, 2, 2), "one file per item");
     assert_eq!(names(&mut b, prod(), UPLOADS), ["20261125-1348", "robots.txt"]);
-    assert_eq!(names(&mut b, prod(), &format!("{UPLOADS}/20261125-1348")), ["app.min.js", "assets", "index.html", "package.json"]);
+    assert_eq!(
+        names(&mut b, prod(), &format!("{UPLOADS}/20261125-1348")),
+        ["app.min.js", "assets", "index.html", "package.json"]
+    );
     assert_eq!(names(&mut b, prod(), "/var/www/site/releases"), ["20261120-1730", "20261124-0912"]);
     // The site on screen lost robots.txt and listed again.
     let on_screen = listed(&evs, SITE).expect("relisted");
@@ -311,10 +347,15 @@ fn a_move_takes_the_tree_along_and_replace_merges() {
 #[test]
 fn own_folder_rules_skip_a_move_and_fail_a_folder_into_itself() {
     let mut b = connected();
-    let here = JobRequest::Move { host: prod(), items: vec![ritem("/var/www/site/index.html", EntryKind::File)], into: site() };
+    let here = JobRequest::Move {
+        host: prod(),
+        items: vec![ritem("/var/www/site/index.html", EntryKind::File)],
+        into: site(),
+    };
     let j = start(&mut b, here);
     assert_eq!((&j.state, j.skipped.as_slice()), (&TaskState::Done, &["index.html: already there".to_owned()][..]));
-    let inside = JobRequest::Move { host: prod(), items: vec![ritem(SITE, EntryKind::Dir)], into: RemotePath::new(UPLOADS) };
+    let inside =
+        JobRequest::Move { host: prod(), items: vec![ritem(SITE, EntryKind::Dir)], into: RemotePath::new(UPLOADS) };
     let j = start(&mut b, inside);
     assert_eq!(j.state, TaskState::Failed { error: "site: can't move a folder into itself".into() });
     assert!(names(&mut b, prod(), SITE).contains(&"uploads".to_owned()), "nothing moved");
@@ -330,7 +371,11 @@ fn copies_and_moves_between_two_hosts_wait_for_both() {
         into: RemotePath::new("/volume1"),
     };
     let j = start(&mut b, copy);
-    assert_eq!((&j.state, j.waiting_for_connection, &j.host), (&TaskState::Queued, true, &nas()), "nas isn't connected");
+    assert_eq!(
+        (&j.state, j.waiting_for_connection, &j.host),
+        (&TaskState::Queued, true, &nas()),
+        "nas isn't connected"
+    );
     b.send(Command::Connect { host: nas() });
     let j = jobs(&send(&mut b, TransferCommand::ClearFinished)).remove(0);
     assert_eq!((&j.state, j.kind), (&TaskState::Done, JobKind::CrossHostCopy));
@@ -339,7 +384,12 @@ fn copies_and_moves_between_two_hosts_wait_for_both() {
     assert!(names(&mut b, prod(), SITE).contains(&"index.html".to_owned()), "a copy keeps the source");
 
     // A move: copied file by file, each source deleted, the emptied folders tidied away.
-    let mv = JobRequest::CrossHostMove { from: prod(), items: vec![ritem(RELEASE, EntryKind::Dir)], to: nas(), into: RemotePath::new("/volume1") };
+    let mv = JobRequest::CrossHostMove {
+        from: prod(),
+        items: vec![ritem(RELEASE, EntryKind::Dir)],
+        to: nas(),
+        into: RemotePath::new("/volume1"),
+    };
     let j = start(&mut b, mv);
     assert_eq!((&j.state, j.files_total, j.kind), (&TaskState::Done, 3, JobKind::CrossHostMove));
     assert_eq!(names(&mut b, nas(), "/volume1/20261125-1348"), ["app.min.js", "assets", "index.html", "package.json"]);
@@ -354,7 +404,9 @@ fn copies_and_moves_between_two_hosts_wait_for_both() {
     };
     let j = start(&mut b, again);
     assert_eq!(j.conflict.as_ref().map(|c| c.name.as_str()), Some("index.html"));
-    let j = jobs(&send(&mut b, TransferCommand::Resolve { job: j.id, choice: ConflictChoice::KeepBoth, apply_all: false })).remove(0);
+    let j =
+        jobs(&send(&mut b, TransferCommand::Resolve { job: j.id, choice: ConflictChoice::KeepBoth, apply_all: false }))
+            .remove(0);
     assert_eq!(j.state, TaskState::Done);
     assert!(names(&mut b, nas(), "/volume1").contains(&"index (1).html".to_owned()));
     assert!(!names(&mut b, prod(), SITE).contains(&"index.html".to_owned()), "moved away");
@@ -365,8 +417,20 @@ fn copies_and_moves_are_deterministic() {
     let run = || {
         let mut b = connected();
         b.send(Command::Connect { host: nas() });
-        let mut all = send(&mut b, TransferCommand::Start(JobRequest::RemoteCopy { host: prod(), items: vec![ritem(RELEASE, EntryKind::Dir)], into: site() }));
-        let mv = JobRequest::CrossHostMove { from: prod(), items: vec![ritem(RELEASE, EntryKind::Dir)], to: nas(), into: RemotePath::new("/volume1") };
+        let mut all = send(
+            &mut b,
+            TransferCommand::Start(JobRequest::RemoteCopy {
+                host: prod(),
+                items: vec![ritem(RELEASE, EntryKind::Dir)],
+                into: site(),
+            }),
+        );
+        let mv = JobRequest::CrossHostMove {
+            from: prod(),
+            items: vec![ritem(RELEASE, EntryKind::Dir)],
+            to: nas(),
+            into: RemotePath::new("/volume1"),
+        };
         all.extend(send(&mut b, TransferCommand::Start(mv)));
         all.extend(b.send(Command::List { host: nas(), path: RemotePath::new("/volume1/20261125-1348") }));
         all
@@ -395,12 +459,25 @@ fn the_transfers_key_reads_job_snapshots_newest_first() {
     assert_eq!(t.len(), 5);
     assert_eq!(t.iter().map(|j| j.id.0 - FIXTURE_JOBS).collect::<Vec<_>>(), [5, 4, 3, 2, 1]);
     assert_eq!(t[0].state, TaskState::Running);
-    assert_eq!((t[0].progress, t[0].files_done, t[0].files_total), (Progress { done: 12_400_000, total: 80_000_000 }, 3, 40));
+    assert_eq!(
+        (t[0].progress, t[0].files_done, t[0].files_total),
+        (Progress { done: 12_400_000, total: 80_000_000 }, 3, 40)
+    );
     assert_eq!((t[0].speed, t[0].eta), (Some(8_100_000.0), Some(std::time::Duration::from_secs(9))));
     assert_eq!(t[0].reveal, Some(Reveal::Local(PathBuf::from("/Users/me/Downloads/photos"))));
     assert_eq!((&t[1].state, t[1].waiting_for_connection), (&TaskState::Preparing { files_found: 1204 }, true));
     let (no_side, c) = (Side::default(), t[2].conflict.as_ref().unwrap());
-    assert_eq!(*c, ConflictView { name: "index.html".into(), folder: RemotePath::new("/var/www"), existing_is_dir: false, existing: no_side, incoming: no_side, more: 2 });
+    assert_eq!(
+        *c,
+        ConflictView {
+            name: "index.html".into(),
+            folder: RemotePath::new("/var/www"),
+            existing_is_dir: false,
+            existing: no_side,
+            incoming: no_side,
+            more: 2
+        }
+    );
     assert_eq!(t[3].state, TaskState::Failed { error: "Permission denied".into() });
     assert_eq!((t[3].errors.len(), t[3].skipped.len()), (1, 1));
     assert_eq!(t[4].reveal, Some(Reveal::Remote(prod(), RemotePath::new("/srv/a.txt"))));
@@ -446,7 +523,10 @@ fn a_pictures_conflict_reads_both_sides_sizes_and_dates() {
         );
         parse(&src).unwrap_err().to_string()
     };
-    assert_eq!(bad(r#"{"size": -1}"#), "transfers: job 1: conflict.existing.size: expected a whole number of at least 0, found -1");
+    assert_eq!(
+        bad(r#"{"size": -1}"#),
+        "transfers: job 1: conflict.existing.size: expected a whole number of at least 0, found -1"
+    );
     assert!(bad(r#"{"mtime": "soon"}"#).starts_with("transfers: job 1: conflict.existing.mtime: "));
     assert!(bad(r#"{"colour": 1}"#).contains(r#"unknown field "colour""#));
 }
@@ -454,19 +534,44 @@ fn a_pictures_conflict_reads_both_sides_sizes_and_dates() {
 #[test]
 fn transfers_errors_name_where() {
     let bad = |job: &str| {
-        let src = format!(r#"{{"version": 1, "hosts": [{{"alias": "prod", "source": "saved"}}], "transfers": [{job}]}}"#);
+        let src =
+            format!(r#"{{"version": 1, "hosts": [{{"alias": "prod", "source": "saved"}}], "transfers": [{job}]}}"#);
         parse(&src).unwrap_err().to_string()
     };
     let ok = r#""kind": "download", "host": "prod", "title": "t""#;
-    assert_eq!(bad(&format!(r#"{{{ok}, "state": "going"}}"#)), r#"transfers: job 1: state: unknown state "going" (expected queued, preparing, running, paused, done, failed or cancelled)"#);
+    assert_eq!(
+        bad(&format!(r#"{{{ok}, "state": "going"}}"#)),
+        r#"transfers: job 1: state: unknown state "going" (expected queued, preparing, running, paused, done, failed or cancelled)"#
+    );
     assert_eq!(bad(&format!(r#"{{{ok}, "state": "failed"}}"#)), "transfers: job 1: error: missing");
-    assert_eq!(bad(&format!(r#"{{{ok}, "state": "running", "error": "x"}}"#)), "transfers: job 1: error: only a failed job has error");
-    assert_eq!(bad(r#"{"kind": "copy", "host": "prod", "title": "t", "state": "done"}"#), r#"transfers: job 1: kind: unknown kind "copy" (expected download or upload)"#);
-    assert_eq!(bad(r#"{"kind": "upload", "host": "nas", "title": "t", "state": "done"}"#), r#"transfers: job 1: host: "nas" is not a host (add it to hosts)"#);
-    assert_eq!(bad(&format!(r#"{{{ok}, "state": "done", "done": 9, "total": 5}}"#)), "transfers: job 1: done: 9 is more than total (5)");
-    assert_eq!(bad(&format!(r#"{{{ok}, "state": "done", "files": [3]}}"#)), "transfers: job 1: files: files is [done, total], whole numbers");
-    assert_eq!(bad(&format!(r#"{{{ok}, "state": "done", "speed": -1}}"#)), "transfers: job 1: speed: expected a number of at least 0, found -1");
-    assert!(bad(&format!(r#"{{{ok}, "state": "done", "colour": 1}}"#)).starts_with(r#"transfers: job 1: unknown field "colour""#));
+    assert_eq!(
+        bad(&format!(r#"{{{ok}, "state": "running", "error": "x"}}"#)),
+        "transfers: job 1: error: only a failed job has error"
+    );
+    assert_eq!(
+        bad(r#"{"kind": "copy", "host": "prod", "title": "t", "state": "done"}"#),
+        r#"transfers: job 1: kind: unknown kind "copy" (expected download or upload)"#
+    );
+    assert_eq!(
+        bad(r#"{"kind": "upload", "host": "nas", "title": "t", "state": "done"}"#),
+        r#"transfers: job 1: host: "nas" is not a host (add it to hosts)"#
+    );
+    assert_eq!(
+        bad(&format!(r#"{{{ok}, "state": "done", "done": 9, "total": 5}}"#)),
+        "transfers: job 1: done: 9 is more than total (5)"
+    );
+    assert_eq!(
+        bad(&format!(r#"{{{ok}, "state": "done", "files": [3]}}"#)),
+        "transfers: job 1: files: files is [done, total], whole numbers"
+    );
+    assert_eq!(
+        bad(&format!(r#"{{{ok}, "state": "done", "speed": -1}}"#)),
+        "transfers: job 1: speed: expected a number of at least 0, found -1"
+    );
+    assert!(
+        bad(&format!(r#"{{{ok}, "state": "done", "colour": 1}}"#))
+            .starts_with(r#"transfers: job 1: unknown field "colour""#)
+    );
     assert_eq!(
         bad(r#"{"kind": "upload", "host": "prod", "title": "t", "state": "done", "reveal": "relative"}"#),
         r#"transfers: job 1: reveal: "relative" is not an absolute path"#
@@ -486,7 +591,10 @@ fn the_fixtures_pictures_stay_after_the_sessions_jobs_and_their_buttons_move_the
 
     b.send(Command::Connect { host: prod() });
     let item = RemoteItem { path: RemotePath::new("/srv/x"), kind: EntryKind::File, size: 1 };
-    let j = jobs(&send(&mut b, TransferCommand::Start(JobRequest::Download { host: prod(), items: vec![item], into: PathBuf::from("/dl") })));
+    let j = jobs(&send(
+        &mut b,
+        TransferCommand::Start(JobRequest::Download { host: prod(), items: vec![item], into: PathBuf::from("/dl") }),
+    ));
     assert_eq!(j.len(), 6);
     assert_eq!(j[0].id, JobId(1), "the session's job comes first");
     let j = jobs(&send(&mut b, TransferCommand::ClearFinished));

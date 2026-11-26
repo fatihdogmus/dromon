@@ -4,7 +4,9 @@
 use std::path::PathBuf;
 
 use dromon_core::{EntryKind, HostId, LinkTarget, RemotePath};
-use dromon_transfer::{ConflictChoice, ConflictView, JobId, JobKind, JobRequest, JobView, Progress, RemoteItem, Reveal, Side, TaskState};
+use dromon_transfer::{
+    ConflictChoice, ConflictView, JobId, JobKind, JobRequest, JobView, Progress, RemoteItem, Reveal, Side, TaskState,
+};
 
 use super::*;
 use crate::fixture;
@@ -80,7 +82,10 @@ fn download_takes_the_selection_in_row_order_or_else_the_cursor() {
     s.act(Action::Download);
     let JobRequest::Download { items, .. } = &started(&rec)[0] else { panic!("not a download") };
     let picked: Vec<(&str, EntryKind)> = items.iter().map(|i| (i.path.file_name().unwrap(), i.kind)).collect();
-    assert_eq!(picked, [("current", EntryKind::Symlink { target: Some(LinkTarget::Dir) }), ("robots.txt", EntryKind::File)]);
+    assert_eq!(
+        picked,
+        [("current", EntryKind::Symlink { target: Some(LinkTarget::Dir) }), ("robots.txt", EntryKind::File)]
+    );
 
     // Nothing selected: nothing to download.
     s.act(Action::Escape);
@@ -164,7 +169,11 @@ fn the_oldest_clash_is_asked_first_and_apply_to_all_goes_with_the_answer() {
     s.act(Action::ResolveConflict(ConflictChoice::KeepBoth));
     assert_eq!(
         rec.sent().last(),
-        Some(&Command::Transfer(TransferCommand::Resolve { job: JobId(7), choice: ConflictChoice::KeepBoth, apply_all: true }))
+        Some(&Command::Transfer(TransferCommand::Resolve {
+            job: JobId(7),
+            choice: ConflictChoice::KeepBoth,
+            apply_all: true
+        }))
     );
     assert!(!s.transfers.apply_all, "the next clash starts unticked");
 }
@@ -332,7 +341,8 @@ fn the_folder_on_screen_is_listed_again_when_a_job_changing_it_ends() {
     let lists = |rec: &Recorder| rec.sent().iter().filter(|c| matches!(c, Command::List { .. })).count();
     let site = (prod(), RemotePath::new(SITE));
     let elsewhere = (prod(), RemotePath::new("/srv/other"));
-    let with = |id, state, folders: Vec<(HostId, RemotePath)>| JobView { folders, ..job(id, JobKind::Move, state, 0, 1) };
+    let with =
+        |id, state, folders: Vec<(HostId, RemotePath)>| JobView { folders, ..job(id, JobKind::Move, state, 0, 1) };
 
     // Running, then done: one listing, when it ends.
     s.apply(ServiceEvent::Transfers(vec![with(1, TaskState::Running, vec![elsewhere.clone(), site.clone()])]));
@@ -422,7 +432,14 @@ fn only_jobs_seen_running_get_a_flourish_and_clearing_ends_it() {
 
     // Two finish together: both fill; another job still runs, so the ring keeps its bytes.
     tr.set_at(vec![running(6), running(5), running(4)], 0);
-    tr.set_at(vec![running(6), job(5, JobKind::Upload, TaskState::Done, 2, 2), job(4, JobKind::Upload, TaskState::Done, 2, 2)], 0);
+    tr.set_at(
+        vec![
+            running(6),
+            job(5, JobKind::Upload, TaskState::Done, 2, 2),
+            job(4, JobKind::Upload, TaskState::Done, 2, 2),
+        ],
+        0,
+    );
     assert!(tr.flourish.get(JobId(5)).is_some() && tr.flourish.get(JobId(4)).is_some());
     assert_eq!(tr.ring_fraction(), Some(0.5));
     // Clear finished takes them away mid-flourish.
@@ -433,7 +450,10 @@ fn only_jobs_seen_running_get_a_flourish_and_clearing_ends_it() {
 #[test]
 fn a_notification_click_opens_the_popover_on_its_jobs_tab() {
     let (mut s, _rec) = connected();
-    s.apply(ServiceEvent::Transfers(vec![job(2, JobKind::Upload, TaskState::Done, 1, 1), job(1, JobKind::Download, TaskState::Done, 1, 1)]));
+    s.apply(ServiceEvent::Transfers(vec![
+        job(2, JobKind::Upload, TaskState::Done, 1, 1),
+        job(1, JobKind::Download, TaskState::Done, 1, 1),
+    ]));
     s.show_transfer(JobId(1));
     assert!(s.transfers.open);
     assert_eq!(s.transfers.tab, super::Tab::Downloads);
@@ -451,11 +471,15 @@ fn the_app_s_jobs_reach_the_taskbar_and_focus_decides_notifications() {
     s.transfers.watch.os.take();
     s.transfers.window_focus(false);
     s.apply(ServiceEvent::Transfers(vec![job(1, JobKind::Download, TaskState::Running, 1, 2)]));
-    s.transfers.set_at(vec![job(1, JobKind::Download, TaskState::Failed { error: "Permission denied".into() }, 1, 2)], i64::MAX / 2);
+    s.transfers.set_at(
+        vec![job(1, JobKind::Download, TaskState::Failed { error: "Permission denied".into() }, 1, 2)],
+        i64::MAX / 2,
+    );
     let held = s.transfers.watch.os.take();
     assert!(held.contains(&OsEffect::Taskbar(Dock { count: 1, bar: notify::Bar::Busy })), "{held:?}");
     assert!(held.contains(&OsEffect::Taskbar(Dock { count: 0, bar: notify::Bar::Error })), "{held:?}");
-    let lines: Vec<String> = held.iter().filter_map(|fx| if let OsEffect::Notify(n) = fx { Some(n.line()) } else { None }).collect();
+    let lines: Vec<String> =
+        held.iter().filter_map(|fx| if let OsEffect::Notify(n) = fx { Some(n.line()) } else { None }).collect();
     assert_eq!(lines, ["Couldn't download job 1: Permission denied"]);
     s.transfers.window_focus(true);
     assert_eq!(s.transfers.watch.os.take(), [OsEffect::Taskbar(Dock::default())]);

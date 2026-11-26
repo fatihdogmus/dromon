@@ -50,7 +50,7 @@ pub struct Paint {
     /// The OS display preferences in force (reduce motion, reduce transparency, increased
     /// contrast; [`access`]). `t` already follows them; Rune reduces every transition,
     /// sequence and loop itself; the list's refresh highlight reads `reduced`.
-    #[allow(dead_code)]
+    #[expect(dead_code, reason = "no view reads it yet: `t` and `reduced` already follow it")]
     pub access: Access,
 }
 
@@ -136,7 +136,8 @@ pub fn effect(fx: Effect, tx: &mut Tx) {
         Effect::Copy(text) => tx.copy(text),
         Effect::ContextMenu(kind) => menu::open_at_row(kind, tx),
         Effect::PickUpload { folder } => {
-            let options = rune::FileDialogOptions { title: format!("Upload to {folder}"), ..rune::FileDialogOptions::default() };
+            let options =
+                rune::FileDialogOptions { title: format!("Upload to {folder}"), ..rune::FileDialogOptions::default() };
             // A cancelled dialog or an error from it does nothing.
             tx.open_files(options, |s: &mut App, picked, tx| {
                 if let Ok(Some(paths)) = picked {
@@ -145,7 +146,9 @@ pub fn effect(fx: Effect, tx: &mut Tx) {
             });
         }
         Effect::ReadClipboard { as_move } => {
-            tx.read_clipboard(move |s: &mut App, content: &rune::ClipboardContent, tx: &mut Tx| pasted(s, content, as_move, tx))
+            tx.read_clipboard(move |s: &mut App, content: &rune::ClipboardContent, tx: &mut Tx| {
+                pasted(s, content, as_move, tx)
+            })
         }
     }
 }

@@ -149,12 +149,17 @@ pub static SERVER: IconPair = pair!(
     r#"<rect x="2.5" y="2.5" width="11" height="4" rx="1.5"/><rect x="2.5" y="9.5" width="11" height="4" rx="1.5"/><path d="M5 4.5H5.01M5 11.5H5.01" stroke-width="1.75"/>"#,
     r#"<rect x="2.25" y="2.25" width="11.5" height="4.5" rx="1.5"/><rect x="2.25" y="9.25" width="11.5" height="4.5" rx="1.5"/><path d="M5 4.5H5.01M5 11.5H5.01" stroke-width="1.75"/>"#
 );
-pub static CHEVRON_LEFT: IconPair = pair!("dromon-chevron-left", r#"<path d="M9.5 4L5.5 8L9.5 12"/>"#, r#"<path d="M9.5 4L5.5 8L9.5 12"/>"#);
-pub static CHEVRON_RIGHT: IconPair = pair!("dromon-chevron-right", r#"<path d="M6.5 4L10.5 8L6.5 12"/>"#, r#"<path d="M6.5 4L10.5 8L6.5 12"/>"#);
+pub static CHEVRON_LEFT: IconPair =
+    pair!("dromon-chevron-left", r#"<path d="M9.5 4L5.5 8L9.5 12"/>"#, r#"<path d="M9.5 4L5.5 8L9.5 12"/>"#);
+pub static CHEVRON_RIGHT: IconPair =
+    pair!("dromon-chevron-right", r#"<path d="M6.5 4L10.5 8L6.5 12"/>"#, r#"<path d="M6.5 4L10.5 8L6.5 12"/>"#);
 /// The breadcrumb separator: a smaller chevron on the same grid.
-pub static CRUMB: IconPair = pair!("dromon-crumb", r#"<path d="M6.5 5L9.5 8L6.5 11"/>"#, r#"<path d="M6.5 5L9.5 8L6.5 11"/>"#);
-pub static CARET_UP: IconPair = pair!("dromon-caret-up", r#"<path d="M5 9.5L8 6.5L11 9.5"/>"#, r#"<path d="M5 9.5L8 6.5L11 9.5"/>"#);
-pub static CARET_DOWN: IconPair = pair!("dromon-caret-down", r#"<path d="M5 6.5L8 9.5L11 6.5"/>"#, r#"<path d="M5 6.5L8 9.5L11 6.5"/>"#);
+pub static CRUMB: IconPair =
+    pair!("dromon-crumb", r#"<path d="M6.5 5L9.5 8L6.5 11"/>"#, r#"<path d="M6.5 5L9.5 8L6.5 11"/>"#);
+pub static CARET_UP: IconPair =
+    pair!("dromon-caret-up", r#"<path d="M5 9.5L8 6.5L11 9.5"/>"#, r#"<path d="M5 9.5L8 6.5L11 9.5"/>"#);
+pub static CARET_DOWN: IconPair =
+    pair!("dromon-caret-down", r#"<path d="M5 6.5L8 9.5L11 6.5"/>"#, r#"<path d="M5 6.5L8 9.5L11 6.5"/>"#);
 pub static ARROW_UP: IconPair = pair!(
     "dromon-arrow-up",
     r#"<path d="M7.5 13V3.5M4 7L7.5 3.5L11 7"/>"#,
@@ -165,12 +170,10 @@ pub static SEARCH: IconPair = pair!(
     r#"<circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L13.5 13.5"/>"#,
     r#"<circle cx="6.75" cy="6.75" r="4.5"/><path d="M10.25 10.25L13.25 13.25"/>"#
 );
-pub static PLUS: IconPair = pair!(
-    "dromon-plus",
-    r#"<path d="M7.5 3V12M3 7.5H12"/>"#,
-    r#"<path d="M7.75 3.25V12.25M3.25 7.75H12.25"/>"#
-);
-pub static CLOSE: IconPair = pair!("dromon-close", r#"<path d="M5 5L11 11M11 5L5 11"/>"#, r#"<path d="M5 5L11 11M11 5L5 11"/>"#);
+pub static PLUS: IconPair =
+    pair!("dromon-plus", r#"<path d="M7.5 3V12M3 7.5H12"/>"#, r#"<path d="M7.75 3.25V12.25M3.25 7.75H12.25"/>"#);
+pub static CLOSE: IconPair =
+    pair!("dromon-close", r#"<path d="M5 5L11 11M11 5L5 11"/>"#, r#"<path d="M5 5L11 11M11 5L5 11"/>"#);
 pub static DOWNLOAD: IconPair = pair!(
     "dromon-download",
     r#"<path d="M7.5 2.5V10M4 6.5L7.5 10L11 6.5M2.5 13.5H12.5"/>"#,
@@ -191,7 +194,8 @@ pub static MORE: IconPair = pair!(
     r#"<path d="M3.5 8H3.51M8 8H8.01M12.5 8H12.51" stroke-width="2"/>"#,
     r#"<path d="M3.5 8H3.51M8 8H8.01M12.5 8H12.51" stroke-width="2"/>"#
 );
-pub static PAUSE: IconPair = pair!("dromon-pause", r#"<path d="M5.5 4V12M10.5 4V12"/>"#, r#"<path d="M5.75 4V12M10.25 4V12"/>"#);
+pub static PAUSE: IconPair =
+    pair!("dromon-pause", r#"<path d="M5.5 4V12M10.5 4V12"/>"#, r#"<path d="M5.75 4V12M10.25 4V12"/>"#);
 /// Play: a triangle whose upright edge is pixel-exact.
 pub static RESUME: IconPair = pair!(
     "dromon-resume",
@@ -204,7 +208,8 @@ pub static RETRY: IconPair = pair!(
     r#"<path d="M13 8A5 5 0 1 1 11.54 4.46"/><path d="M11.5 1.5V4.5H8.5"/>"#,
     r#"<path d="M13 8A5 5 0 1 1 11.54 4.46"/><path d="M11.75 1.75V4.75H8.75"/>"#
 );
-pub static CHECK: IconPair = pair!("dromon-check", r#"<path d="M3.5 8.5L6.5 11.5L12.5 4.5"/>"#, r#"<path d="M3.5 8.5L6.5 11.5L12.5 4.5"/>"#);
+pub static CHECK: IconPair =
+    pair!("dromon-check", r#"<path d="M3.5 8.5L6.5 11.5L12.5 4.5"/>"#, r#"<path d="M3.5 8.5L6.5 11.5L12.5 4.5"/>"#);
 /// Three quarters of a ring; spun by a rotation loop while connecting, so its curve stays as drawn.
 pub static SPINNER: IconPair = pair!(
     "dromon-spinner",
@@ -222,8 +227,8 @@ pub static WARNING: IconPair = pair!(
 pub fn for_file(name: &str) -> (&'static IconPair, Option<f32>) {
     let ext = name.rsplit_once('.').map(|(stem, ext)| if stem.is_empty() { "" } else { ext }).unwrap_or("");
     match ext.to_ascii_lowercase().as_str() {
-        "rs" | "js" | "mjs" | "ts" | "tsx" | "jsx" | "css" | "html" | "htm" | "json" | "py" | "go" | "sh" | "rb" | "php" | "toml"
-        | "yaml" | "yml" | "xml" | "lock" => (&FILE_CODE, Some(250.0)),
+        "rs" | "js" | "mjs" | "ts" | "tsx" | "jsx" | "css" | "html" | "htm" | "json" | "py" | "go" | "sh" | "rb"
+        | "php" | "toml" | "yaml" | "yml" | "xml" | "lock" => (&FILE_CODE, Some(250.0)),
         "md" | "txt" | "log" | "csv" | "conf" | "ini" | "env" => (&FILE_TEXT, None),
         "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "ico" | "avif" | "heic" => (&FILE_IMAGE, Some(320.0)),
         "zip" | "gz" | "tgz" | "xz" | "bz2" | "zst" | "tar" | "7z" | "rar" => (&FILE_ARCHIVE, Some(70.0)),

@@ -3,7 +3,11 @@ use dromon_core::HostId;
 use super::*;
 
 fn askpass() -> AskpassEnv {
-    AskpassEnv { exe: PathBuf::from("/opt/dromon/dromon"), endpoint: "/run/user/1000/dromon/a.sock".into(), token: "ab".repeat(32) }
+    AskpassEnv {
+        exe: PathBuf::from("/opt/dromon/dromon"),
+        endpoint: "/run/user/1000/dromon/a.sock".into(),
+        token: "ab".repeat(32),
+    }
 }
 
 fn saved(alias: &str) -> HostSpec {

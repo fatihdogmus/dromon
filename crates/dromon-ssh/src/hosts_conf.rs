@@ -29,7 +29,8 @@ mod tests;
 pub const HOSTS_CONF: &str = "hosts.conf";
 
 /// The first lines of `hosts.conf`.
-const HEADER: &str = "# Dromon's saved hosts, in ssh_config syntax. Dromon rewrites this file: edit hosts in the app.\n";
+const HEADER: &str =
+    "# Dromon's saved hosts, in ssh_config syntax. Dromon rewrites this file: edit hosts in the app.\n";
 
 /// The `Host` block for `spec`, lines ending in `\n`:
 ///
@@ -91,7 +92,11 @@ pub fn parse_hosts_conf(text: &str) -> Vec<HostSpec> {
                 && is_literal_alias(alias)
                 && check_alias(alias).is_ok()
             {
-                current = Some(HostSpec { id: HostId(alias.clone()), source: HostSource::Saved, ..HostSpec::from_config_alias(alias) });
+                current = Some(HostSpec {
+                    id: HostId(alias.clone()),
+                    source: HostSource::Saved,
+                    ..HostSpec::from_config_alias(alias)
+                });
             }
             continue;
         }

@@ -105,8 +105,10 @@ async fn write_remote(sftp: &Sftp, path: &RemotePath, data: &[u8]) {
 
 /// `len` random bytes at `path`, owned by the key user, with mtime [`MTIME`].
 fn random_remote(fixture: &Fixture, path: &RemotePath, len: u64) {
-    let script =
-        format!("head -c {len} /dev/urandom >'{path}' && chown {} '{path}' && TZ=UTC0 touch -m -t {TOUCH_MTIME} '{path}'", fixture.owner(Role::Key));
+    let script = format!(
+        "head -c {len} /dev/urandom >'{path}' && chown {} '{path}' && TZ=UTC0 touch -m -t {TOUCH_MTIME} '{path}'",
+        fixture.owner(Role::Key)
+    );
     fixture.exec(&["sh", "-c", &script]).unwrap();
 }
 
@@ -143,7 +145,7 @@ fn streamed() -> CopyOptions {
 
 /// The engine runs these in spawned tasks, so their futures must be `Send` (checked at compile
 /// time; never called).
-#[allow(dead_code)]
+#[expect(dead_code, reason = "a compile-time check, never called")]
 fn futures_are_send(a: &Sftp, b: &Sftp, plan: &FilePlan, copied: &Copied) {
     fn send<T: Send>(_: T) {}
     send(scan_remote_copy(a, &p("/"), &p("/x"), false, |_| {}));
@@ -185,7 +187,10 @@ async fn same_host_copy_uses_copy_data_and_keeps_bytes_and_mtime() {
     s.mkdir(&dir.join("out")).await.unwrap();
     let dst = dir.join("out/big.bin");
     let plan = the_plan(scan_remote_copy(s, &src, &dst, false, |_| {}).await.unwrap());
-    assert_eq!(plan, FilePlan::Copy { src: src.clone(), dst: dst.clone(), size: 3 * MIB, mtime: Some(MTIME), overwrite: false });
+    assert_eq!(
+        plan,
+        FilePlan::Copy { src: src.clone(), dst: dst.clone(), size: 3 * MIB, mtime: Some(MTIME), overwrite: false }
+    );
 
     let mut progress = Vec::new();
     let got = copy_remote(s, &plan, CopyOptions::default(), |n| progress.push(n)).await.unwrap();
@@ -198,7 +203,8 @@ async fn same_host_copy_uses_copy_data_and_keeps_bytes_and_mtime() {
     let got = copy_remote(s, &plan, CopyOptions::default(), |_| {}).await.unwrap();
     assert_eq!(got.dst, dir.join("out/big (1).bin"));
     write_remote(s, &dst, b"old").await;
-    let replace = FilePlan::Copy { src: src.clone(), dst: dst.clone(), size: 3 * MIB, mtime: Some(MTIME), overwrite: true };
+    let replace =
+        FilePlan::Copy { src: src.clone(), dst: dst.clone(), size: 3 * MIB, mtime: Some(MTIME), overwrite: true };
     assert_eq!(copy_remote(s, &replace, CopyOptions::default(), |_| {}).await.unwrap().dst, dst);
     assert_eq!(sha(fx, &dst), sha(fx, &src));
     assert!(remote_parts(s, &dir).await.is_empty());
@@ -216,7 +222,9 @@ async fn same_host_copy_uses_copy_data_and_keeps_bytes_and_mtime() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn same_host_copy_streams_when_told_and_resumes_from_the_part() {
-    let Some((fx, a, _b)) = two_hosts("same_host_copy_streams_when_told_and_resumes_from_the_part").await else { return };
+    let Some((fx, a, _b)) = two_hosts("same_host_copy_streams_when_told_and_resumes_from_the_part").await else {
+        return;
+    };
     let s = &a.sftp;
     let dir = scratch(fx, s, "stream").await;
     let src = dir.join("data.bin");
@@ -350,7 +358,10 @@ async fn a_cross_host_move_deletes_only_verified_sources() {
     write_remote(&a.sftp, &src, b"two").await;
     let copied = Copied { dst: dst.clone(), size: 3, mtime: mtime(&a.sftp, &src).await };
     let err = delete_verified(&a.sftp, &b.sftp, &src, &copied).await.unwrap_err();
-    assert_eq!(err.to_string(), format!("The copy of two.txt has {} bytes instead of 3; the original was kept", MIB + 7));
+    assert_eq!(
+        err.to_string(),
+        format!("The copy of two.txt has {} bytes instead of 3; the original was kept", MIB + 7)
+    );
     assert!(a.sftp.exists(&src).await.unwrap());
 
     // A source that changed after it was copied: it stays.
@@ -365,7 +376,13 @@ async fn a_cross_host_move_deletes_only_verified_sources() {
     // A move dropped mid-copy never touches its source.
     let big = dir.join("big.bin");
     random_remote(fx, &big, 32 * MIB);
-    let plan = FilePlan::Copy { src: big.clone(), dst: dir.join("b/big.bin"), size: 32 * MIB, mtime: Some(MTIME), overwrite: false };
+    let plan = FilePlan::Copy {
+        src: big.clone(),
+        dst: dir.join("b/big.bin"),
+        size: 32 * MIB,
+        mtime: Some(MTIME),
+        overwrite: false,
+    };
     let (from, to, task_plan) = (a.sftp.clone(), b.sftp.clone(), plan.clone());
     abort_after_first_progress(move |tx| async move {
         let _ = move_between(&from, &to, &task_plan, CopyOptions::default(), move |n| {
@@ -390,7 +407,9 @@ async fn a_cross_host_move_deletes_only_verified_sources() {
 /// second copy.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_move_run_again_after_it_finished_is_done_without_a_second_copy() {
-    let Some((fx, a, b)) = two_hosts("a_move_run_again_after_it_finished_is_done_without_a_second_copy").await else { return };
+    let Some((fx, a, b)) = two_hosts("a_move_run_again_after_it_finished_is_done_without_a_second_copy").await else {
+        return;
+    };
     let dir = scratch(fx, &a.sftp, "move-again").await;
     b.sftp.mkdir(&dir.join("b")).await.unwrap();
     let listing = |s: &Sftp, d: RemotePath| {
@@ -482,7 +501,8 @@ async fn a_move_renames_and_replace_merges_folders() {
     assert_eq!(move_remote(s, &plan).await.unwrap(), dst.join("d"));
     assert_eq!(read_remote(s, &dst.join("d/a.txt")).await, b"new a");
     assert_eq!(mtime(s, &dst.join("d/a.txt")).await, Some(MTIME), "a rename keeps the mtime");
-    for (f, want) in [("d/sub/b.txt", "b"), ("d/sub/other.txt", "other"), ("d/new/c.txt", "c"), ("d/keep.txt", "keep")] {
+    for (f, want) in [("d/sub/b.txt", "b"), ("d/sub/other.txt", "other"), ("d/new/c.txt", "c"), ("d/keep.txt", "keep")]
+    {
         assert_eq!(read_remote(s, &dst.join(f)).await, want.as_bytes(), "{f}");
     }
     assert!(!s.exists(&src.join("d")).await.unwrap());

@@ -19,8 +19,8 @@ use std::sync::mpsc;
 
 use dromon_transfer::{JobId, JobKind, JobView, Reveal, TaskState, format_bytes, progress_line};
 use rune::{
-    Align, AppHandle, Beat, Color, Easing, El, LineCap, MotionIntent, ScrollSpec, Sequence, Shape, Side, Taskbar, TaskbarProgress,
-    Transition, Tx, WindowHandle, canvas, col, el, icon, row, text,
+    Align, AppHandle, Beat, Color, Easing, El, LineCap, MotionIntent, ScrollSpec, Sequence, Shape, Side, Taskbar,
+    TaskbarProgress, Transition, Tx, WindowHandle, canvas, col, el, icon, row, text,
 };
 
 use super::widgets::Keyboard;
@@ -107,7 +107,8 @@ fn ring(p: Paint, fraction: f32) -> El {
     // The left half turned clockwise into the right-hand clip draws 0–50%; the right half
     // turned into the left-hand clip draws the rest. A half not turned at all would still show
     // its leading cap past the clip, so it hides.
-    let turned = |e: El, angle: f32| e.rotate(angle).rotate_motion(motion::MOVE).opacity(if angle > 0.0 { 1.0 } else { 0.0 });
+    let turned =
+        |e: El, angle: f32| e.rotate(angle).rotate_motion(motion::MOVE).opacity(if angle > 0.0 { 1.0 } else { 0.0 });
     let first = turned(half(0, t.accent).absolute(-c, 0.0), f.min(0.5) * 2.0 * PI);
     let second = turned(half(1, t.accent).absolute(0.0, 0.0), (f - 0.5).max(0.0) * 2.0 * PI);
     // The track is opaque: a translucent stroke darkens where its segments overlap.
@@ -118,13 +119,19 @@ fn ring(p: Paint, fraction: f32) -> El {
         .label(format!("{:.0}%", f * 100.0))
         .absolute((28.0 - RING) / 2.0, (28.0 - RING) / 2.0)
         .size(RING, RING)
-        .child(canvas(Shape::new().stroke_svg(&track, RING_STROKE, LineCap::Round, track_color)).absolute(0.0, 0.0).size(RING, RING).a11y_hidden())
+        .child(
+            canvas(Shape::new().stroke_svg(&track, RING_STROKE, LineCap::Round, track_color))
+                .absolute(0.0, 0.0)
+                .size(RING, RING)
+                .a11y_hidden(),
+        )
         .child(el().absolute(c, 0.0).size(c, RING).clip_soft(0.0).child(first.a11y_hidden()))
         .child(el().absolute(0.0, 0.0).size(c, RING).clip_soft(0.0).child(second.a11y_hidden()))
 }
 
 /// The ring's pulse: a copy of it in the accent that grows out of it and fades, once.
-const PULSE_BEATS: &[Beat] = &[Beat::new(0.0).opacity(0.8), Beat::new(PULSE).opacity(0.0).scale(1.4).easing(Easing::EASE_OUT)];
+const PULSE_BEATS: &[Beat] =
+    &[Beat::new(0.0).opacity(0.8), Beat::new(PULSE).opacity(0.0).scale(1.4).easing(Easing::EASE_OUT)];
 
 /// Pulse `n` of the ring (each one a new element, so each plays), over the ring.
 fn pulse(p: Paint, n: u32) -> El {
@@ -218,7 +225,11 @@ fn tabs(s: &App, p: Paint) -> El {
             .radius(radius::ROW - 1.0)
             .center()
             .motion(motion::SNAP)
-            .child(text(label).font(if on { type_::BODY_STRONG } else { type_::BODY }).color(if on { t.text } else { t.text_2 }))
+            .child(text(label).font(if on { type_::BODY_STRONG } else { type_::BODY }).color(if on {
+                t.text
+            } else {
+                t.text_2
+            }))
             .child(text(fmt::thousands(n as u64)).font(type_::META).color(t.text_3));
         if on {
             e = e.fill(t.press).border(p.hair, t.border_subtle);
@@ -250,7 +261,9 @@ fn jobs(s: &App, p: Paint) -> El {
     let rows: Vec<El> = s.transfers.in_tab(tab).map(|j| job_row(p, j, s.transfers.flourish.get(j.id))).collect();
     let body = if rows.is_empty() {
         let (headline, hint) = match tab {
-            Tab::Downloads => ("No downloads yet", format!("Select files and press {}", super::widgets::chord("mod+d"))),
+            Tab::Downloads => {
+                ("No downloads yet", format!("Select files and press {}", super::widgets::chord("mod+d")))
+            }
             Tab::Uploads => ("No uploads yet", "Drop files on the list to upload them".to_owned()),
         };
         col()
@@ -344,7 +357,11 @@ fn tile(p: Paint, j: &JobView, flourishing: bool) -> El {
                 .opacity(if flourishing { 0.0 } else { 1.0 })
                 .scale_motion(motion::settle(p.reduced))
                 .opacity_motion(motion::MOVE);
-            let tile = if flourishing { tile.child(icon(arrow.at(p.scale), size::ICON).color(t.text_2).absolute(inset, inset)) } else { tile };
+            let tile = if flourishing {
+                tile.child(icon(arrow.at(p.scale), size::ICON).color(t.text_2).absolute(inset, inset))
+            } else {
+                tile
+            };
             // Reduce motion: the check is just there (no cross-fade either).
             let tile = if p.reduced { tile.instant_changes() } else { tile };
             tile.child(check)
@@ -399,38 +416,18 @@ fn job_row(p: Paint, j: &JobView, flourish: Option<Flourish>) -> El {
         .h(22.0)
         .gap(space::S1)
         .center_y()
-        .child(text(j.title.clone()).key(format!("tr-title-{}", id.0)).font(type_::BODY).color(t.text).truncate().grow(1.0).min_w(0.0))
+        .child(
+            text(j.title.clone())
+                .key(format!("tr-title-{}", id.0))
+                .font(type_::BODY)
+                .color(t.text)
+                .truncate()
+                .grow(1.0)
+                .min_w(0.0),
+        )
         .children(resolve)
         .child(row().gap(2.0).group_opacity(0.0, 1.0).children(buttons));
-
-    let (fraction, bar) = match &j.state {
-        TaskState::Done => (if let Some(Flourish::Finished { from }) = flourish { from } else { 1.0 }, t.accent),
-        TaskState::Failed { .. } => (j.progress.fraction().max(0.02), t.danger),
-        TaskState::Paused | TaskState::Cancelled => (j.progress.fraction(), t.text_3),
-        _ if j.waiting_for_connection || j.conflict.is_some() => (j.progress.fraction(), t.text_3),
-        _ => (j.progress.fraction(), t.accent),
-    };
-    // Collapsed, the bar keeps its room (the row doesn't change height), drawn shrunk into its
-    // left end, by the tile, and clear.
-    let mut progress = el()
-        .key(format!("tr-bar-{}", id.0))
-        .w_full()
-        .h(3.0)
-        .mt(3.0)
-        .radius(1.5)
-        .fill(t.border)
-        .origin(0.0, 0.5)
-        .scale(if collapsed { 0.0 } else { 1.0 })
-        .opacity(if collapsed { 0.0 } else { 1.0 })
-        .scale_motion(motion::MOVE)
-        .opacity_motion(motion::MOVE)
-        .child(el().w_frac(fraction).h_full().radius(1.5).fill(bar).motion(motion::MOVE));
-    if !collapsed {
-        progress = progress.role("progressbar").label(format!("{:.0}%", fraction * 100.0));
-    } else if p.reduced {
-        // Reduce motion: no collapse, the bar is just gone.
-        progress = progress.instant_changes();
-    }
+    let progress = progress_bar(p, j, flourish, collapsed);
     let line = text(status_line(j))
         .key(format!("tr-line-{}", id.0))
         .font(type_::META)
@@ -464,7 +461,11 @@ fn job_row(p: Paint, j: &JobView, flourish: Option<Flourish>) -> El {
         _ => None,
     };
     if let Some(label) = reveal {
-        r = r.on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, Action::RevealTransfer(id), tx)).help(label).tab_press().focus_ring(2.0, -1.0, t.focus);
+        r = r
+            .on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, Action::RevealTransfer(id), tx))
+            .help(label)
+            .tab_press()
+            .focus_ring(2.0, -1.0, t.focus);
     }
     // What failed or was left out says so on hover, over the reveal hint.
     if let Some(d) = details(j) {
@@ -473,11 +474,47 @@ fn job_row(p: Paint, j: &JobView, flourish: Option<Flourish>) -> El {
     r
 }
 
+/// A job's progress bar, in the state's colour; `collapsed` (a done job at rest, or as its
+/// flourish ends) shrinks it into the tile.
+fn progress_bar(p: Paint, j: &JobView, flourish: Option<Flourish>, collapsed: bool) -> El {
+    let t = p.t;
+    let (fraction, bar) = match &j.state {
+        TaskState::Done => (if let Some(Flourish::Finished { from }) = flourish { from } else { 1.0 }, t.accent),
+        TaskState::Failed { .. } => (j.progress.fraction().max(0.02), t.danger),
+        TaskState::Paused | TaskState::Cancelled => (j.progress.fraction(), t.text_3),
+        _ if j.waiting_for_connection || j.conflict.is_some() => (j.progress.fraction(), t.text_3),
+        _ => (j.progress.fraction(), t.accent),
+    };
+    // Collapsed, the bar keeps its room (the row doesn't change height), drawn shrunk into its
+    // left end, by the tile, and clear.
+    let mut progress = el()
+        .key(format!("tr-bar-{}", j.id.0))
+        .w_full()
+        .h(3.0)
+        .mt(3.0)
+        .radius(1.5)
+        .fill(t.border)
+        .origin(0.0, 0.5)
+        .scale(if collapsed { 0.0 } else { 1.0 })
+        .opacity(if collapsed { 0.0 } else { 1.0 })
+        .scale_motion(motion::MOVE)
+        .opacity_motion(motion::MOVE)
+        .child(el().w_frac(fraction).h_full().radius(1.5).fill(bar).motion(motion::MOVE));
+    if !collapsed {
+        progress = progress.role("progressbar").label(format!("{:.0}%", fraction * 100.0));
+    } else if p.reduced {
+        // Reduce motion: no collapse, the bar is just gone.
+        progress = progress.instant_changes();
+    }
+    progress
+}
+
 /// "3 active" and Clear finished.
 fn footer(s: &App, p: Paint) -> El {
     let t = p.t;
     let active = s.transfers.active();
-    let summary = if active == 0 { "Nothing running".to_owned() } else { format!("{} active", fmt::thousands(active as u64)) };
+    let summary =
+        if active == 0 { "Nothing running".to_owned() } else { format!("{} active", fmt::thousands(active as u64)) };
     let can_clear = s.transfers.has_finished();
     let mut clear = row()
         .key("tr-clear")
@@ -487,7 +524,11 @@ fn footer(s: &App, p: Paint) -> El {
         .px(space::S2)
         .radius(radius::ROW)
         .center()
-        .child(text("Clear finished").font(type_::META_STRONG).color(if can_clear { t.text_2 } else { t.text_3.alpha(0.6) }));
+        .child(text("Clear finished").font(type_::META_STRONG).color(if can_clear {
+            t.text_2
+        } else {
+            t.text_3.alpha(0.6)
+        }));
     clear = if can_clear {
         clear
             .hover(t.hover)

@@ -24,7 +24,15 @@ pub fn view(s: &App, p: Paint) -> El {
     for (section, list) in s.hosts.sections(&s.conns) {
         hosts = hosts.child(section_view(s, p, section, &list));
     }
-    let sections = col().key("sb-sections").w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec::default()).px(space::S2).pb(space::S2).child(hosts);
+    let sections = col()
+        .key("sb-sections")
+        .w_full()
+        .grow(1.0)
+        .min_h(0.0)
+        .scroll(ScrollSpec::default())
+        .px(space::S2)
+        .pb(space::S2)
+        .child(hosts);
     col()
         .key("sidebar")
         .role("navigation")
@@ -186,11 +194,8 @@ fn footer(s: &App, p: Paint) -> El {
 
 /// The resize handle on the sidebar's right edge.
 fn resize_grip() -> El {
-    el().key("sb-grip")
-        .pin(None, Some(0.0), Some(-3.0), Some(0.0))
-        .w(6.0)
-        .cursor(Cursor::ResizeColumn)
-        .on_drag(|s: &mut App, d: &mut Drag, _tx: &mut Tx| {
+    el().key("sb-grip").pin(None, Some(0.0), Some(-3.0), Some(0.0)).w(6.0).cursor(Cursor::ResizeColumn).on_drag(
+        |s: &mut App, d: &mut Drag, _tx: &mut Tx| {
             if d.phase == Phase::Down {
                 d.data = s.ui.sidebar_width;
             }
@@ -198,5 +203,6 @@ fn resize_grip() -> El {
             if d.phase == Phase::Up {
                 s.sidebar_resized();
             }
-        })
+        },
+    )
 }

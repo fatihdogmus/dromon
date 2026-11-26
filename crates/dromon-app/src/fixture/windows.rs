@@ -47,7 +47,13 @@ struct Shared {
 impl FixtureBackend {
     /// The first window's end of a fresh fixture.
     pub fn new(fixture: Arc<Fixture>) -> Self {
-        let shared = Shared { core: Core::new(fixture), pending: BTreeMap::new(), prompts: Vec::new(), shown: BTreeMap::new(), wake: None };
+        let shared = Shared {
+            core: Core::new(fixture),
+            pending: BTreeMap::new(),
+            prompts: Vec::new(),
+            shown: BTreeMap::new(),
+            wake: None,
+        };
         FixtureBackend { shared: Rc::new(RefCell::new(shared)), window: WindowId::FIRST }
     }
 }
@@ -126,9 +132,15 @@ impl Shared {
                 }
                 ServiceEvent::Opened { .. } if joins => to(self, from, ev),
                 // A folder size is the asking window's sheet's alone, as the service sends it.
-                ServiceEvent::FolderSizeProgress { .. } | ServiceEvent::FolderSizeDone { .. } | ServiceEvent::FolderSizeFailed { .. } => to(self, from, ev),
+                ServiceEvent::FolderSizeProgress { .. }
+                | ServiceEvent::FolderSizeDone { .. }
+                | ServiceEvent::FolderSizeFailed { .. } => to(self, from, ev),
                 _ => {
-                    if let ServiceEvent::Status { host, status: ConnStatus::Ready | ConnStatus::Failed(_) | ConnStatus::Disconnected } = &ev {
+                    if let ServiceEvent::Status {
+                        host,
+                        status: ConnStatus::Ready | ConnStatus::Failed(_) | ConnStatus::Disconnected,
+                    } = &ev
+                    {
                         self.shown.remove(host);
                     }
                     if let ServiceEvent::PromptClosed(id) = &ev {
@@ -145,10 +157,15 @@ impl Shared {
             self.shown.retain(|_, w| *w != from);
             let next = focused.filter(|w| *w != from).or_else(|| windows.first().copied());
             if let Some(next) = next {
-                let moved: Vec<Prompt> = self.prompts.iter_mut().filter(|(_, at)| *at == from).map(|(p, at)| {
-                    *at = next;
-                    p.clone()
-                }).collect();
+                let moved: Vec<Prompt> = self
+                    .prompts
+                    .iter_mut()
+                    .filter(|(_, at)| *at == from)
+                    .map(|(p, at)| {
+                        *at = next;
+                        p.clone()
+                    })
+                    .collect();
                 for p in moved {
                     to(self, next, ServiceEvent::Prompt(p));
                 }

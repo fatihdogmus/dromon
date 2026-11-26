@@ -85,7 +85,10 @@ async fn two_helpers_at_once_are_both_served() {
     // Both wait at the same time; answer in the opposite order of arrival.
     let first = next_request(&mut requests).await;
     let second = next_request(&mut requests).await;
-    let mut seen = [(first.host.as_str().to_owned(), first.prompt.clone()), (second.host.as_str().to_owned(), second.prompt.clone())];
+    let mut seen = [
+        (first.host.as_str().to_owned(), first.prompt.clone()),
+        (second.host.as_str().to_owned(), second.prompt.clone()),
+    ];
     seen.sort();
     assert_eq!(seen, [("a".to_owned(), "pa".to_owned()), ("b".to_owned(), "pb".to_owned())]);
     for req in [second, first] {

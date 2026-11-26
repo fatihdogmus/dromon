@@ -44,11 +44,19 @@ fn shown(rt: &Runtime<App>, k: &str) -> bool {
 }
 
 fn text_of(rt: &Runtime<App>, k: &str) -> String {
-    rt.elements().into_iter().find(|e| e.key.as_deref() == Some(k) && !e.exiting).and_then(|e| e.text).unwrap_or_else(|| panic!("no text {k:?}"))
+    rt.elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some(k) && !e.exiting)
+        .and_then(|e| e.text)
+        .unwrap_or_else(|| panic!("no text {k:?}"))
 }
 
 fn label_of(rt: &Runtime<App>, k: &str) -> String {
-    rt.elements().into_iter().find(|e| e.key.as_deref() == Some(k) && !e.exiting).and_then(|e| e.label).unwrap_or_default()
+    rt.elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some(k) && !e.exiting)
+        .and_then(|e| e.label)
+        .unwrap_or_default()
 }
 
 fn press(rt: &mut Runtime<App>, key: Key, mods: Mods) {
@@ -76,11 +84,30 @@ fn properties_opens_from_the_rows_menu_and_shows_what_the_listing_knows() {
     click(&mut rt, "ctx-properties");
     assert!(shown(&rt, "properties"), "the sheet opens");
     assert_eq!(label_of(&rt, "properties"), "index.html properties");
-    let fields: Vec<String> = ["sheet-title", "prop-kind-value", "prop-location-value", "prop-size-value", "prop-modified-value", "prop-permissions-value", "prop-owner-value"]
-        .iter()
-        .map(|k| text_of(&rt, k))
-        .collect();
-    assert_eq!(fields, ["index.html", "File", "/var/www/site", "14.8 KB (14,812 bytes)", "Nov 24, 2026 at 18:00", "rw-r--r-- (644)", "—"]);
+    let fields: Vec<String> = [
+        "sheet-title",
+        "prop-kind-value",
+        "prop-location-value",
+        "prop-size-value",
+        "prop-modified-value",
+        "prop-permissions-value",
+        "prop-owner-value",
+    ]
+    .iter()
+    .map(|k| text_of(&rt, k))
+    .collect();
+    assert_eq!(
+        fields,
+        [
+            "index.html",
+            "File",
+            "/var/www/site",
+            "14.8 KB (14,812 bytes)",
+            "Nov 24, 2026 at 18:00",
+            "rw-r--r-- (644)",
+            "—"
+        ]
+    );
     assert!(!shown(&rt, "prop-calculate"), "a file's size is known");
     // Escape closes it; the keyboard opens it again, and Return (Close is the default) closes it.
     press(&mut rt, Key::Escape, Mods::default());

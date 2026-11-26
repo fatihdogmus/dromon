@@ -37,7 +37,10 @@ impl Section {
 
 /// Whether a connection belongs in the Connected section.
 pub fn is_live(status: &ConnStatus) -> bool {
-    matches!(status, ConnStatus::Connecting | ConnStatus::Ready | ConnStatus::Reconnecting { .. } | ConnStatus::NeedsInput)
+    matches!(
+        status,
+        ConnStatus::Connecting | ConnStatus::Ready | ConnStatus::Reconnecting { .. } | ConnStatus::NeedsInput
+    )
 }
 
 /// Every host the app knows, in the order discovery gave them.
@@ -97,7 +100,11 @@ mod tests {
     #[test]
     fn live_hosts_move_to_connected() {
         let dir = HostDirectory {
-            hosts: vec![host("prod", HostSource::SshConfig), host("pi", HostSource::SshConfig), host("box", HostSource::Saved)],
+            hosts: vec![
+                host("prod", HostSource::SshConfig),
+                host("pi", HostSource::SshConfig),
+                host("box", HostSource::Saved),
+            ],
         };
         let mut conns = BTreeMap::new();
         let titles = |conns: &BTreeMap<HostId, ConnView>| -> Vec<(Section, Vec<String>)> {

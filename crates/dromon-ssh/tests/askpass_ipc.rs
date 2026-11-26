@@ -27,7 +27,12 @@ fn fixture() -> Fixture {
 }
 
 /// Runs the helper logic on a blocking thread; returns (exit code, stdout bytes).
-fn helper(endpoint: String, token: String, prompt: &str, hint: Option<&str>) -> tokio::task::JoinHandle<(i32, Vec<u8>)> {
+fn helper(
+    endpoint: String,
+    token: String,
+    prompt: &str,
+    hint: Option<&str>,
+) -> tokio::task::JoinHandle<(i32, Vec<u8>)> {
     let prompt = prompt.to_owned();
     let hint = hint.map(str::to_owned);
     tokio::task::spawn_blocking(move || {
@@ -65,7 +70,8 @@ async fn answer_round_trip() {
 async fn hint_and_multiline_prompt_arrive_intact() {
     let mut f = fixture();
     let env = f.server.register(HostId("prod".into()), Path::new(EXE)).unwrap();
-    let prompt = "The authenticity of host 'prod (10.0.0.4)' can't be established.\nAre you sure (yes/no/[fingerprint])? ";
+    let prompt =
+        "The authenticity of host 'prod (10.0.0.4)' can't be established.\nAre you sure (yes/no/[fingerprint])? ";
     let task = helper(env.endpoint.clone(), env.token.clone(), prompt, Some("confirm"));
     let req = next_request(&mut f.requests).await;
     assert_eq!(req.prompt, prompt);

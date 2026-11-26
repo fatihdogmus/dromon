@@ -94,7 +94,14 @@ impl App {
                     // In the folder on screen: a full folder may have no empty area to right-click.
                     item("new-folder", "New folder", live, Some("mod+shift+n")),
                     item("rename", "Rename", live && one, Some("f2")),
-                    MenuEntry::Item(MenuItem { id: "delete", title: "Delete", enabled: live, checked: None, danger: true, shortcut: Some(delete_chord()) }),
+                    MenuEntry::Item(MenuItem {
+                        id: "delete",
+                        title: "Delete",
+                        enabled: live,
+                        checked: None,
+                        danger: true,
+                        shortcut: Some(delete_chord()),
+                    }),
                     MenuEntry::Separator,
                     // Shows what the listing knows, so it works while reconnecting too.
                     item("properties", "Properties", self.properties_row().is_some(), Some(properties_chord())),

@@ -48,8 +48,8 @@ use dromon_core::{Entry, EntryKind, Error, HostSpec, RemotePath};
 use dromon_transfer::JobView;
 
 pub use generate::Generator;
-pub use windows::FixtureBackend;
 pub use parse::parse;
+pub use windows::FixtureBackend;
 
 /// Ids of the fixture's own job snapshots start above this, clear of the ids a session's jobs get
 /// (which count from 1).
@@ -111,15 +111,31 @@ pub enum Change {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Step {
     /// An unknown host key: trusting it once remembers it (as `known_hosts` would).
-    HostKey { key_type: String, fingerprint: String },
-    Password { prompt: Option<String>, accept: String },
-    Passphrase { key_path: String, accept: String },
+    HostKey {
+        key_type: String,
+        fingerprint: String,
+    },
+    Password {
+        prompt: Option<String>,
+        accept: String,
+    },
+    Passphrase {
+        key_path: String,
+        accept: String,
+    },
     /// Keyboard-interactive and everything else (a verification code): never remembered.
-    Code { prompt: Option<String>, accept: String },
+    Code {
+        prompt: Option<String>,
+        accept: String,
+    },
     /// A yes/no question; anything but yes refuses.
-    Confirm { text: String },
+    Confirm {
+        text: String,
+    },
     /// A toast with nothing to answer, up until the connection settles.
-    Notice { text: String },
+    Notice {
+        text: String,
+    },
 }
 
 /// What a folder path holds.
@@ -230,7 +246,15 @@ impl Server {
 }
 
 fn implied_dir(name: String) -> Entry {
-    Entry { name, kind: EntryKind::Dir, size: default_size(EntryKind::Dir), mtime: None, mode: default_mode(EntryKind::Dir), owner: None, group: None }
+    Entry {
+        name,
+        kind: EntryKind::Dir,
+        size: default_size(EntryKind::Dir),
+        mtime: None,
+        mode: default_mode(EntryKind::Dir),
+        owner: None,
+        group: None,
+    }
 }
 
 /// A folder's entries with its generators run, in order.

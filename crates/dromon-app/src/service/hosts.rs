@@ -46,7 +46,14 @@ async fn resolve_with(ssh: &Path, config_file: Option<&Path>, alias: &str) -> Re
         return Err(format!("{alias:?} isn't a host alias ssh can take"));
     }
     let mut cmd = tokio::process::Command::new(ssh);
-    cmd.arg("-F").arg(file).arg("-G").arg(alias).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
+    cmd.arg("-F")
+        .arg(file)
+        .arg("-G")
+        .arg(alias)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
     match tokio::time::timeout(RESOLVE_TIMEOUT, cmd.output()).await {
         Ok(Ok(out)) if out.status.success() => Ok(parse_ssh_g(&String::from_utf8_lossy(&out.stdout))),
         Ok(Ok(out)) => Err(format!("ssh -G {alias} failed ({})", out.status)),

@@ -8,7 +8,10 @@
 //! Keys: `palette`, `palette-input`, `palette-list`, `palette-group-<hosts|folders|actions>`,
 //! rows `pal-host-<id>`, `pal-go`, `pal-folder-<path>`, `pal-<action>`; `palette-empty`.
 
-use rune::{Anim, AutoComplete, Curve, Cx, Easing, El, Key, KeyEvent, ScrollSpec, Span, TextStyle, Transition, Tx, col, el, icon, row, text, text_input};
+use rune::{
+    Anim, AutoComplete, Curve, Cx, Easing, El, Key, KeyEvent, ScrollSpec, Span, TextStyle, Transition, Tx, col, el,
+    icon, row, text, text_input,
+};
 
 use super::widgets::{chord, kbd};
 use super::{Paint, run};
@@ -118,7 +121,17 @@ pub fn layer(s: &App, p: Paint, top: Option<f32>) -> Option<El> {
             .key("palette-layer")
             .pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0))
             .child(top.key("palette-top").w_full().a11y_hidden())
-            .child(col().key("palette-room").w_full().grow(2.0).min_h(0.0).px(space::S6).pb(space::S6).items_center().child(panel)),
+            .child(
+                col()
+                    .key("palette-room")
+                    .w_full()
+                    .grow(2.0)
+                    .min_h(0.0)
+                    .px(space::S6)
+                    .pb(space::S6)
+                    .items_center()
+                    .child(panel),
+            ),
     )
 }
 
@@ -137,7 +150,14 @@ fn empty(s: &App, mode: Mode, p: Paint) -> El {
         Mode::Path if s.ui.palette.query().is_empty() => "Type a path on this host".to_owned(),
         _ => format!("Nothing matches “{}”", s.ui.palette.query()),
     };
-    row().key("palette-empty").role("status").w_full().h(44.0).px(space::S4).center_y().child(text(line).font(type_::BODY).color(p.t.text_3).truncate())
+    row()
+        .key("palette-empty")
+        .role("status")
+        .w_full()
+        .h(44.0)
+        .px(space::S4)
+        .center_y()
+        .child(text(line).font(type_::BODY).color(p.t.text_3).truncate())
 }
 
 /// The rows by group, scrolling past [`LIST_MAX`].
@@ -200,7 +220,14 @@ fn glyph(item: &Item) -> &'static IconPair {
 fn item_row(item: &Item, i: usize, current: bool, total: usize, p: Paint) -> El {
     let t = p.t;
     let spans: Vec<Span> = item.hits.iter().map(|&(a, b)| Span::new(a, b).weight(600.0)).collect();
-    let title = text(item.title.clone()).key("title").font(type_::BODY).color(t.text).spans(spans).truncate().shrink().min_w(0.0);
+    let title = text(item.title.clone())
+        .key("title")
+        .font(type_::BODY)
+        .color(t.text)
+        .spans(spans)
+        .truncate()
+        .shrink()
+        .min_w(0.0);
     let mut r = row()
         .key(item.key.clone())
         .role("option")
@@ -216,10 +243,16 @@ fn item_row(item: &Item, i: usize, current: bool, total: usize, p: Paint) -> El 
         .hover(t.hover)
         .press(t.press)
         .motion(motion::SNAP)
-        .child(icon(glyph(item).at(p.scale), size::ICON).color(if item.group == Group::Folders { t.folder } else { t.text_2 }))
+        .child(icon(glyph(item).at(p.scale), size::ICON).color(if item.group == Group::Folders {
+            t.folder
+        } else {
+            t.text_2
+        }))
         .child(title);
     if let Some(d) = &item.detail {
-        r = r.description(d.clone()).child(text(d.clone()).key("detail").font(type_::META).color(t.text_3).truncate().shrink().min_w(0.0));
+        r = r
+            .description(d.clone())
+            .child(text(d.clone()).key("detail").font(type_::META).color(t.text_3).truncate().shrink().min_w(0.0));
     }
     r = r.child(el().grow(1.0));
     if let Some(spec) = item.shortcut {

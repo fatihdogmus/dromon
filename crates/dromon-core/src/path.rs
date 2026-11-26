@@ -28,11 +28,7 @@ impl RemotePath {
                 p => parts.push(p),
             }
         }
-        if parts.is_empty() {
-            Self::root()
-        } else {
-            RemotePath(format!("/{}", parts.join("/")))
-        }
+        if parts.is_empty() { Self::root() } else { RemotePath(format!("/{}", parts.join("/"))) }
     }
 
     pub fn as_str(&self) -> &str {
@@ -60,11 +56,7 @@ impl RemotePath {
     /// Appends `name`, which may itself contain slashes or `..`; the result is normalized.
     /// An absolute `name` replaces the path, as in `Path::join`.
     pub fn join(&self, name: &str) -> RemotePath {
-        if name.starts_with('/') {
-            RemotePath::new(name)
-        } else {
-            RemotePath::new(&format!("{}/{}", self.0, name))
-        }
+        if name.starts_with('/') { RemotePath::new(name) } else { RemotePath::new(&format!("{}/{}", self.0, name)) }
     }
 
     /// The components from the root down, without the root itself.

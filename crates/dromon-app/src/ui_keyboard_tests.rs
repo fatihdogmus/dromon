@@ -7,9 +7,11 @@ use rune::{ElementInfo, Key, KeyEvent, KeyPlatform, Mods, Runtime};
 
 use crate::scenes;
 use crate::state::{Action, App, FileAction, MenuKind};
-use crate::theme::{self, Access, Appearance};
 use crate::state::{Page, SettingsSection};
-use crate::ui_a11y_tests::{ITEMS, Node, interactive, needs_sign_in, scene, scene_runtime, settings_browsing, settle, tree};
+use crate::theme::{self, Access, Appearance};
+use crate::ui_a11y_tests::{
+    ITEMS, Node, interactive, needs_sign_in, scene, scene_runtime, settings_browsing, settle, tree,
+};
 
 const SHIFT: Mods = Mods { shift: true, cmd: false, alt: false, ctrl: false, logo: false };
 
@@ -97,7 +99,8 @@ fn unreached(nodes: &[Node], visited: &[String]) -> Vec<String> {
         }
         false
     };
-    let visited_ix: Vec<usize> = nodes.iter().enumerate().filter(|(_, n)| visited.contains(&n.key)).map(|(i, _)| i).collect();
+    let visited_ix: Vec<usize> =
+        nodes.iter().enumerate().filter(|(_, n)| visited.contains(&n.key)).map(|(i, _)| i).collect();
     nodes
         .iter()
         .enumerate()
@@ -107,8 +110,14 @@ fn unreached(nodes: &[Node], visited: &[String]) -> Vec<String> {
             let mut p = nodes[*i].parent;
             while let Some(j) = p {
                 if COMPOSITES.contains(&nodes[j].role.as_str()) {
-                    let controlled = nodes.iter().any(|f| visited.contains(&f.key) && f.raw["controls"].as_array().is_some_and(|c| c.iter().any(|x| x.as_str() == Some(nodes[j].key.as_str()))));
-                    return !(ITEMS.contains(&n.role.as_str()) && (visited_ix.iter().any(|&v| inside(v, j)) || controlled));
+                    let controlled = nodes.iter().any(|f| {
+                        visited.contains(&f.key)
+                            && f.raw["controls"]
+                                .as_array()
+                                .is_some_and(|c| c.iter().any(|x| x.as_str() == Some(nodes[j].key.as_str())))
+                    });
+                    return !(ITEMS.contains(&n.role.as_str())
+                        && (visited_ix.iter().any(|&v| inside(v, j)) || controlled));
                 }
                 p = nodes[j].parent;
             }
@@ -136,7 +145,8 @@ fn walk(scene: &str, start: fn(&mut App), trap: Option<&str>) -> Vec<String> {
     let missed = unreached(&nodes, &forward);
     assert!(missed.is_empty(), "{scene}: Tab never reaches {missed:?} (visited {forward:?})");
     if let Some(modal) = trap {
-        let root = rt.elements().into_iter().find(|e| e.key.as_deref() == Some(modal) && !e.exiting).expect("the modal").path;
+        let root =
+            rt.elements().into_iter().find(|e| e.key.as_deref() == Some(modal) && !e.exiting).expect("the modal").path;
         for k in &forward {
             let e = rt.elements().into_iter().find(|e| e.key.as_deref() == Some(k.as_str())).unwrap();
             assert!(e.path.starts_with(&root), "{scene}: Tab left {modal} for {k}");
@@ -173,7 +183,10 @@ fn tab_walks_the_window_in_reading_order() {
     assert_eq!(order[(at + 1) % order.len()], "tb-filter-clear", "{order:?}");
     assert_eq!(order[(at + order.len() - 1) % order.len()], "crumb-2", "{order:?}");
     let order = walk("welcome", scenes::welcome, None);
-    assert_eq!(order, ["host-prod", "sb-quick-connect", "sidebar-settings", "tb-transfers", "tb-palette", "welcome-quick-connect"]);
+    assert_eq!(
+        order,
+        ["host-prod", "sb-quick-connect", "sidebar-settings", "tb-transfers", "tb-palette", "welcome-quick-connect"]
+    );
 }
 
 #[test]
@@ -197,7 +210,19 @@ fn every_main_state_is_reachable_by_tab() {
     // A reconnect that needs the user: the banner's Sign in is a Tab stop, after the toolbar,
     // before the status bar (the dimmed list between them is inert while it reconnects).
     let order = walk("reconnect-sign-in", needs_sign_in, None);
-    assert_eq!(order, ["host-prod", "sb-quick-connect", "sidebar-settings", "tb-filter", "tb-transfers", "tb-palette", "banner-sign-in", "status-conn"]);
+    assert_eq!(
+        order,
+        [
+            "host-prod",
+            "sb-quick-connect",
+            "sidebar-settings",
+            "tb-filter",
+            "tb-transfers",
+            "tb-palette",
+            "banner-sign-in",
+            "status-conn"
+        ]
+    );
     let plain = walk("reconnecting", scenes::reconnecting, None);
     assert!(!plain.iter().any(|k| k == "banner-sign-in"), "a plain reconnect has no Sign in: {plain:?}");
     // A failed delete's toast can be dismissed from the keyboard.
@@ -253,7 +278,10 @@ fn the_settings_page_walks_by_tab_too() {
     let order = walk("settings-light", scene("settings-light"), None);
     assert_eq!(order[order.len() - 3..], ["settings-tab-appearance", "theme-light", "density-compact"]);
     let order = walk("settings-transfers", scene("settings-transfers"), None);
-    assert_eq!(order[order.len() - 4..], ["settings-tab-transfers", "folder-choose", "transfers-fewer", "transfers-more"]);
+    assert_eq!(
+        order[order.len() - 4..],
+        ["settings-tab-transfers", "folder-choose", "transfers-fewer", "transfers-more"]
+    );
     let order = walk("settings-browsing", settings_browsing, None);
     assert_eq!(order[4..], ["settings-tab-browsing", "hidden-toggle"]);
 }
@@ -385,7 +413,12 @@ fn round_trip(start: fn(&mut App), trigger: &str, open: Key, modal: &str) {
     tab_to(&mut rt, trigger);
     press(&mut rt, open, Mods::default());
     settle(&mut rt);
-    let root = rt.elements().into_iter().find(|e| e.key.as_deref() == Some(modal) && !e.exiting).unwrap_or_else(|| panic!("{modal} opens")).path;
+    let root = rt
+        .elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some(modal) && !e.exiting)
+        .unwrap_or_else(|| panic!("{modal} opens"))
+        .path;
     let inside = focused(&rt).unwrap_or_else(|| panic!("{modal}: nothing focused"));
     assert!(inside.path.starts_with(&root), "{modal}: focus went inside ({:?})", inside.key);
     press(&mut rt, Key::Escape, Mods::default());
@@ -406,7 +439,11 @@ fn escape_closes_and_focus_returns_to_the_opener() {
     let delete = if KeyPlatform::current() == KeyPlatform::Mac { Key::Backspace } else { Key::Delete };
     let mut rt = listing();
     tab_to(&mut rt, "rows");
-    let mods = if KeyPlatform::current() == KeyPlatform::Mac { Mods { cmd: true, logo: true, ..Mods::default() } } else { Mods::default() };
+    let mods = if KeyPlatform::current() == KeyPlatform::Mac {
+        Mods { cmd: true, logo: true, ..Mods::default() }
+    } else {
+        Mods::default()
+    };
     press(&mut rt, delete, mods);
     assert!(rt.state.ui.sheets.is_open(), "the delete sheet");
     press(&mut rt, Key::Escape, Mods::default());
@@ -446,7 +483,12 @@ fn clicks_leave_the_keyboard_where_it_was() {
 #[test]
 fn the_drawn_menu_moves_by_arrows_and_return_picks() {
     let mut rt = listing();
-    rt.update(|s, _| drop(s.act(Action::File(FileAction::OpenMenu { kind: MenuKind::Row("index.html".into()), at: Some((560.0, 330.0)) }))));
+    rt.update(|s, _| {
+        drop(s.act(Action::File(FileAction::OpenMenu {
+            kind: MenuKind::Row("index.html".into()),
+            at: Some((560.0, 330.0)),
+        })))
+    });
     settle(&mut rt);
     press(&mut rt, Key::Down, Mods::default());
     let first = focused_key(&rt);

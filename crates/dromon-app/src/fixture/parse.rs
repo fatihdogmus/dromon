@@ -52,7 +52,8 @@ impl At {
     }
 
     fn item(&self, noun: &str, i: usize) -> At {
-        let text = if self.text.is_empty() { format!("{noun} {}", i + 1) } else { format!("{}: {noun} {}", self.text, i + 1) };
+        let text =
+            if self.text.is_empty() { format!("{noun} {}", i + 1) } else { format!("{}: {noun} {}", self.text, i + 1) };
         At { text, in_item: true }
     }
 
@@ -183,7 +184,8 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
 
 /// Reads a fixture document (see `docs/fixtures.md`).
 pub fn parse(src: &str) -> Result<Fixture, ParseError> {
-    let doc: Value = serde_json::from_str(src).map_err(|e| ParseError { path: String::new(), message: format!("not valid JSON: {e}") })?;
+    let doc: Value = serde_json::from_str(src)
+        .map_err(|e| ParseError { path: String::new(), message: format!("not valid JSON: {e}") })?;
     let root = At::default();
     let Some(top) = doc.as_object() else {
         return root.err(format!("a fixture is a JSON object, found {}", what(&doc)));
@@ -231,8 +233,8 @@ fn transfers(v: &Value, at: &At, hosts: &[HostSpec]) -> R<Vec<JobView>> {
         known(
             m,
             &[
-                "kind", "host", "title", "state", "found", "error", "done", "total", "files", "speed", "eta", "waiting", "conflict",
-                "reveal", "errors", "skipped",
+                "kind", "host", "title", "state", "found", "error", "done", "total", "files", "speed", "eta",
+                "waiting", "conflict", "reveal", "errors", "skipped",
             ],
             &at,
         )?;
@@ -246,39 +248,7 @@ fn transfers(v: &Value, at: &At, hosts: &[HostSpec]) -> R<Vec<JobView>> {
             return at.key("host").err(format!("{host:?} is not a host (add it to hosts)"));
         }
         let title = text(required(m, "title", &at)?, &at.key("title"))?;
-        let only = |k: &str, state: &str| -> R<()> {
-            match m.get(k) {
-                Some(_) => at.key(k).err(format!("only a {state} job has {k}")),
-                None => Ok(()),
-            }
-        };
-        let state = match string(required(m, "state", &at)?, &at.key("state"))?.as_str() {
-            "preparing" => {
-                only("error", "failed")?;
-                let found = optional(m, "found").map(|v| uint(v, &at.key("found"))).transpose()?.unwrap_or(0);
-                TaskState::Preparing { files_found: found }
-            }
-            "failed" => {
-                only("found", "preparing")?;
-                TaskState::Failed { error: text(required(m, "error", &at)?, &at.key("error"))? }
-            }
-            other => {
-                only("found", "preparing")?;
-                only("error", "failed")?;
-                match other {
-                    "queued" => TaskState::Queued,
-                    "running" => TaskState::Running,
-                    "paused" => TaskState::Paused,
-                    "done" => TaskState::Done,
-                    "cancelled" => TaskState::Cancelled,
-                    _ => {
-                        return at.key("state").err(format!(
-                            "unknown state {other:?} (expected queued, preparing, running, paused, done, failed or cancelled)"
-                        ));
-                    }
-                }
-            }
-        };
+        let state = job_state(m, &at)?;
         let bytes = |k: &str| optional(m, k).map(|v| uint(v, &at.key(k))).transpose().map(Option::unwrap_or_default);
         let (done, total) = (bytes("done")?, bytes("total")?);
         if total > 0 && done > total {
@@ -286,17 +256,7 @@ fn transfers(v: &Value, at: &At, hosts: &[HostSpec]) -> R<Vec<JobView>> {
         }
         let (files_done, files_total) = match optional(m, "files") {
             None => (0, 0),
-            Some(v) => {
-                let at = at.key("files");
-                let r = list(v, &at)?;
-                let (Some(d), Some(t), 2) = (r.first().and_then(Value::as_u64), r.get(1).and_then(Value::as_u64), r.len()) else {
-                    return at.err("files is [done, total], whole numbers");
-                };
-                if d > t {
-                    return at.err(format!("[{d}, {t}]: done is above total"));
-                }
-                (d, t)
-            }
+            Some(v) => file_counts(v, &at.key("files"))?,
         };
         let seconds = |k: &str| -> R<Option<f64>> {
             match optional(m, k) {
@@ -311,7 +271,9 @@ fn transfers(v: &Value, at: &At, hosts: &[HostSpec]) -> R<Vec<JobView>> {
         let eta = seconds("eta")?.map(Duration::from_secs_f64);
         let waiting = match optional(m, "waiting") {
             None => false,
-            Some(v) => v.as_bool().map_or_else(|| at.key("waiting").err(format!("expected true or false, found {}", what(v))), Ok)?,
+            Some(v) => v
+                .as_bool()
+                .map_or_else(|| at.key("waiting").err(format!("expected true or false, found {}", what(v))), Ok)?,
         };
         let conflict = optional(m, "conflict").map(|v| conflict(v, &at.key("conflict"))).transpose()?;
         let host = HostId(host);
@@ -358,6 +320,56 @@ fn transfers(v: &Value, at: &At, hosts: &[HostSpec]) -> R<Vec<JobView>> {
     Ok(out)
 }
 
+/// A job's `state`, with the fields only some states have (`found`, `error`).
+fn job_state(m: &Map<String, Value>, at: &At) -> R<TaskState> {
+    let only = |k: &str, state: &str| -> R<()> {
+        match m.get(k) {
+            Some(_) => at.key(k).err(format!("only a {state} job has {k}")),
+            None => Ok(()),
+        }
+    };
+    let state = match string(required(m, "state", at)?, &at.key("state"))?.as_str() {
+        "preparing" => {
+            only("error", "failed")?;
+            let found = optional(m, "found").map(|v| uint(v, &at.key("found"))).transpose()?.unwrap_or(0);
+            TaskState::Preparing { files_found: found }
+        }
+        "failed" => {
+            only("found", "preparing")?;
+            TaskState::Failed { error: text(required(m, "error", at)?, &at.key("error"))? }
+        }
+        other => {
+            only("found", "preparing")?;
+            only("error", "failed")?;
+            match other {
+                "queued" => TaskState::Queued,
+                "running" => TaskState::Running,
+                "paused" => TaskState::Paused,
+                "done" => TaskState::Done,
+                "cancelled" => TaskState::Cancelled,
+                _ => {
+                    return at.key("state").err(format!(
+                        "unknown state {other:?} (expected queued, preparing, running, paused, done, failed or cancelled)"
+                    ));
+                }
+            }
+        }
+    };
+    Ok(state)
+}
+
+/// A job's `files`: `[done, total]`.
+fn file_counts(v: &Value, at: &At) -> R<(u64, u64)> {
+    let r = list(v, at)?;
+    let (Some(d), Some(t), 2) = (r.first().and_then(Value::as_u64), r.get(1).and_then(Value::as_u64), r.len()) else {
+        return at.err("files is [done, total], whole numbers");
+    };
+    if d > t {
+        return at.err(format!("[{d}, {t}]: done is above total"));
+    }
+    Ok((d, t))
+}
+
 fn conflict(v: &Value, at: &At) -> R<ConflictView> {
     let m = object(v, at)?;
     known(m, &["name", "folder", "dir", "more", "existing", "incoming"], at)?;
@@ -365,7 +377,9 @@ fn conflict(v: &Value, at: &At) -> R<ConflictView> {
     let folder = absolute(&text(required(m, "folder", at)?, &at.key("folder"))?, &at.key("folder"))?;
     let existing_is_dir = match optional(m, "dir") {
         None => false,
-        Some(v) => v.as_bool().map_or_else(|| at.key("dir").err(format!("expected true or false, found {}", what(v))), Ok)?,
+        Some(v) => {
+            v.as_bool().map_or_else(|| at.key("dir").err(format!("expected true or false, found {}", what(v))), Ok)?
+        }
     };
     let more = optional(m, "more").map(|v| uint(v, &at.key("more"))).transpose()?.unwrap_or(0) as usize;
     let side = |k: &str| -> R<Side> {
@@ -398,7 +412,11 @@ fn hosts(v: &Value, at: &At) -> R<Vec<HostSpec>> {
             "ssh-config" => HostSource::SshConfig,
             "saved" => HostSource::Saved,
             "recent" => HostSource::Recent,
-            other => return at.key("source").err(format!("unknown source {other:?} (expected ssh-config, saved or recent)")),
+            other => {
+                return at
+                    .key("source")
+                    .err(format!("unknown source {other:?} (expected ssh-config, saved or recent)"));
+            }
         };
         let opt_text = |k: &str| optional(m, k).map(|v| text(v, &at.key(k))).transpose();
         let port = match optional(m, "port") {
@@ -453,7 +471,9 @@ fn server(v: &Value, at: &At) -> R<Server> {
             let at = at.item("step", i);
             // A step is one change, or a list of changes made together.
             let step = match v.as_array() {
-                Some(all) => all.iter().enumerate().map(|(j, v)| change(v, &at.item("change", j))).collect::<R<Vec<_>>>()?,
+                Some(all) => {
+                    all.iter().enumerate().map(|(j, v)| change(v, &at.item("change", j))).collect::<R<Vec<_>>>()?
+                }
                 None => vec![change(v, &at)?],
             };
             changes.push(step);
@@ -548,7 +568,11 @@ fn node(v: &Value, at: &At) -> R<Node> {
             "permission-denied" => TreeError::PermissionDenied,
             "not-found" => TreeError::NotFound,
             "connection-lost" => TreeError::ConnectionLost,
-            other => return at.err(format!("unknown error {other:?} (expected permission-denied, not-found or connection-lost)")),
+            other => {
+                return at.err(format!(
+                    "unknown error {other:?} (expected permission-denied, not-found or connection-lost)"
+                ));
+            }
         };
         return Ok(Node::Error(e));
     }
@@ -616,7 +640,10 @@ fn item(v: &Value, at: &At) -> R<Item> {
             "file" => LinkTarget::File,
             "dir" => LinkTarget::Dir,
             "other" => LinkTarget::Other,
-            other => return at.err(format!("unknown target {other:?} (expected file, dir, other, or null for a dangling link)")),
+            other => {
+                return at
+                    .err(format!("unknown target {other:?} (expected file, dir, other, or null for a dangling link)"));
+            }
         };
         kind = EntryKind::Symlink { target: Some(target) };
     }
@@ -635,7 +662,8 @@ fn item(v: &Value, at: &At) -> R<Item> {
 fn generator(v: &Value, at: &At) -> R<Generator> {
     let m = object(v, at)?;
     known(m, &["pattern", "count", "start", "kind", "size", "mtime", "mode", "seed"], at)?;
-    let pattern = Pattern::parse(&text(required(m, "pattern", at)?, &at.key("pattern"))?).or_else(|e| at.key("pattern").err(e))?;
+    let pattern = Pattern::parse(&text(required(m, "pattern", at)?, &at.key("pattern"))?)
+        .or_else(|e| at.key("pattern").err(e))?;
     let count = uint(required(m, "count", at)?, &at.key("count"))?;
     if count > MAX_COUNT {
         return at.key("count").err(format!("{count} is more than {MAX_COUNT}"));
@@ -649,7 +677,9 @@ fn generator(v: &Value, at: &At) -> R<Generator> {
         None => Size::Fixed(default_size(kind)),
         Some(Value::Array(r)) => {
             let at = at.key("size");
-            let (Some(min), Some(max), 2) = (r.first().and_then(Value::as_u64), r.get(1).and_then(Value::as_u64), r.len()) else {
+            let (Some(min), Some(max), 2) =
+                (r.first().and_then(Value::as_u64), r.get(1).and_then(Value::as_u64), r.len())
+            else {
                 return at.err("a range is [min, max], whole numbers");
             };
             if min > max {

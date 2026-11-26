@@ -59,7 +59,15 @@ fn a_silent_backend_leaves_the_connection_connecting_until_events_arrive() {
     // The service thread's answers, applied by hand.
     s.apply(ServiceEvent::Opened { host: prod(), start: RemotePath::new("/srv") });
     assert_eq!(s.conn().unwrap().status, ConnStatus::Ready);
-    let entries = vec![Entry { name: "media".into(), kind: EntryKind::Dir, size: 0, mtime: None, mode: None, owner: None, group: None }];
+    let entries = vec![Entry {
+        name: "media".into(),
+        kind: EntryKind::Dir,
+        size: 0,
+        mtime: None,
+        mode: None,
+        owner: None,
+        group: None,
+    }];
     s.apply(ServiceEvent::Listing { host: prod(), path: RemotePath::new("/srv"), entries });
     assert_eq!(names(&s), ["media"]);
 }
@@ -217,8 +225,13 @@ fn discovered_hosts_replace_the_ssh_config_section_only() {
     let mut spec = dromon_core::HostSpec::from_config_alias("lab");
     spec.hostname = Some("10.1.1.1".into());
     s.apply(ServiceEvent::Hosts(vec![spec]));
-    let config: Vec<&str> =
-        s.hosts.hosts.iter().filter(|h| h.source == dromon_core::HostSource::SshConfig).map(|h| h.alias.as_str()).collect();
+    let config: Vec<&str> = s
+        .hosts
+        .hosts
+        .iter()
+        .filter(|h| h.source == dromon_core::HostSource::SshConfig)
+        .map(|h| h.alias.as_str())
+        .collect();
     assert_eq!(config, ["lab"]);
     assert!(s.hosts.get(&HostId("box".into())).is_some(), "saved hosts stay");
     assert!(s.hosts.get(&prod()).is_none());
@@ -281,7 +294,15 @@ fn every_scene_builds() {
         scene(&mut s);
         // Quick connect, the saved hosts' and the first Settings page's scenes are over the
         // welcome state.
-        let welcome = ["welcome", "quick-connect", "quick-connect-more", "quick-connect-error", "add-to-config", "host-menu", "settings"];
+        let welcome = [
+            "welcome",
+            "quick-connect",
+            "quick-connect-more",
+            "quick-connect-error",
+            "add-to-config",
+            "host-menu",
+            "settings",
+        ];
         if !welcome.contains(name) {
             assert!(s.conn().is_some(), "{name}");
         }
@@ -289,7 +310,13 @@ fn every_scene_builds() {
 }
 
 fn prompt_of(id: u64, host: &str) -> dromon_core::Prompt {
-    dromon_core::Prompt { id: dromon_core::PromptId(id), host: HostId(host.into()), kind: dromon_core::PromptKind::Password, text: "pw: ".into(), error: None }
+    dromon_core::Prompt {
+        id: dromon_core::PromptId(id),
+        host: HostId(host.into()),
+        kind: dromon_core::PromptKind::Password,
+        text: "pw: ".into(),
+        error: None,
+    }
 }
 
 fn open_prompt(s: &App) -> Option<u64> {
@@ -308,7 +335,11 @@ fn sign_in_brings_a_queued_prompt_forward() {
     assert_eq!(open_prompt(&s), Some(1));
     s.act(Action::SignIn(prod()));
     assert_eq!(open_prompt(&s), Some(2), "prod's prompt is the open sheet");
-    assert_eq!(s.ui.sheets.queued().map(|p| p.id.0).collect::<Vec<_>>(), [1], "the other host's goes back to the front of the queue");
+    assert_eq!(
+        s.ui.sheets.queued().map(|p| p.id.0).collect::<Vec<_>>(),
+        [1],
+        "the other host's goes back to the front of the queue"
+    );
     assert!(s.ui.sheets.edit().is_some_and(|e| e.focused), "with its field focused");
     // Again: it's open already, nothing moves, nothing is asked of the service.
     s.act(Action::SignIn(prod()));

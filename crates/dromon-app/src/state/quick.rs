@@ -17,8 +17,14 @@ use rune::TextEdit;
 mod tests;
 
 /// Every field, in the order they show (and errors are reported).
-pub const FIELDS: [QuickField; 6] =
-    [QuickField::Host, QuickField::User, QuickField::Port, QuickField::Alias, QuickField::IdentityFile, QuickField::ProxyJump];
+pub const FIELDS: [QuickField; 6] = [
+    QuickField::Host,
+    QuickField::User,
+    QuickField::Port,
+    QuickField::Alias,
+    QuickField::IdentityFile,
+    QuickField::ProxyJump,
+];
 
 /// The fields under More.
 pub fn under_more(f: QuickField) -> bool {

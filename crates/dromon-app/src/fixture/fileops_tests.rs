@@ -108,7 +108,11 @@ fn a_new_folder_lists_in_its_parent_and_is_empty() {
     let mut b = connected();
     let evs = op(&mut b, 1, FileOp::Mkdir { path: p("new") });
     assert_eq!(evs[0], done(1));
-    assert_eq!(listed(&evs, &p("")), Some(names(&["flaky", "keep", "locked", "many", "new", "tree", "x.txt"])), "the folder on screen again");
+    assert_eq!(
+        listed(&evs, &p("")),
+        Some(names(&["flaky", "keep", "locked", "many", "new", "tree", "x.txt"])),
+        "the folder on screen again"
+    );
     let entry = b
         .send(Command::List { host: prod(), path: p("") })
         .into_iter()
@@ -124,7 +128,10 @@ fn a_new_folder_lists_in_its_parent_and_is_empty() {
     assert_eq!(evs[0], failed(2, Error::AlreadyExists(p("x.txt"))));
     assert!(listed(&evs, &p("")).is_some());
     assert_eq!(op(&mut b, 3, FileOp::Mkdir { path: p("nope/new") })[0], failed(3, Error::NotFound(p("nope/new"))));
-    assert_eq!(op(&mut b, 4, FileOp::Mkdir { path: p("locked/new") })[0], failed(4, Error::PermissionDenied(p("locked/new"))));
+    assert_eq!(
+        op(&mut b, 4, FileOp::Mkdir { path: p("locked/new") })[0],
+        failed(4, Error::PermissionDenied(p("locked/new")))
+    );
     // Inside the new folder (not on screen: nothing listed).
     assert_eq!(op(&mut b, 5, FileOp::Mkdir { path: p("new/inner") }), [done(5)]);
     assert_eq!(ls(&mut b, &p("new")), Ok(names(&["inner"])));
@@ -141,8 +148,14 @@ fn a_rename_moves_the_entry_and_a_folder_takes_its_contents_along() {
     // Onto a name that's taken, from a name that isn't there, onto itself.
     let evs = op(&mut b, 2, FileOp::Rename { from: p("y.txt"), to: p("tree") });
     assert_eq!(evs[0], failed(2, Error::AlreadyExists(p("tree"))));
-    assert_eq!(op(&mut b, 3, FileOp::Rename { from: p("x.txt"), to: p("z.txt") })[0], failed(3, Error::NotFound(p("x.txt"))));
-    assert_eq!(op(&mut b, 4, FileOp::Rename { from: p("tree"), to: p("tree") })[0], failed(4, Error::AlreadyExists(p("tree"))));
+    assert_eq!(
+        op(&mut b, 3, FileOp::Rename { from: p("x.txt"), to: p("z.txt") })[0],
+        failed(3, Error::NotFound(p("x.txt")))
+    );
+    assert_eq!(
+        op(&mut b, 4, FileOp::Rename { from: p("tree"), to: p("tree") })[0],
+        failed(4, Error::AlreadyExists(p("tree")))
+    );
 
     // A folder: everything inside it moves; the old path is gone with all below it.
     assert_eq!(op(&mut b, 5, FileOp::Rename { from: p("tree"), to: p("moved") })[0], done(5));
@@ -171,7 +184,10 @@ fn a_delete_counts_then_removes_everything_below_with_one_progress_event() {
     let mut b = connected();
     // tree, a.txt, sub, to-keep (a link: removed itself), b.txt, deeper; and x.txt.
     let evs = op(&mut b, 1, FileOp::Delete { paths: vec![p("tree"), p("x.txt"), p("tree/sub")] });
-    assert_eq!(evs[..2], [ServiceEvent::FileOpProgress { id: OpId(1), host: prod(), done: 7, total: Some(7) }, done(1)]);
+    assert_eq!(
+        evs[..2],
+        [ServiceEvent::FileOpProgress { id: OpId(1), host: prod(), done: 7, total: Some(7) }, done(1)]
+    );
     assert_eq!(listed(&evs, &p("")), Some(names(&["flaky", "keep", "locked", "many"])));
     assert_eq!(ls(&mut b, &p("tree")), Err(Error::NotFound(p("tree"))));
     assert_eq!(ls(&mut b, &p("tree/sub/deeper")), Err(Error::NotFound(p("tree/sub/deeper"))));
@@ -184,9 +200,15 @@ fn a_delete_counts_then_removes_everything_below_with_one_progress_event() {
     // Missing, unreadable: fails, and nothing goes (it counts first).
     let evs = op(&mut b, 3, FileOp::Delete { paths: vec![p("keep"), p("gone")] });
     assert_eq!(evs[0], failed(3, Error::NotFound(p("gone"))));
-    assert_eq!(op(&mut b, 4, FileOp::Delete { paths: vec![p("keep"), p("locked")] })[0], failed(4, Error::PermissionDenied(p("locked"))));
+    assert_eq!(
+        op(&mut b, 4, FileOp::Delete { paths: vec![p("keep"), p("locked")] })[0],
+        failed(4, Error::PermissionDenied(p("locked")))
+    );
     assert_eq!(ls(&mut b, &p("")), Ok(names(&["flaky", "keep", "locked"])));
-    assert_eq!(op(&mut b, 5, FileOp::Delete { paths: vec![RemotePath::root()] })[0], failed(5, Error::PermissionDenied(RemotePath::root())));
+    assert_eq!(
+        op(&mut b, 5, FileOp::Delete { paths: vec![RemotePath::root()] })[0],
+        failed(5, Error::PermissionDenied(RemotePath::root()))
+    );
 
     // A recreated folder is new and empty.
     op(&mut b, 6, FileOp::Mkdir { path: p("tree") });
@@ -207,7 +229,10 @@ fn a_folder_that_loses_the_connection_fails_the_delete_and_drops_it() {
     let mut b = connected();
     let evs = op(&mut b, 1, FileOp::Delete { paths: vec![p("flaky")] });
     assert_eq!(evs[0], failed(1, Error::ConnectionLost));
-    assert!(evs.iter().any(|e| matches!(e, ServiceEvent::Status { status: ConnStatus::Reconnecting { attempt: 1 }, .. })), "{evs:#?}");
+    assert!(
+        evs.iter().any(|e| matches!(e, ServiceEvent::Status { status: ConnStatus::Reconnecting { attempt: 1 }, .. })),
+        "{evs:#?}"
+    );
 }
 
 #[test]
@@ -290,7 +315,11 @@ fn an_upload_named_like_a_deleted_file_runs_without_a_conflict() {
     let j = job(&evs);
     assert_eq!((&j.state, j.conflict.as_ref()), (&TaskState::Done, None), "no question asked");
     assert_eq!(j.reveal, Some(Reveal::Remote(prod(), p("x.txt"))), "under its own name");
-    assert_eq!(listed(&evs, &p("")), Some(names(&["flaky", "keep", "locked", "many", "tree", "x.txt"])), "home on screen lists again");
+    assert_eq!(
+        listed(&evs, &p("")),
+        Some(names(&["flaky", "keep", "locked", "many", "tree", "x.txt"])),
+        "home on screen lists again"
+    );
     // A name still there asks, as before.
     assert!(start(&mut b, upload("x.txt", p(""))).conflict.is_some());
 }
@@ -329,7 +358,11 @@ fn copies_and_moves_into_a_renamed_folder_land_under_its_new_name() {
     // A move into it, onto the copy: Replace merges.
     let mv = JobRequest::Move { host: prod(), items: vec![item(p("tree"), EntryKind::Dir)], into: p("kept") };
     let j = start(&mut b, mv);
-    let j = job(&b.send(Command::Transfer(TransferCommand::Resolve { job: j.id, choice: ConflictChoice::Replace, apply_all: false })));
+    let j = job(&b.send(Command::Transfer(TransferCommand::Resolve {
+        job: j.id,
+        choice: ConflictChoice::Replace,
+        apply_all: false,
+    })));
     assert_eq!(j.state, TaskState::Done);
     assert_eq!(ls(&mut b, &p("kept/tree")), Ok(names(&["a.txt", "sub", "to-keep"])));
     assert_eq!(ls(&mut b, &p("tree")), Err(Error::NotFound(p("tree"))));
@@ -349,7 +382,10 @@ fn a_delete_after_an_upload_removes_the_uploaded_file_too() {
     // The uploaded file itself.
     start(&mut b, upload("notes.txt", p("")));
     let evs = op(&mut b, 3, FileOp::Delete { paths: vec![p("notes.txt")] });
-    assert_eq!(evs[..2], [ServiceEvent::FileOpProgress { id: OpId(3), host: prod(), done: 1, total: Some(1) }, done(3)]);
+    assert_eq!(
+        evs[..2],
+        [ServiceEvent::FileOpProgress { id: OpId(3), host: prod(), done: 1, total: Some(1) }, done(3)]
+    );
     assert!(!ls(&mut b, &p("")).unwrap().contains(&"notes.txt".to_owned()));
     // And a renamed upload is found under its new name.
     start(&mut b, upload("draft.txt", p("")));

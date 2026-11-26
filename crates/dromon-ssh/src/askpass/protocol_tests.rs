@@ -43,7 +43,11 @@ fn reply_wire_format() {
 
 #[test]
 fn reply_round_trips() {
-    for reply in [Reply::Answer(Zeroizing::new("pä\"ss\nword".into())), Reply::Answer(Zeroizing::new(String::new())), Reply::Cancel] {
+    for reply in [
+        Reply::Answer(Zeroizing::new("pä\"ss\nword".into())),
+        Reply::Answer(Zeroizing::new(String::new())),
+        Reply::Cancel,
+    ] {
         let line = encode_reply(&reply).unwrap();
         assert_eq!(decode_reply(&line).unwrap(), reply);
     }
@@ -52,10 +56,7 @@ fn reply_round_trips() {
 #[test]
 fn cancel_wins_and_empty_reply_is_rejected() {
     assert_eq!(decode_reply(br#"{"answer":"x","cancel":true}"#).unwrap(), Reply::Cancel);
-    assert_eq!(
-        decode_reply(br#"{"answer":"x","cancel":false}"#).unwrap(),
-        Reply::Answer(Zeroizing::new("x".into()))
-    );
+    assert_eq!(decode_reply(br#"{"answer":"x","cancel":false}"#).unwrap(), Reply::Answer(Zeroizing::new("x".into())));
     assert!(decode_reply(b"{}").is_err());
 }
 

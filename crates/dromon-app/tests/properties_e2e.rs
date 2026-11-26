@@ -124,7 +124,9 @@ impl Harness {
                 None
             }
             ServiceEvent::FolderSizeDone { id: i, total, .. } if *i == id => Some(Ok(*total)),
-            ServiceEvent::FolderSizeFailed { id: i, total, error, .. } if *i == id => Some(Err((*total, error.clone()))),
+            ServiceEvent::FolderSizeFailed { id: i, total, error, .. } if *i == id => {
+                Some(Err((*total, error.clone())))
+            }
             _ => None,
         });
         (end, progress)
@@ -135,9 +137,26 @@ fn write_ssh_config(fx: &Fixture, dir: &Path) -> PathBuf {
     let key = dir.join("id_ed25519");
     copy_private_key(&fx.key(), &key).unwrap();
     let mut config = String::new();
-    writeln!(config, "Host fx-key\n    HostName {}\n    Port {}\n    User {}", fx.host(), fx.port(), fx.user(Role::Key)).unwrap();
-    writeln!(config, "    IdentityFile {}\n    IdentitiesOnly yes\n    PreferredAuthentications publickey", key.display()).unwrap();
-    writeln!(config, "    UserKnownHostsFile {}\n    GlobalKnownHostsFile {NULL_DEVICE}", dir.join("known_hosts").display()).unwrap();
+    writeln!(
+        config,
+        "Host fx-key\n    HostName {}\n    Port {}\n    User {}",
+        fx.host(),
+        fx.port(),
+        fx.user(Role::Key)
+    )
+    .unwrap();
+    writeln!(
+        config,
+        "    IdentityFile {}\n    IdentitiesOnly yes\n    PreferredAuthentications publickey",
+        key.display()
+    )
+    .unwrap();
+    writeln!(
+        config,
+        "    UserKnownHostsFile {}\n    GlobalKnownHostsFile {NULL_DEVICE}",
+        dir.join("known_hosts").display()
+    )
+    .unwrap();
     writeln!(config, "    StrictHostKeyChecking accept-new\n    UpdateHostKeys no").unwrap();
     let path = dir.join("ssh_config");
     std::fs::write(&path, config).unwrap();

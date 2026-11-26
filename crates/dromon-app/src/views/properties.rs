@@ -15,7 +15,9 @@ use super::sheets::{button, buttons, frame};
 use super::widgets::Keyboard;
 use super::{Paint, run};
 use crate::icons;
-use crate::state::properties::{PropertiesView, SizePhase, calculating_text, counts_text, kind_text, owner_text, permissions_text, unreadable_text};
+use crate::state::properties::{
+    PropertiesView, SizePhase, calculating_text, counts_text, kind_text, owner_text, permissions_text, unreadable_text,
+};
 use crate::state::{Action, App, FileAction};
 use crate::theme::{motion, radius, size, space, type_};
 
@@ -26,13 +28,9 @@ const LABEL_W: f32 = 96.0;
 pub fn sheet(s: &App, v: &PropertiesView, p: Paint) -> El {
     let t = p.t;
     let e = &v.entry;
-    let title = row()
-        .key("prop-heading")
-        .w_full()
-        .gap(space::S2)
-        .center_y()
-        .child(file_icon(p, e, false))
-        .child(text(e.name.clone()).key("sheet-title").font(type_::TITLE).color(t.text).grow(1.0).min_w(0.0).wrap_anywhere());
+    let title = row().key("prop-heading").w_full().gap(space::S2).center_y().child(file_icon(p, e, false)).child(
+        text(e.name.clone()).key("sheet-title").font(type_::TITLE).color(t.text).grow(1.0).min_w(0.0).wrap_anywhere(),
+    );
     let modified = e.mtime.map_or_else(|| "—".to_owned(), |m| crate::fmt::date_time(m, 0));
     let fields = col()
         .key("prop-fields")
@@ -66,7 +64,13 @@ fn field(p: Paint, key: &str, label: &'static str, value: El) -> El {
 }
 
 fn value(p: Paint, key: &str, s: String, mono: bool) -> El {
-    text(s).key(format!("prop-{key}-value")).font(if mono { type_::MONO } else { type_::BODY }).color(p.t.text).w_full().wrap_anywhere().selectable(true)
+    text(s)
+        .key(format!("prop-{key}-value"))
+        .font(if mono { type_::MONO } else { type_::BODY })
+        .color(p.t.text)
+        .w_full()
+        .wrap_anywhere()
+        .selectable(true)
 }
 
 /// A file's size from the listing; a folder's as far as it's measured.
@@ -104,7 +108,15 @@ fn size_value(s: &App, v: &PropertiesView, p: Paint) -> El {
             lines.child(calculate("Recalculate"))
         }
         SizePhase::Failed { error, .. } => lines
-            .child(text(format!("Couldn't calculate: {error}")).key("prop-size-error").role("alert").font(type_::META).color(t.danger).w_full().wrap())
+            .child(
+                text(format!("Couldn't calculate: {error}"))
+                    .key("prop-size-error")
+                    .role("alert")
+                    .font(type_::META)
+                    .color(t.danger)
+                    .w_full()
+                    .wrap(),
+            )
             .child(calculate("Recalculate")),
     }
 }

@@ -1,0 +1,7 @@
+# Thresholds for the complexity lints enabled in Cargo.toml's [workspace.lints.clippy].
+# A function harder to follow than this is split into named steps (Clippy's default is 25).
+cognitive-complexity-threshold = 25
+# A function body longer than this no longer fits on a screen (Clippy's default is 100).
+too-many-lines-threshold = 100
+# Blocks nested deeper than this are flattened with early returns or helpers.
+excessive-nesting-threshold = 6

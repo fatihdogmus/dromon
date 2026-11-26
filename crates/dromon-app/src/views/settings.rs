@@ -86,7 +86,12 @@ fn sections(current: SettingsSection, p: Paint) -> El {
             .press(t.press)
             .motion(motion::SNAP)
             .on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, Action::SettingsSection(section), tx))
-            .child(text(section.title()).font(if on { type_::BODY_STRONG } else { type_::BODY }).color(if on { t.text } else { t.text_2 }).truncate())
+            .child(
+                text(section.title())
+                    .font(if on { type_::BODY_STRONG } else { type_::BODY })
+                    .color(if on { t.text } else { t.text_2 })
+                    .truncate(),
+            )
     });
     col()
         .key("settings-sections")
@@ -135,7 +140,11 @@ fn appearance(v: &SettingsView, p: Paint) -> El {
         "theme",
         "Theme",
         72.0,
-        &[(Appearance::System, "System", "theme-system"), (Appearance::Dark, "Dark", "theme-dark"), (Appearance::Light, "Light", "theme-light")],
+        &[
+            (Appearance::System, "System", "theme-system"),
+            (Appearance::Dark, "Dark", "theme-dark"),
+            (Appearance::Light, "Light", "theme-light"),
+        ],
         s.theme,
         SettingsChange::Theme,
     );
@@ -144,7 +153,10 @@ fn appearance(v: &SettingsView, p: Paint) -> El {
         "density",
         "Density",
         100.0,
-        &[(Density::Comfortable, "Comfortable", "density-comfortable"), (Density::Compact, "Compact", "density-compact")],
+        &[
+            (Density::Comfortable, "Comfortable", "density-comfortable"),
+            (Density::Compact, "Compact", "density-compact"),
+        ],
         s.density,
         SettingsChange::Density,
     );
@@ -168,28 +180,42 @@ fn transfers(v: &SettingsView, home: Option<&Path>, error: Option<&str>, p: Pain
             .gap(6.0)
             .min_w(0.0)
             .center_y()
-            .child(text(v.folder_label(home)).key("folder-path").font(type_::MONO).color(t.text_2).truncate().min_w(0.0))
+            .child(
+                text(v.folder_label(home)).key("folder-path").font(type_::MONO).color(t.text_2).truncate().min_w(0.0),
+            )
             .children((!custom).then(|| text("Default").key("folder-default").font(type_::META).color(t.text_3))),
     };
     let folder_buttons = row()
         .gap(space::S2)
-        .children(custom.then(|| button(p, "folder-reset", "Reset", "Use the Downloads folder", |s: &mut App, tx: &mut Tx| {
-            change(s, SettingsChange::DownloadFolder(None), tx)
-        })))
+        .children(custom.then(|| {
+            button(p, "folder-reset", "Reset", "Use the Downloads folder", |s: &mut App, tx: &mut Tx| {
+                change(s, SettingsChange::DownloadFolder(None), tx)
+            })
+        }))
         .child(button(p, "folder-choose", "Choose…", "Choose the download folder", choose_folder));
     section(
         p,
         "Transfers",
         vec![
             setting(p, "Download folder", Some(folder_sub), folder_buttons),
-            setting(p, "Transfers at once", Some(sub(p, "Files copied at the same time per server")), stepper(p, s.transfers_at_once)),
+            setting(
+                p,
+                "Transfers at once",
+                Some(sub(p, "Files copied at the same time per server")),
+                stepper(p, s.transfers_at_once),
+            ),
         ],
     )
 }
 
 fn browsing(v: &SettingsView, p: Paint) -> El {
-    let hidden_sub = format!("For servers opened from now on; {} switches them", super::widgets::chord("mod+shift+period"));
-    section(p, "Browsing", vec![setting(p, "Show hidden files by default", Some(sub(p, &hidden_sub)), switch(p, v.settings.show_hidden))])
+    let hidden_sub =
+        format!("For servers opened from now on; {} switches them", super::widgets::chord("mod+shift+period"));
+    section(
+        p,
+        "Browsing",
+        vec![setting(p, "Show hidden files by default", Some(sub(p, &hidden_sub)), switch(p, v.settings.show_hidden))],
+    )
 }
 
 /// "Choose…": the platform's folder picker, starting in the folder in use. It runs off the UI
@@ -210,7 +236,14 @@ fn choose_folder(s: &mut App, tx: &mut Tx) {
 /// A caption and its rows.
 fn section(p: Paint, title: &'static str, rows: Vec<El>) -> El {
     let caption = text(title.to_uppercase()).font(type_::CAPTION).color(p.t.text_3);
-    col().key(format!("section-{}", title.to_lowercase())).role("group").label(title).w_full().gap(space::S2).child(caption).children(rows)
+    col()
+        .key(format!("section-{}", title.to_lowercase()))
+        .role("group")
+        .label(title)
+        .w_full()
+        .gap(space::S2)
+        .child(caption)
+        .children(rows)
 }
 
 /// A label (with a line under it, maybe) on the left, its control on the right.
@@ -251,10 +284,24 @@ fn segmented<T: Copy + PartialEq + 'static>(
             .center()
             .motion(motion::SNAP)
             .on_press_tx(move |s: &mut App, tx: &mut Tx| change(s, to(value), tx))
-            .child(text(name).font(if on { type_::BODY_STRONG } else { type_::BODY }).color(if on { t.text } else { t.text_2 }));
+            .child(text(name).font(if on { type_::BODY_STRONG } else { type_::BODY }).color(if on {
+                t.text
+            } else {
+                t.text_2
+            }));
         if on { e.fill(t.press).border(p.hair, t.border_subtle) } else { e.hover(t.hover).press(t.press) }
     });
-    row().key(key).role("radiogroup").label(label).focus_group().h(28.0).padding(2.0).gap(2.0).radius(radius::ROW + 1.0).fill(t.field).children(segments)
+    row()
+        .key(key)
+        .role("radiogroup")
+        .label(label)
+        .focus_group()
+        .h(28.0)
+        .padding(2.0)
+        .gap(2.0)
+        .radius(radius::ROW + 1.0)
+        .fill(t.field)
+        .children(segments)
 }
 
 /// A bordered button with a body-size label, as the sheets' secondary ones.
@@ -283,14 +330,9 @@ fn button(p: Paint, key: &'static str, label: &'static str, describe: &'static s
 fn stepper(p: Paint, n: usize) -> El {
     let t = p.t;
     let step = |key: &'static str, label: &'static str, glyph: &'static str, to: Option<usize>| {
-        let b = row()
-            .key(key)
-            .role("button")
-            .label(label)
-            .size(24.0, 24.0)
-            .radius(radius::ROW - 1.0)
-            .center()
-            .child(text(glyph).font(type_::BODY_STRONG).color(if to.is_some() { t.text_2 } else { t.text_3.alpha(0.5) }));
+        let b = row().key(key).role("button").label(label).size(24.0, 24.0).radius(radius::ROW - 1.0).center().child(
+            text(glyph).font(type_::BODY_STRONG).color(if to.is_some() { t.text_2 } else { t.text_3.alpha(0.5) }),
+        );
         match to {
             Some(to) => b
                 .focusable(true)
@@ -315,14 +357,25 @@ fn stepper(p: Paint, n: usize) -> El {
         .center_y()
         .fill(t.field)
         .child(step("transfers-fewer", "Fewer transfers at once", "−", fewer))
-        .child(text(n.to_string()).key("transfers-value").font(type_::BODY_STRONG.features("'tnum' 1")).color(t.text).w(24.0).align(rune::Align::Center))
+        .child(
+            text(n.to_string())
+                .key("transfers-value")
+                .font(type_::BODY_STRONG.features("'tnum' 1"))
+                .color(t.text)
+                .w(24.0)
+                .align(rune::Align::Center),
+        )
         .child(step("transfers-more", "More transfers at once", "+", more))
 }
 
 /// An on/off switch: accent track and the knob on the right when on.
 fn switch(p: Paint, on: bool) -> El {
     let t = p.t;
-    let knob = el().size(14.0, 14.0).radius(7.0).fill(if on { t.on_accent } else { t.text_2 }).offset(if on { 14.0 } else { 0.0 }, 0.0);
+    let knob = el()
+        .size(14.0, 14.0)
+        .radius(7.0)
+        .fill(if on { t.on_accent } else { t.text_2 })
+        .offset(if on { 14.0 } else { 0.0 }, 0.0);
     row()
         .key("hidden-toggle")
         .role("switch")

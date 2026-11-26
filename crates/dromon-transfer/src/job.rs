@@ -191,7 +191,9 @@ impl FilePlan {
             FilePlan::Download { src, .. } | FilePlan::Copy { src, .. } | FilePlan::Move { src, .. } => {
                 src.file_name().unwrap_or("/").to_owned()
             }
-            FilePlan::Upload { src, .. } => src.file_name().map_or_else(|| src.display().to_string(), |n| n.to_string_lossy().into_owned()),
+            FilePlan::Upload { src, .. } => {
+                src.file_name().map_or_else(|| src.display().to_string(), |n| n.to_string_lossy().into_owned())
+            }
         }
     }
 }

@@ -45,9 +45,20 @@ fn write_ssh_config(fx: &Fixture, dir: &Path) -> PathBuf {
     let key = dir.join("id_ed25519");
     copy_private_key(&fx.key(), &key).unwrap();
     let mut config = String::new();
-    writeln!(config, "Host fx-key\n    HostName {}\n    Port {}\n    User {}", fx.host(), fx.port(), fx.user(Role::Key)).unwrap();
-    writeln!(config, "    IdentityFile {}\n    PubkeyAuthentication yes\n    PreferredAuthentications publickey", key.display())
-        .unwrap();
+    writeln!(
+        config,
+        "Host fx-key\n    HostName {}\n    Port {}\n    User {}",
+        fx.host(),
+        fx.port(),
+        fx.user(Role::Key)
+    )
+    .unwrap();
+    writeln!(
+        config,
+        "    IdentityFile {}\n    PubkeyAuthentication yes\n    PreferredAuthentications publickey",
+        key.display()
+    )
+    .unwrap();
     for line in [
         format!("UserKnownHostsFile {}", dir.join("known_hosts").display()),
         format!("GlobalKnownHostsFile {NULL_DEVICE}"),
@@ -123,7 +134,11 @@ fn perf_first_rows_of_a_10k_folder() {
         helper_exe: PathBuf::from(HELPER),
         verbose: false,
         config_file: Some(config.clone()),
-        discover: Some(dromon_ssh::ConfigSources { user: Some(config), system: None, user_ssh_dir: dir.path().to_path_buf() }),
+        discover: Some(dromon_ssh::ConfigSources {
+            user: Some(config),
+            system: None,
+            user_ssh_dir: dir.path().to_path_buf(),
+        }),
         hosts_file: None,
         hosts: Vec::new(),
         without_env: vec!["SSH_AUTH_SOCK".into()],

@@ -20,3 +20,10 @@
 //! hot patching reaches only the executable's own crate, not a library it links.
 
 include!("app_root.rs");
+
+// rustfmt follows `mod` declarations but not `include!`, so `cargo fmt` would never reach
+// app_root.rs and its modules. This one is never compiled (`cfg(any())` is always false); it
+// only points rustfmt at them.
+#[cfg(any())]
+#[path = "app_root.rs"]
+mod app_root_for_rustfmt;

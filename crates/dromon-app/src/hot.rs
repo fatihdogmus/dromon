@@ -2,7 +2,7 @@
 //! reaches only the executable's own crate, and `dromon` (`main.rs`) links the views as a
 //! library, so this binary compiles the whole app as its own crate: the same root items as
 //! `lib.rs` (`app_root.rs`), whose public surface goes unused here.
-#![allow(dead_code)]
+#![expect(dead_code, reason = "the library's public surface (`app_root.rs`) goes unused in this binary")]
 
 include!("app_root.rs");
 

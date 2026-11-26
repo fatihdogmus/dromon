@@ -38,16 +38,17 @@ pub fn icon_button(
     action: Option<fn(&mut App, &mut Tx)>,
 ) -> El {
     let t = p.t;
-    let b = el()
-        .key(key)
-        .role("button")
-        .label(label)
-        .size(28.0, 28.0)
-        .radius(radius::ROW)
-        .center()
-        .child(icon(glyph.at(p.scale), size::ICON).color(if action.is_some() { t.text_2 } else { t.text_3.alpha(0.6) }));
+    let b = el().key(key).role("button").label(label).size(28.0, 28.0).radius(radius::ROW).center().child(
+        icon(glyph.at(p.scale), size::ICON).color(if action.is_some() { t.text_2 } else { t.text_3.alpha(0.6) }),
+    );
     match action {
-        Some(f) => b.hover(t.hover).press(t.press).press_scale(0.97).press_motion(rune::Anim::INSTANT, motion::SNAP).on_press_tx(f).tab_press(),
+        Some(f) => b
+            .hover(t.hover)
+            .press(t.press)
+            .press_scale(0.97)
+            .press_motion(rune::Anim::INSTANT, motion::SNAP)
+            .on_press_tx(f)
+            .tab_press(),
         None => b.disabled(true),
     }
 }

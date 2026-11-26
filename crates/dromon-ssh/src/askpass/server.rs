@@ -10,9 +10,9 @@
 
 use std::fmt;
 use std::io;
+use std::path::Path;
 #[cfg(unix)]
 use std::path::PathBuf;
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -105,7 +105,11 @@ pub(crate) fn random_hex<const N: usize>() -> io::Result<String> {
 
 /// Serves one helper connection: read the request, check the token, forward it, write the
 /// answer. Platform-neutral, so a Windows named pipe can reuse it.
-pub(crate) async fn serve_connection<S>(stream: S, registry: Registry, requests: mpsc::Sender<AskpassRequest>) -> io::Result<()>
+pub(crate) async fn serve_connection<S>(
+    stream: S,
+    registry: Registry,
+    requests: mpsc::Sender<AskpassRequest>,
+) -> io::Result<()>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
@@ -121,7 +125,10 @@ where
 
     let (reply_tx, reply_rx) = oneshot::channel();
     let forwarded = AskpassRequest { host, prompt: request.prompt, hint: request.hint, reply: reply_tx };
-    requests.send(forwarded).await.map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "askpass requests are no longer read"))?;
+    requests
+        .send(forwarded)
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "askpass requests are no longer read"))?;
 
     let answer = tokio::select! {
         answer = reply_rx => answer.unwrap_or(PromptAnswer::Cancel),
@@ -342,7 +349,12 @@ mod unix {
 
     use super::{AskpassRequest, Registry, random_hex, serve_connection};
 
-    pub(super) async fn accept_loop(listener: UnixListener, uid: u32, registry: Registry, tx: mpsc::Sender<AskpassRequest>) {
+    pub(super) async fn accept_loop(
+        listener: UnixListener,
+        uid: u32,
+        registry: Registry,
+        tx: mpsc::Sender<AskpassRequest>,
+    ) {
         loop {
             match listener.accept().await {
                 Ok((stream, _)) => {

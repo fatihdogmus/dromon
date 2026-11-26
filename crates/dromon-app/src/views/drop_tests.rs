@@ -16,7 +16,10 @@ fn the_pill_names_the_count_and_where() {
 #[test]
 fn long_paths_keep_their_last_folders() {
     assert_eq!(short_path("/var/www/site"), "/var/www/site");
-    assert_eq!(short_path("/srv/media/photos/2026/november/holiday-in-the-mountains"), "…/november/holiday-in-the-mountains");
+    assert_eq!(
+        short_path("/srv/media/photos/2026/november/holiday-in-the-mountains"),
+        "…/november/holiday-in-the-mountains"
+    );
     let one = format!("/a/{}", "x".repeat(60));
     assert_eq!(short_path(&one), format!("…/{}", "x".repeat(60)), "the last folder stays whole");
 }

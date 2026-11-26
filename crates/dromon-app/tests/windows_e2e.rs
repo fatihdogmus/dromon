@@ -121,7 +121,9 @@ impl Harness {
         let deadline = Instant::now() + WAIT;
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
-            let (to, ev) = self.next(left).unwrap_or_else(|| panic!("timed out waiting for {what}\nconnection log:\n{}", self.log.join("\n")));
+            let (to, ev) = self
+                .next(left)
+                .unwrap_or_else(|| panic!("timed out waiting for {what}\nconnection log:\n{}", self.log.join("\n")));
             if done(&self.a, &self.b, to, &ev) {
                 return;
             }
@@ -147,7 +149,8 @@ impl Harness {
 
 /// Whether `app` shows `host`'s `path`, listed.
 fn shows(app: &App, host: &HostId, path: &RemotePath) -> bool {
-    app.active.as_ref() == Some(host) && app.conn().is_some_and(|c| c.opened && c.cwd == *path && matches!(c.listing, Listing::Ready(_)))
+    app.active.as_ref() == Some(host)
+        && app.conn().is_some_and(|c| c.opened && c.cwd == *path && matches!(c.listing, Listing::Ready(_)))
 }
 
 fn has(app: &App, name: &str) -> bool {
@@ -158,12 +161,40 @@ fn write_ssh_config(fx: &Fixture, dir: &Path) -> PathBuf {
     let key = dir.join("id_ed25519");
     copy_private_key(&fx.key(), &key).unwrap();
     let mut config = String::new();
-    writeln!(config, "Host fx-key\n    HostName {}\n    Port {}\n    User {}", fx.host(), fx.port(), fx.user(Role::Key)).unwrap();
-    writeln!(config, "    IdentityFile {}\n    PubkeyAuthentication yes\n    PreferredAuthentications publickey", key.display()).unwrap();
-    writeln!(config, "Host fx-pw\n    HostName {}\n    Port {}\n    User {}", fx.host(), fx.port(), fx.user(Role::Password)).unwrap();
-    writeln!(config, "    PubkeyAuthentication no\n    PreferredAuthentications password\n    NumberOfPasswordPrompts 3").unwrap();
-    writeln!(config, "Host *\n    IdentitiesOnly yes\n    UserKnownHostsFile {}", dir.join("known_hosts").display()).unwrap();
-    writeln!(config, "    GlobalKnownHostsFile {NULL_DEVICE}\n    StrictHostKeyChecking accept-new\n    UpdateHostKeys no").unwrap();
+    writeln!(
+        config,
+        "Host fx-key\n    HostName {}\n    Port {}\n    User {}",
+        fx.host(),
+        fx.port(),
+        fx.user(Role::Key)
+    )
+    .unwrap();
+    writeln!(
+        config,
+        "    IdentityFile {}\n    PubkeyAuthentication yes\n    PreferredAuthentications publickey",
+        key.display()
+    )
+    .unwrap();
+    writeln!(
+        config,
+        "Host fx-pw\n    HostName {}\n    Port {}\n    User {}",
+        fx.host(),
+        fx.port(),
+        fx.user(Role::Password)
+    )
+    .unwrap();
+    writeln!(
+        config,
+        "    PubkeyAuthentication no\n    PreferredAuthentications password\n    NumberOfPasswordPrompts 3"
+    )
+    .unwrap();
+    writeln!(config, "Host *\n    IdentitiesOnly yes\n    UserKnownHostsFile {}", dir.join("known_hosts").display())
+        .unwrap();
+    writeln!(
+        config,
+        "    GlobalKnownHostsFile {NULL_DEVICE}\n    StrictHostKeyChecking accept-new\n    UpdateHostKeys no"
+    )
+    .unwrap();
     let path = dir.join("ssh_config");
     std::fs::write(&path, config).unwrap();
     path
@@ -175,13 +206,17 @@ fn two_windows_on_one_host_each_see_what_is_made_in_their_own_folder() {
     let (one, two) = (h.folder("one"), h.folder("two"));
     // The first window connects and goes to `one`.
     h.a.act(Action::SelectHost(key_host()));
-    h.pump("the first window to open the host", |a, _, _, _| a.conn().is_some_and(|c| c.opened && matches!(c.listing, Listing::Ready(_))));
+    h.pump("the first window to open the host", |a, _, _, _| {
+        a.conn().is_some_and(|c| c.opened && matches!(c.listing, Listing::Ready(_)))
+    });
     h.a.act(Action::GoTo(one.clone()));
     h.pump("one to list in the first window", |a, _, _, _| shows(a, &key_host(), &one));
     // The second asks for the same host: it opens there alone, on the same connection, in the
     // folder remembered last (the first window's), then goes to `two`.
     h.b.act(Action::SelectHost(key_host()));
-    h.pump("the host to open in the second window", |_, _, to, ev| matches!(ev, ServiceEvent::Opened { .. }) && to == Some(WindowId(1)));
+    h.pump("the host to open in the second window", |_, _, to, ev| {
+        matches!(ev, ServiceEvent::Opened { .. }) && to == Some(WindowId(1))
+    });
     h.pump("the second window's listing", |_, b, _, _| shows(b, &key_host(), &one));
     h.b.act(Action::GoTo(two.clone()));
     h.pump("two to list in the second window", |_, b, _, _| shows(b, &key_host(), &two));
@@ -195,7 +230,10 @@ fn two_windows_on_one_host_each_see_what_is_made_in_their_own_folder() {
     h.pump("each file in its window", |a, b, _, _| has(a, "in-one.txt") && has(b, "in-two.txt"));
     assert!(shows(&h.a, &key_host(), &one) && shows(&h.b, &key_host(), &two), "refreshes, not navigations");
     assert!(!has(&h.a, "in-two.txt") && !has(&h.b, "in-one.txt"));
-    assert!(h.a.conn().unwrap().fresh.is_new("in-one.txt") && h.b.conn().unwrap().fresh.is_new("in-two.txt"), "highlighted as new");
+    assert!(
+        h.a.conn().unwrap().fresh.is_new("in-one.txt") && h.b.conn().unwrap().fresh.is_new("in-two.txt"),
+        "highlighted as new"
+    );
     assert!(h.prompts.is_empty(), "no prompts for a key");
 }
 
@@ -206,7 +244,9 @@ fn a_password_prompt_shows_in_the_focused_window_and_is_answered_once() {
     h.b.window_focus(false);
     // The second window connects the password host while the first has the focus.
     h.b.act(Action::SelectHost(pw_host()));
-    h.pump("the password sheet", |a, _, _, _| a.ui.sheets.open().and_then(|s| s.prompt()).is_some_and(|p| p.host == pw_host()));
+    h.pump("the password sheet", |a, _, _, _| {
+        a.ui.sheets.open().and_then(|s| s.prompt()).is_some_and(|p| p.host == pw_host())
+    });
     assert!(!h.b.ui.sheets.is_open(), "the sheet is the focused window's alone");
     assert_eq!(h.prompts, [Some(WindowId(0))]);
     // Answered there once: the host opens in the window that asked for it.

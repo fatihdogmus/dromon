@@ -10,7 +10,9 @@ pub enum EntryKind {
     Dir,
     /// A symlink, with the kind of what it points at when that could be resolved
     /// (`None` for a dangling link or one we couldn't stat).
-    Symlink { target: Option<LinkTarget> },
+    Symlink {
+        target: Option<LinkTarget>,
+    },
     /// Sockets, FIFOs, devices.
     Other,
 }
@@ -161,11 +163,7 @@ mod tests {
 
     #[test]
     fn by_size_and_date_with_name_ties() {
-        let mut v = vec![
-            e("c", EntryKind::File, 5, 9),
-            e("a", EntryKind::File, 5, 1),
-            e("b", EntryKind::File, 1, 5),
-        ];
+        let mut v = vec![e("c", EntryKind::File, 5, 9), e("a", EntryKind::File, 5, 1), e("b", EntryKind::File, 1, 5)];
         sort_entries(&mut v, SortKey::Size, SortDir::Ascending);
         assert_eq!(names(&v), ["b", "a", "c"]);
         sort_entries(&mut v, SortKey::Modified, SortDir::Descending);
@@ -174,11 +172,7 @@ mod tests {
 
     #[test]
     fn size_sort_orders_folders_by_name() {
-        let mut v = vec![
-            e("b", EntryKind::Dir, 4096, 1),
-            e("a", EntryKind::Dir, 30, 1),
-            e("f", EntryKind::File, 7, 1),
-        ];
+        let mut v = vec![e("b", EntryKind::Dir, 4096, 1), e("a", EntryKind::Dir, 30, 1), e("f", EntryKind::File, 7, 1)];
         sort_entries(&mut v, SortKey::Size, SortDir::Ascending);
         assert_eq!(names(&v), ["a", "b", "f"]);
     }

@@ -97,11 +97,17 @@ impl Palette {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
     /// Opens (or re-opens) in `mode` with `text` in the field, all selected, the field focused.
-    Open { mode: Mode, text: String },
+    Open {
+        mode: Mode,
+        text: String,
+    },
     /// The field's text changed: the cursor goes back to the first row.
     Edited,
     /// ↑ ↓ over `count` rows, wrapping at the ends.
-    Move { delta: isize, count: usize },
+    Move {
+        delta: isize,
+        count: usize,
+    },
     Close,
 }
 
@@ -219,7 +225,11 @@ impl App {
     /// Every host in the sidebar, in the order it shows them (Connected, SSH Config, Saved,
     /// Recent): what ⌘1 … ⌘9 count.
     pub fn sidebar_order(&self) -> Vec<HostId> {
-        self.hosts.sections(&self.conns).into_iter().flat_map(|(_, hosts)| hosts.into_iter().map(|h| h.id.clone())).collect()
+        self.hosts
+            .sections(&self.conns)
+            .into_iter()
+            .flat_map(|(_, hosts)| hosts.into_iter().map(|h| h.id.clone()))
+            .collect()
     }
 
     /// The palette's rows, in group order; empty while it's closed.
@@ -277,8 +287,11 @@ impl App {
                 hits: Vec::new(),
             });
         }
-        let recent: Vec<RemotePath> = c.history.recent().into_iter().filter(|p| *p != c.cwd).take(MAX_FOLDERS).collect();
-        let picked: Vec<(usize, Vec<(usize, usize)>)> = if mode == Mode::Path && (query.is_empty() || self.ui.palette.untouched()) {
+        let recent: Vec<RemotePath> =
+            c.history.recent().into_iter().filter(|p| *p != c.cwd).take(MAX_FOLDERS).collect();
+        let picked: Vec<(usize, Vec<(usize, usize)>)> = if mode == Mode::Path
+            && (query.is_empty() || self.ui.palette.untouched())
+        {
             (0..recent.len()).map(|i| (i, Vec::new())).collect()
         } else {
             fuzzy::rank(query, recent.iter().map(RemotePath::as_str)).into_iter().map(|(i, m)| (i, m.ranges)).collect()
@@ -335,7 +348,13 @@ impl App {
         }
         // Last, so an empty query's cap trims it rather than Disconnect; typing finds it.
         add(true, "settings", "Settings…", Some("mod+comma"), Action::OpenSettings);
-        add(self.transfers.has_finished(), "clear-finished", "Clear finished transfers", None, Action::Transfer(TransferCommand::ClearFinished));
+        add(
+            self.transfers.has_finished(),
+            "clear-finished",
+            "Clear finished transfers",
+            None,
+            Action::Transfer(TransferCommand::ClearFinished),
+        );
         for cmd in &mut out {
             if matches!(cmd.id, "log" | "disconnect") {
                 cmd.detail = host.clone();

@@ -3,7 +3,7 @@
 use dromon_core::EntryKind;
 
 use super::*;
-use crate::RemoteItem;
+use crate::{ConflictView, JobKind, RemoteItem, Reveal};
 
 const T0: Duration = Duration::ZERO;
 
@@ -38,7 +38,13 @@ fn request(kind: JobKind, items: Vec<RemoteItem>, into: &str) -> JobRequest {
 const KINDS: [JobKind; 4] = [JobKind::RemoteCopy, JobKind::Move, JobKind::CrossHostCopy, JobKind::CrossHostMove];
 
 fn copy_plan(name: &str, size: u64) -> FilePlan {
-    FilePlan::Copy { src: p(&format!("/src/d/{name}")), dst: p(&format!("/dst/d/{name}")), size, mtime: Some(5), overwrite: false }
+    FilePlan::Copy {
+        src: p(&format!("/src/d/{name}")),
+        dst: p(&format!("/dst/d/{name}")),
+        size,
+        mtime: Some(5),
+        overwrite: false,
+    }
 }
 
 fn both_up(q: &mut Queue) {
@@ -83,7 +89,10 @@ fn a_two_host_job_waits_for_both_and_counts_against_both_limits() {
     let dst = ItemDst::Remote { path: p("/dst/d"), overwrite: false };
     assert_eq!(q.poll(T0), vec![Action::Scan { job: id, item: 0, dst }]);
     let v = view(&q, id);
-    assert_eq!((v.host, v.reveal, v.kind), (host("b"), Some(Reveal::Remote(host("b"), p("/dst/d"))), JobKind::CrossHostCopy));
+    assert_eq!(
+        (v.host, v.reveal, v.kind),
+        (host("b"), Some(Reveal::Remote(host("b"), p("/dst/d"))), JobKind::CrossHostCopy)
+    );
 
     // A download on b already runs one file: b has room for one more.
     let dl = q.add(JobRequest::Download { host: host("b"), items: vec![file("/r/x")], into: PathBuf::from("/l") }, T0);
@@ -120,8 +129,14 @@ fn every_remote_kind_asks_on_a_clash_at_the_destination() {
         q.exists(id, 1, Some(Existing { is_dir: true, side: Side::default() }), Side::default());
         q.exists(id, 2, Some(Existing { is_dir: false, side: Side::default() }), Side::default());
         let c = view(&q, id).conflict.unwrap();
-        let expected =
-            ConflictView { name: "a.txt".into(), folder: p("/dst"), existing_is_dir: false, existing: old, incoming: new, more: 2 };
+        let expected = ConflictView {
+            name: "a.txt".into(),
+            folder: p("/dst"),
+            existing_is_dir: false,
+            existing: old,
+            incoming: new,
+            more: 2,
+        };
         assert_eq!(c, expected, "{kind:?}");
 
         q.resolve(id, ConflictChoice::Replace, false);
@@ -151,7 +166,10 @@ fn every_remote_kind_asks_on_a_clash_at_the_destination() {
             assert_eq!(starts(&next), [FileId(0), FileId(1)]);
             assert_eq!(next[1], Action::Start { job: id, file: FileId(1), plan });
         } else {
-            assert_eq!(next, [Action::Scan { job: id, item: 1, dst: ItemDst::Remote { path: p("/dst/d (1)"), overwrite: false } }]);
+            assert_eq!(
+                next,
+                [Action::Scan { job: id, item: 1, dst: ItemDst::Remote { path: p("/dst/d (1)"), overwrite: false } }]
+            );
         }
     }
 }
@@ -182,7 +200,8 @@ fn a_copy_into_its_own_folder_keeps_both_without_asking() {
     assert_eq!(q.poll(T0), [Action::Scan { job: id, item: 0, dst }]);
 
     // A cross-host copy whose two hosts are one is held to the same rule.
-    let same = JobRequest::CrossHostCopy { from: host("a"), items: vec![file("/srv/a.txt")], to: host("a"), into: p("/srv") };
+    let same =
+        JobRequest::CrossHostCopy { from: host("a"), items: vec![file("/srv/a.txt")], to: host("a"), into: p("/srv") };
     let id = q.add(same, T0);
     assert_eq!(q.poll(T0), [Action::FreeRemoteName { job: id, item: 0 }]);
     // Between two hosts the same paths are unrelated: an ordinary name check.
@@ -239,8 +258,11 @@ fn a_move_is_one_file_per_item_done_at_once() {
     let v = view(&q, id);
     assert_eq!((v.state, v.files_total, v.progress.total), (TaskState::Running, 2, 10));
     assert_eq!(v.reveal, Some(Reveal::Remote(host("a"), p("/dst/d"))));
-    let plans: Vec<FilePlan> =
-        q.poll(T0).into_iter().filter_map(|a| if let Action::Start { plan, .. } = a { Some(plan) } else { None }).collect();
+    let plans: Vec<FilePlan> = q
+        .poll(T0)
+        .into_iter()
+        .filter_map(|a| if let Action::Start { plan, .. } = a { Some(plan) } else { None })
+        .collect();
     assert_eq!(
         plans,
         [
@@ -302,7 +324,10 @@ fn copies_never_tidy_and_cancel_cleans_their_parts() {
     q.poll(T0);
     q.file_progress(id, FileId(0), 50, T0);
     let actions = q.cancel(id);
-    assert_eq!(actions, [Action::Abort { job: id, file: FileId(0) }, Action::Cleanup { job: id, plans: vec![copy_plan("1", 100)] }]);
+    assert_eq!(
+        actions,
+        [Action::Abort { job: id, file: FileId(0) }, Action::Cleanup { job: id, plans: vec![copy_plan("1", 100)] }]
+    );
 
     let id = q.add(request(JobKind::RemoteCopy, vec![folder("/src/d")], "/dst"), T0);
     q.poll(T0);

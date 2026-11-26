@@ -158,7 +158,15 @@ mod tests {
 
     #[test]
     fn folders_have_no_size() {
-        let dir = Entry { name: "a".into(), kind: EntryKind::Dir, size: 4096, mtime: None, mode: None, owner: None, group: None };
+        let dir = Entry {
+            name: "a".into(),
+            kind: EntryKind::Dir,
+            size: 4096,
+            mtime: None,
+            mode: None,
+            owner: None,
+            group: None,
+        };
         assert_eq!(entry_size(&dir), "—");
         let file = Entry { kind: EntryKind::File, ..dir };
         assert_eq!(entry_size(&file), "4.1 KB");
