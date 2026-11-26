@@ -25,12 +25,13 @@ fn centred(key: &'static str, p: Paint, headline: &str, sub: Option<El>) -> El {
         .children(sub)
 }
 
-fn button(p: Paint, key: &'static str, glyph: &'static IconPair, label: &'static str, action: Action) -> El {
+fn button(p: Paint, key: &'static str, glyph: &'static IconPair, label: &str, action: Action) -> El {
     let t = p.t;
+    let label = label.to_owned();
     row()
         .key(key)
         .role("button")
-        .label(label)
+        .label(label.clone())
         .h(28.0)
         .pl(space::S2)
         .pr(space::S3)
@@ -49,11 +50,15 @@ fn button(p: Paint, key: &'static str, glyph: &'static IconPair, label: &'static
         .child(text(label).font(type_::BODY_STRONG).color(t.text))
 }
 
-pub fn welcome(p: Paint) -> El {
+/// "Pick a host to start", and the host opened last time (§12: offered, never connected by
+/// itself) when the sidebar still has it.
+pub fn welcome(s: &App, p: Paint) -> El {
+    let last = s.last_host().and_then(|h| s.hosts.get(&h).map(|spec| (h.clone(), spec.display_name().to_owned())));
     let sub = col()
         .center()
         .gap(space::S2)
         .child(text(format!("or press {}", chord("mod+k"))).font(type_::BODY).color(p.t.text_2))
+        .children(last.map(|(h, name)| button(p, "welcome-last-host", &icons::SERVER, &format!("Connect to {name}"), Action::SelectHost(h))))
         .child(button(p, "welcome-quick-connect", &icons::PLUS, "Quick connect", Action::QuickConnect));
     centred("welcome", p, "Pick a host to start", Some(sub))
 }

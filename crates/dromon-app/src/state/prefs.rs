@@ -35,6 +35,9 @@ pub struct Saved {
     /// The Settings window's values (§8); missing in prefs from before it.
     pub settings: Option<Settings>,
     pub sidebar_width: Option<f32>,
+    /// The host last opened, by host id: offered on the welcome screen at launch, never
+    /// connected by itself (§12).
+    pub last_host: Option<String>,
     /// The last folder on each host, by host id (the ssh alias).
     pub last_folder: BTreeMap<String, String>,
     /// Host ids, least recently used first: decides which folders [`MAX_FOLDERS`] drops.

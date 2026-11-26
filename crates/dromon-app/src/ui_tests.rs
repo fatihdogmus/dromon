@@ -241,6 +241,21 @@ fn keys_that_move_the_cursor_scroll_its_row_into_view() {
 }
 
 #[test]
+fn the_welcome_screen_offers_the_host_opened_last_time() {
+    let mut rt = runtime();
+    assert!(rt.find("welcome-last-host").is_none(), "nothing remembered: no offer");
+    rt.update(|s, _| {
+        let saved = crate::state::Saved { last_host: Some("prod".into()), ..Default::default() };
+        s.remember(saved, Box::new(crate::state::NoStore));
+    });
+    rt.frame(1.0 / 60.0);
+    assert_eq!(rt.state.active, None, "offered, not connected");
+    click(&mut rt, "welcome-last-host");
+    assert_eq!(rt.state.active, Some(HostId("prod".into())));
+    assert_eq!(cwd(&rt), "/var/www/site");
+}
+
+#[test]
 fn sidebar_resizes_within_its_bounds() {
     let mut rt = runtime();
     let (x, y) = rt.find("sb-grip").unwrap();

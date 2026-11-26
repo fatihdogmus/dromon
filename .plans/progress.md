@@ -76,6 +76,7 @@ Tracks where implementation stands against `dromon-plan.md`. Newest first.
 - Transfer engine robustness: work cut off by drops is replayed as itself and at once on a replaced session; runs tagged so a stale Finished can't start a second copy; stress test kills sessions at varying moments (`transfers_e2e`, ignored by default).
 - M5 server matrix (`DROMON_SERVER_MATRIX=1`, CI linux): Debian trixie (OpenSSH 10), bullseye (8.4, no copy-data: streamed copies), Alpine 3.24, toxiproxy (latency, caps, reset mid-transfer → resume); 100 / 10k / 100k folders, symlink loops, unreadable folders. CI windows: the runner's own OpenSSH Server, `/C:/` paths, round trip, rename, copy, delete.
 
+- Launch (§12 "Restore window/sidebar/last host; never auto-connect"): the host opened last is saved (`Saved.last_host`) and offered on the welcome screen as "Connect to <host>"; nothing connects by itself.
 - M5 performance (`scripts/perf.sh`, one table; this Linux box, release builds):
   - First rows of a 10k folder: 14 ms over the sshd (gate 150 ms) ✅
   - Throughput vs scp: 1 GiB 92 % down / 101 % up; 8,192 small files 153 % / 139 % ✅ (localhost, cipher-bound ~300 MB/s)

@@ -699,6 +699,7 @@ impl App {
         if self.hosts.get(&host).is_none() {
             return;
         }
+        self.remember_host(&host);
         self.ui.filter_edit = TextEdit::new("");
         self.active = Some(host.clone());
         let live = self.conns.get(&host).is_some_and(|c| hosts::is_live(&c.status));

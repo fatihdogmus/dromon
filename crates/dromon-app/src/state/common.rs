@@ -64,6 +64,19 @@ impl App {
     }
 
     /// Remembers the folder on screen for `host`.
+    /// `host` was opened: the welcome screen offers it at the next launch.
+    pub(super) fn remember_host(&mut self, host: &HostId) {
+        if self.saved().last_host.as_deref() != Some(host.as_str()) {
+            self.save(|s| s.last_host = Some(host.as_str().to_owned()));
+        }
+    }
+
+    /// The host the welcome screen offers: the last one opened, while the sidebar still has it.
+    pub fn last_host(&self) -> Option<HostId> {
+        let id = HostId(self.saved().last_host.clone()?);
+        self.hosts.get(&id).is_some().then_some(id)
+    }
+
     pub(super) fn remember_folder(&mut self, host: &HostId, path: &RemotePath) {
         if self.saved().folder(host.as_str()) != Some(path.as_str()) {
             self.save(|s| s.set_folder(host.as_str(), path.as_str()));

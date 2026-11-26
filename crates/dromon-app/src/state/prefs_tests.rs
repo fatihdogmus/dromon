@@ -57,9 +57,31 @@ fn a_new_launch_starts_from_what_was_saved() {
     let c = s.conn().unwrap();
     assert_eq!(c.sort.key, SortKey::Size);
     assert!(!c.show_hidden);
-    // Starting from saved settings saves nothing by itself, except the folder now on screen.
-    assert_eq!(store.count(), 1);
+    // Starting from saved settings saves nothing by itself, except the host opened and the
+    // folder now on screen.
+    assert_eq!(store.count(), 2);
     assert_eq!(store.last().folder("prod"), Some("/var/www/site"));
+    assert_eq!(store.last().last_host.as_deref(), Some("prod"));
+}
+
+#[test]
+fn the_last_host_is_offered_at_launch_and_never_connected_by_itself() {
+    let (mut s, store) = app_with(Saved::default());
+    assert_eq!(s.last_host(), None, "nothing opened yet");
+    s.act(Action::SelectHost(prod()));
+    assert_eq!(store.last().last_host.as_deref(), Some("prod"));
+
+    // The next launch: the welcome screen offers prod, and nothing connects (§12).
+    let (mut next, _) = app_with(store.last());
+    assert_eq!(next.active, None);
+    assert!(next.conns.is_empty(), "never auto-connects");
+    assert_eq!(next.last_host(), Some(prod()));
+    next.act(Action::SelectHost(prod()));
+    assert_eq!(next.active, Some(prod()));
+
+    // A host the sidebar no longer has isn't offered.
+    let (gone, _) = app_with(Saved { last_host: Some("retired".into()), ..Saved::default() });
+    assert_eq!(gone.last_host(), None);
 }
 
 #[test]

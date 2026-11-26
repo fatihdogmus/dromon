@@ -183,7 +183,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
 /// The list area: whichever state the active connection is in.
 fn content(s: &App, p: Paint) -> El {
     let body = match s.conn() {
-        None => states::welcome(p),
+        None => states::welcome(s, p),
         Some(c) => match &c.status {
             dromon_core::ConnStatus::Failed(msg) => states::failed(s, c, msg, p),
             dromon_core::ConnStatus::Disconnected => states::disconnected(s, c, p),
