@@ -15,6 +15,8 @@ pub enum Shortcut {
     Filter,
     /// ⌘D (Ctrl+D elsewhere): download the selection.
     Download,
+    /// ⌘U (Ctrl+U elsewhere): pick files to upload into the folder on screen.
+    Upload,
     /// Escape: close the filter, else clear the selection.
     Escape,
     Move { delta: isize, extend: bool },
@@ -145,6 +147,7 @@ pub fn shortcut(ev: &KeyEvent, platform: KeyPlatform) -> Option<Shortcut> {
         Key::Command('a') => Shortcut::SelectAll,
         Key::Command('f') => Shortcut::Filter,
         Key::Command('d') if !m.shift && !m.alt => Shortcut::Download,
+        Key::Command('u') if !m.shift && !m.alt => Shortcut::Upload,
         Key::Command(',') if !m.shift && !m.alt => Shortcut::Settings,
         Key::Command('n') if !m.shift && !m.alt => Shortcut::NewWindow,
         Key::Command('w') if !m.shift && !m.alt => Shortcut::CloseWindow,
@@ -224,6 +227,16 @@ mod tests {
         assert_eq!(on(Key::Command('d'), ctrl, KeyPlatform::Linux), Some(Shortcut::Download));
         assert_eq!(k(Key::Command('d'), Mods { shift: true, ..CMD }), None, "⌘⇧D is left alone");
         assert_eq!(k(Key::Text("d".into()), NONE), Some(Shortcut::Type("d".into())), "plain d still types");
+    }
+
+    #[test]
+    fn upload_is_cmd_u_everywhere() {
+        assert_eq!(k(Key::Command('u'), CMD), Some(Shortcut::Upload));
+        let ctrl = Mods { ctrl: true, logo: false, ..CMD };
+        assert_eq!(on(Key::Command('u'), ctrl, KeyPlatform::Windows), Some(Shortcut::Upload));
+        assert_eq!(on(Key::Command('u'), ctrl, KeyPlatform::Linux), Some(Shortcut::Upload));
+        assert_eq!(k(Key::Command('u'), Mods { shift: true, ..CMD }), None, "⌘⇧U is left alone");
+        assert_eq!(k(Key::Text("u".into()), NONE), Some(Shortcut::Type("u".into())), "plain u still types");
     }
 
     #[test]

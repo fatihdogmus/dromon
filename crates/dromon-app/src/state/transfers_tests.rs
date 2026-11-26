@@ -460,3 +460,30 @@ fn the_app_s_jobs_reach_the_taskbar_and_focus_decides_notifications() {
     s.transfers.window_focus(true);
     assert_eq!(s.transfers.watch.os.take(), [OsEffect::Taskbar(Dock::default())]);
 }
+
+#[test]
+fn picking_files_to_upload_asks_for_the_picker_only_while_interactive() {
+    let (mut s, rec) = connected();
+    let folder = || Effect::PickUpload { folder: "site".into() };
+    let palette_upload = |s: &mut App| {
+        s.act(Action::Palette(crate::state::PaletteAction::Toggle));
+        let item = s.palette_items().into_iter().find(|i| i.key == "pal-upload");
+        s.act(Action::Palette(crate::state::PaletteAction::Toggle));
+        item
+    };
+    assert_eq!(s.act(Action::PickUpload), [folder()]);
+    assert_eq!(s.shortcut(crate::state::Shortcut::Upload, 0.0), [folder()], "⌘U");
+    let item = palette_upload(&mut s).expect("the palette lists it");
+    assert_eq!((item.title.as_str(), item.shortcut, item.action), ("Upload files…", Some("mod+u"), Action::PickUpload));
+    assert!(started(&rec).is_empty(), "asking uploads nothing");
+
+    s.conn_mut().unwrap().status = dromon_core::ConnStatus::Reconnecting { attempt: 1 };
+    assert!(s.act(Action::PickUpload).is_empty());
+    assert!(s.shortcut(crate::state::Shortcut::Upload, 0.0).is_empty());
+    assert!(palette_upload(&mut s).is_none(), "hidden while reconnecting");
+
+    let mut none = fixture::app(fixture::demo());
+    assert!(none.act(Action::PickUpload).is_empty(), "no host on screen");
+    assert!(none.shortcut(crate::state::Shortcut::Upload, 0.0).is_empty());
+    assert!(palette_upload(&mut none).is_none());
+}
