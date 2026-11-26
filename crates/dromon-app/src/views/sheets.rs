@@ -250,12 +250,50 @@ fn log_sheet(s: &App, host: &dromon_core::HostId, p: Paint) -> El {
         })
         .child(text("Copy all").font(type_::BODY).color(t.text));
     let live = c.is_some_and(|c| crate::state::hosts::is_live(&c.status));
-    let mut actions = vec![copy];
+    let mut actions = Vec::new();
+    if let Some(c) = c {
+        actions.push(verbose(p, host, c.log.verbose));
+        actions.push(rune::el().key("log-gap").grow(1.0));
+    }
+    actions.push(copy);
     if live {
         actions.push(button(p, "log-disconnect", "Disconnect", false, Action::Disconnect(host.clone())));
     }
     actions.push(button(p, "log-close", "Done", true, Action::DismissSheet));
-    panel(p, "sheet", format!("Connection log · {name}"), LOG_WIDTH).child(lines).child(buttons(actions))
+    panel(p, "sheet", format!("Connection log · {name}"), LOG_WIDTH).child(lines).child(buttons(actions).center_y())
+}
+
+/// The log's "Verbose logging" switch (§6.8), with what changing it does: ssh reconnects with
+/// `-v` (or without). The whole row presses.
+fn verbose(p: Paint, host: &dromon_core::HostId, on: bool) -> El {
+    let t = p.t;
+    let knob = rune::el().size(14.0, 14.0).radius(7.0).fill(if on { t.on_accent } else { t.text_2 }).offset(if on { 14.0 } else { 0.0 }, 0.0);
+    let track = row()
+        .key("log-verbose-track")
+        .w(32.0)
+        .h(18.0)
+        .padding(2.0)
+        .radius(9.0)
+        .center_y()
+        .fill(if on { t.accent } else { t.field })
+        .border(p.hair, if on { t.accent } else { t.border_strong })
+        .motion(motion::SNAP)
+        .child(knob);
+    let action = Action::Verbose { host: host.clone(), on: !on };
+    row()
+        .key("log-verbose")
+        .role("switch")
+        .label("Verbose logging (reconnects)")
+        .checked(on)
+        .focusable(true)
+        .keyboard_focus_only()
+        .h(28.0)
+        .gap(space::S2)
+        .center_y()
+        .on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, action.clone(), tx))
+        .child(track)
+        .child(text("Verbose logging").font(type_::BODY).color(t.text))
+        .child(text("reconnects").key("log-verbose-note").font(type_::META).color(t.text_3))
 }
 
 /// Notices (ssh's "touch your security key"): toasts above the status bar until ssh is done,

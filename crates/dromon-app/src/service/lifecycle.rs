@@ -20,6 +20,9 @@
 //!   authentication or the host key, which no retry fixes.
 //! - Reconnects answer remembered passwords silently (the task's `AuthAttempt` does that); a
 //!   prompt that still needs the user shows the sheet and the status is `NeedsInput`.
+//! - A wake from sleep (`wake.rs`, spike S6) checks a live session with a probe and cuts a
+//!   reconnect's wait short, starting the schedule over as for a new outage. Turning verbose
+//!   logging on or off restarts a live connection the same silent way (`Restart`).
 
 use std::time::Duration;
 
@@ -58,7 +61,15 @@ pub enum Event {
     /// The backoff before reconnect `attempt` is over.
     RetryDue { attempt: u32 },
     Disconnect,
+    /// The computer slept and woke (`wake.rs`).
+    Wake,
+    /// Reconnect now, keeping the folders on screen and the remembered secrets: the ssh
+    /// command line changed (verbose logging).
+    Restart,
 }
+
+/// The connection log's line for a wake.
+pub const WOKE: &str = "The computer was asleep: checking the connection.";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Effect {
@@ -79,6 +90,9 @@ pub enum Effect {
     ForgetSecrets,
     /// A line for the connection log.
     Log(String),
+    /// Check the live session with a cheap request (`wake.rs`); one that gets no answer in
+    /// time ends it as `Lost`.
+    Probe,
 }
 
 /// The machine's whole state: the phase and the reconnect schedule.
@@ -233,7 +247,37 @@ pub fn step(m: &mut Lifecycle, event: Event) -> Vec<Effect> {
         }
         // A timer for an attempt that's no longer waiting.
         (_, Event::RetryDue { .. }) => Vec::new(),
+
+        // Asleep: a session that looks up may be dead, a wait for the network is over.
+        (Phase::Ready, Event::Wake) => vec![E::Log(WOKE.into()), E::Probe],
+        (Phase::Waiting { .. }, Event::Wake) => {
+            let mut fx = vec![E::Log(WOKE.into())];
+            fx.extend(retry_now(m));
+            fx
+        }
+        // The attempt under way finds out by itself (`ConnectTimeout`).
+        (Phase::Starting { .. }, Event::Wake) => vec![E::Log(WOKE.into())],
+        (_, Event::Wake) => Vec::new(),
+
+        (Phase::Ready, Event::Restart) => {
+            let mut fx = vec![E::Kill];
+            fx.extend(retry_now(m));
+            fx
+        }
+        (Phase::Waiting { .. }, Event::Restart) => retry_now(m),
+        // Not connected, or an attempt under way: the next attempt picks the change up.
+        (_, Event::Restart) => Vec::new(),
     }
+}
+
+/// Reconnects at once, the schedule started over as for a new outage: this is reconnect 1,
+/// and if it fails the next waits 2 s.
+fn retry_now(m: &mut Lifecycle) -> Vec<Effect> {
+    m.backoff.reset();
+    m.backoff.next_delay();
+    let attempt = m.backoff.attempt();
+    m.phase = Phase::Starting { attempt, prompts: 0 };
+    vec![Effect::Status(ConnStatus::Reconnecting { attempt }), Effect::Log(format!("Reconnecting (attempt {attempt})…")), Effect::Spawn]
 }
 
 /// Waits out the next backoff step before reconnecting.
@@ -363,6 +407,59 @@ mod tests {
         step(&mut m, Event::Lost);
         step(&mut m, Event::Disconnect);
         assert!(step(&mut m, Event::RetryDue { attempt: 1 }).is_empty(), "no reconnect after a disconnect");
+    }
+
+    #[test]
+    fn a_wake_probes_a_live_session_and_cuts_a_reconnect_wait_short() {
+        // Up: log it and check the session.
+        let mut m = up();
+        assert_eq!(step(&mut m, Event::Wake), [Effect::Log(WOKE.into()), Effect::Probe]);
+        assert_eq!(m.phase, Phase::Ready);
+        // Waiting out the 10 s step before reconnect 4: reconnect now, the schedule started over.
+        for _ in 0..3 {
+            step(&mut m, exited(&[]));
+            let Phase::Waiting { attempt } = m.phase else { panic!("{:?}", m.phase) };
+            step(&mut m, Event::RetryDue { attempt });
+        }
+        let fx = quiet(step(&mut m, exited(&[])));
+        assert_eq!(fx[1], Effect::Retry { attempt: 4, after: secs(10) });
+        let fx = step(&mut m, Event::Wake);
+        assert_eq!(fx[0], Effect::Log(WOKE.into()));
+        assert_eq!(quiet(fx), [Effect::Status(ConnStatus::Reconnecting { attempt: 1 }), Effect::Spawn]);
+        assert_eq!(m.phase, Phase::Starting { attempt: 1, prompts: 0 });
+        assert!(step(&mut m, Event::RetryDue { attempt: 4 }).is_empty(), "the old timer is stale");
+        // It fails: the next wait is the new outage's second step.
+        let fx = quiet(step(&mut m, exited(&[])));
+        assert_eq!(fx, [Effect::Status(ConnStatus::Reconnecting { attempt: 2 }), Effect::Retry { attempt: 2, after: secs(2) }]);
+        // While an attempt runs: only the log line.
+        step(&mut m, Event::RetryDue { attempt: 2 });
+        assert_eq!(step(&mut m, Event::Wake), [Effect::Log(WOKE.into())]);
+        // Not connected: nothing at all.
+        for setup in [None, Some(Event::Disconnect), Some(exited(&["x@y: Permission denied (password)."]))] {
+            let mut m = Lifecycle::default();
+            if let Some(ev) = setup {
+                step(&mut m, Event::Connect);
+                step(&mut m, ev);
+            }
+            assert!(step(&mut m, Event::Wake).is_empty(), "{:?}", m.phase);
+        }
+    }
+
+    #[test]
+    fn a_restart_reconnects_a_live_connection_at_once() {
+        let mut m = up();
+        assert_eq!(quiet(step(&mut m, Event::Restart)), [Effect::Kill, Effect::Status(ConnStatus::Reconnecting { attempt: 1 }), Effect::Spawn]);
+        // Back up: the folders on screen list again (no Opened), the schedule starts over.
+        assert_eq!(quiet(step(&mut m, Event::Up)), [Effect::Status(ConnStatus::Ready), Effect::Reopened]);
+        // Waiting: no wait.
+        step(&mut m, Event::Lost);
+        assert_eq!(quiet(step(&mut m, Event::Restart)), [Effect::Status(ConnStatus::Reconnecting { attempt: 1 }), Effect::Spawn]);
+        // An attempt under way, or no connection: the next attempt takes the change.
+        assert!(step(&mut m, Event::Restart).is_empty());
+        for m in [&mut Lifecycle::default(), &mut up()] {
+            step(m, Event::Disconnect);
+            assert!(step(m, Event::Restart).is_empty());
+        }
     }
 
     #[test]

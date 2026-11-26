@@ -161,6 +161,41 @@ pub fn connection_log(s: &mut App) {
     act(s, Action::OpenLog);
 }
 
+/// The log after a wake found the connection dead, then verbose logging turned on: the
+/// reconnect with `-v` and ssh's `debug1:` lines.
+pub fn connection_log_verbose(s: &mut App) {
+    listing(s);
+    let ssh = "ssh -T -x -e none -o BatchMode=no -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+               -o ConnectTimeout=15 -o ControlMaster=no -v -s prod sftp";
+    let lines: [(i64, String); 16] = [
+        (0, "The computer was asleep: checking the connection.".into()),
+        (5_002, "The connection didn't answer a check within 5 s.".into()),
+        (5_002, "Connection lost: the SFTP channel stopped answering.".into()),
+        (5_002, "Reconnecting in 1 s.".into()),
+        (6_004, "Reconnecting (attempt 1)…".into()),
+        (6_731, "Reconnected.".into()),
+        (61_200, "Verbose logging on: ssh runs with -v.".into()),
+        (61_200, "Reconnecting (attempt 1)…".into()),
+        (61_201, format!("Running {ssh}")),
+        (61_214, "debug1: OpenSSH_10.0p2, OpenSSL 3.5.1 1 Jul 2025".into()),
+        (61_215, "debug1: Reading configuration data /home/fatih/.ssh/config".into()),
+        (61_240, "debug1: Connecting to prod.example.com [203.0.113.10] port 22.".into()),
+        (61_301, "debug1: Connection established.".into()),
+        (61_655, "debug1: Authenticated to prod.example.com ([203.0.113.10]:22) using \"publickey\".".into()),
+        (61_702, "SFTP session started.".into()),
+        (61_702, "Reconnected.".into()),
+    ];
+    let start = (s.now - 600) * 1000;
+    if let Some(c) = s.conns.get_mut(&prod()) {
+        c.log = LogBuffer::default();
+        for (at, line) in lines {
+            c.log.push(start + at, line);
+        }
+        c.log.verbose = true;
+    }
+    act(s, Action::OpenLog);
+}
+
 /// A transfer job as the engine would report it, at `done` of `total` bytes.
 fn job(id: u64, kind: JobKind, host: &str, title: &str, state: TaskState, done: u64, total: u64) -> JobView {
     JobView {
@@ -580,6 +615,7 @@ pub const SCENES: &[Scene] = &[
     ("host-key", host_key),
     ("confirm", confirm),
     ("connection-log", connection_log),
+    ("connection-log-verbose", connection_log_verbose),
     ("transfers", transfers),
     ("transfers-uploads", transfers_uploads),
     ("transfer-conflict", transfer_conflict),

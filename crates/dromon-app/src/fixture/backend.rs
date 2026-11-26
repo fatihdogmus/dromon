@@ -9,6 +9,8 @@
 //! real ones. A prompt stays open until the UI answers it.
 //!
 //! There's no clock: a lost connection says when it would retry, then stays reconnecting.
+//! Nothing sleeps either, so no wake or probe happens (`service/wake.rs`). Verbose logging
+//! (`Command::Verbose`) reconnects a live host at once with `-v`, as the service does.
 //! Answers are compared with the fixture's and wiped; nothing logs them.
 //!
 //! Saved and recent hosts are `fixture/hostbook.rs`'s, in memory.
@@ -84,6 +86,8 @@ struct Conn {
     watch: Watch,
     /// The server's next step of changes made elsewhere (`changes.rs`).
     next_change: usize,
+    /// "ssh" runs with `-v` (`Command::Verbose`).
+    verbose: bool,
 }
 
 /// One connection attempt, at auth step `step`.
@@ -235,11 +239,19 @@ impl Core {
         match fx {
             E::Spawn => {
                 let line = self.ssh_line(host);
+                let (_, hostname) = self.account(host);
+                let port = self.spec(host).and_then(|h| h.port).unwrap_or(22);
                 let conn = self.conns.entry(host.clone()).or_default();
                 conn.ended = None;
                 conn.attempt =
                     Some(Attempt { auth: AuthAttempt::new(host.clone()), step: 0, asked: 0, wrong: 0, waiting: None, notices: Vec::new() });
+                let verbose = conn.verbose;
                 Self::log(host, line, out);
+                // What `ssh -v` says first.
+                if verbose {
+                    Self::log(host, "debug1: Reading configuration data /etc/ssh/ssh_config", out);
+                    Self::log(host, format!("debug1: Connecting to {hostname} port {port}."), out);
+                }
                 queue.push_back(Work::Advance);
             }
             E::Kill => {
@@ -269,6 +281,8 @@ impl Core {
             }
             E::ForgetSecrets => self.store.clear(host),
             E::Log(line) => Self::log(host, line, out),
+            // Its sessions always answer (and nothing here sleeps).
+            E::Probe => {}
         }
     }
 
@@ -276,7 +290,8 @@ impl Core {
     fn ssh_line(&self, host: &HostId) -> String {
         let spec = self.spec(host).cloned().unwrap_or_else(|| HostSpec::from_config_alias(host.as_str()));
         let env = AskpassEnv { exe: "dromon".into(), endpoint: String::new(), token: String::new() };
-        let args = match SshCommand::sftp(&spec, &env, false) {
+        let verbose = self.conns.get(host).is_some_and(|c| c.verbose);
+        let args = match SshCommand::sftp(&spec, &env, verbose) {
             Ok(cmd) => cmd.args.iter().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<_>>().join(" "),
             Err(_) => format!("-s {host} sftp"),
         };
@@ -528,6 +543,21 @@ impl Core {
         }
     }
 
+    /// Verbose logging on or off, as the service's: every window hears it, and a live
+    /// connection reconnects at once (signing in from memory, its folders listed again).
+    fn verbose(&mut self, host: HostId, on: bool, out: &mut Vec<ServiceEvent>) {
+        if self.spec(&host).is_none() {
+            return;
+        }
+        let conn = self.conns.entry(host.clone()).or_default();
+        let changed = std::mem::replace(&mut conn.verbose, on) != on;
+        out.push(ServiceEvent::Verbose { host: host.clone(), on });
+        if changed {
+            Self::log(&host, if on { "Verbose logging on: ssh runs with -v." } else { "Verbose logging off." }, out);
+            self.drive(&host, Work::Life(Event::Restart), out);
+        }
+    }
+
     /// The host whose open prompt is `id`.
     fn owner(&self, id: PromptId) -> Option<HostId> {
         self.conns.iter().find(|(_, c)| c.attempt.as_ref().and_then(|a| a.waiting.as_ref()).is_some_and(|o| o.id == id)).map(|(h, _)| h.clone())
@@ -560,6 +590,9 @@ impl Core {
         let mut out = Vec::new();
         match cmd {
             Command::Connect { host } => {
+                if self.conns.get(&host).is_some_and(|c| c.verbose) {
+                    out.push(ServiceEvent::Verbose { host: host.clone(), on: true });
+                }
                 if self.spec(&host).is_none() {
                     let status = ConnStatus::Failed("Dromon doesn't know this host any more.".into());
                     out.push(ServiceEvent::Status { host, status });
@@ -599,6 +632,7 @@ impl Core {
                 self.windows.insert(self.from, vis);
             }
             Command::Poll { host } => self.poll(&host, &mut out),
+            Command::Verbose { host, on } => self.verbose(host, on, &mut out),
             Command::HostBook(cmd) => self.book.command(cmd, &mut out),
             Command::WindowClosed => {
                 self.windows.remove(&self.from);

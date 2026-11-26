@@ -23,6 +23,9 @@ pub struct LogBuffer {
     cap: usize,
     /// Bumped on every push, so the log sheet can tell it changed.
     pub version: u64,
+    /// The sheet's "Verbose logging": ssh runs with `-v` for this host, for the rest of the
+    /// session (never saved), as the service last said (`ServiceEvent::Verbose`).
+    pub verbose: bool,
 }
 
 impl Default for LogBuffer {
@@ -33,7 +36,7 @@ impl Default for LogBuffer {
 
 impl LogBuffer {
     pub fn with_capacity(cap: usize) -> LogBuffer {
-        LogBuffer { lines: VecDeque::new(), cap: cap.max(1), version: 0 }
+        LogBuffer { lines: VecDeque::new(), cap: cap.max(1), version: 0, verbose: false }
     }
 
     pub fn push(&mut self, at_ms: i64, text: impl Into<String>) {

@@ -146,6 +146,14 @@ and the connection log gets the lines the real service writes ("Running ssh …"
 "Answered ssh's prompt.", "Permission denied, please try again.", "SFTP session started.",
 "Connected.", "Couldn't connect: …", "Disconnected.").
 
+The log sheet's **Verbose logging** switch works as in the app: the connection comes back at once
+(Reconnecting, then Connected, signing in from memory, the folder on screen listed again; a step
+nothing remembers, like a code, asks again), its "Running ssh …" line has `-v`, and two `debug1:`
+lines follow it ("Reading configuration data …", "Connecting to <hostname> port <port>.") on
+every attempt while it's on. A host that isn't connected takes it at its next connect. A fixture
+has no clock, so it never sleeps: the checks after a wake or a window's focus (spike S6) don't
+run, and its sessions always answer.
+
 ## Folders
 
 `tree` maps absolute paths to a list of entries, or to an error:

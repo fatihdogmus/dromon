@@ -192,6 +192,8 @@ pub enum Action {
     OpenLog,
     /// Close a connection and forget its remembered secrets.
     Disconnect(HostId),
+    /// The log's "Verbose logging" switch: ssh with `-v` or without, reconnecting a live host.
+    Verbose { host: HostId, on: bool },
     /// ⌘D or the context menu: download the selected rows (or the cursor's).
     Download,
     /// Files dropped or pasted from Finder/Explorer: upload them into the folder on screen, or
@@ -414,6 +416,11 @@ impl App {
                     c.log.push((self.wall_ms)(), line);
                 }
             }
+            ServiceEvent::Verbose { host, on } => {
+                if let Some(c) = self.conns.get_mut(&host) {
+                    c.log.verbose = on;
+                }
+            }
             ServiceEvent::Transfers(jobs) => {
                 // Every window sees every snapshot; the badge and notifications come from the
                 // leading one alone (`state/windows.rs`).
@@ -570,6 +577,12 @@ impl App {
                 if self.conns.contains_key(&host) {
                     self.ui.sheets.forget_host(&host);
                     self.send(Command::Disconnect { host });
+                }
+            }
+            Action::Verbose { host, on } => {
+                if let Some(c) = self.conns.get_mut(&host) {
+                    c.log.verbose = on;
+                    self.send(Command::Verbose { host, on });
                 }
             }
             Action::Download

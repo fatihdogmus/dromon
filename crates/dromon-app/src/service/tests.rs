@@ -8,7 +8,10 @@
 //!
 //! - `pw`: asks `x@y's password: ` until it hears `secret` (three tries); a cancel is
 //!   "Permission denied". While serving, creating the file `drop` next to it ends the
-//!   connection the way a network drop does.
+//!   connection the way a network drop does, and `freeze` stops `sftp-server` (a network gone
+//!   silent: ssh still runs, nothing answers). While the file `down` exists it refuses to
+//!   connect.
+//! - With `-v` it says so on stderr (`debug1: verbose …`).
 //! - `hostkey`: asks the unknown-host question; anything but `yes` is "Host key verification
 //!   failed."
 //! - `vanish`: asks for a code, then exits (once the test saw the prompt) before it's answered.
@@ -23,7 +26,7 @@ use std::time::Duration;
 use dromon_core::{ConnStatus, Error, HostId, HostSpec, Prompt, PromptAnswer, PromptKind, RemotePath};
 use tokio::sync::mpsc;
 
-use super::{Config, Sink, run};
+use super::{Config, Sink, serve};
 use crate::state::{Command, FileOp, OpId, ServiceEvent, WindowId};
 
 const SFTP_SERVERS: [&str; 2] = ["/usr/lib/openssh/sftp-server", "/usr/lib/ssh/sftp-server"];
@@ -35,8 +38,10 @@ dir="$(cd "$(dirname "$0")" && pwd)"
 alias=""; prev=""
 for a in "$@"; do [ "$prev" = "-s" ] && alias="$a"; prev="$a"; done
 echo "debug1: fake ssh for $alias" >&2
+for a in "$@"; do [ "$a" = "-v" ] && echo "debug1: verbose output from the fake ssh" >&2; done
 case "$alias" in
   pw)
+    [ -e "$dir/down" ] && { echo "ssh: connect to host y port 22: Connection refused" >&2; exit 255; }
     for try in 1 2 3; do
       answer="$("$SSH_ASKPASS" "x@y's password: ")" || { echo "x@y: Permission denied (password)." >&2; exit 255; }
       [ "$answer" = "secret" ] && break
@@ -63,6 +68,11 @@ while kill -0 "$pid" 2>/dev/null; do
     rm -f "$dir/drop"; kill "$pid"
     echo "Connection to y closed by remote host." >&2
     exit 255
+  fi
+  if [ -e "$dir/freeze" ]; then
+    rm -f "$dir/freeze"; kill -STOP "$pid"
+    # Once nobody waits for it any more.
+    ( sleep 30; kill -KILL "$pid" ) >/dev/null 2>&1 &
   fi
   sleep 0.1
 done
@@ -100,6 +110,8 @@ impl Sink for TestSink {
 pub(super) struct Fixture {
     pub(super) dir: tempfile::TempDir,
     commands: mpsc::UnboundedSender<(WindowId, Command)>,
+    /// Tells the service the computer slept this long (instead of the clocks' watcher).
+    pub(super) wake: mpsc::UnboundedSender<Duration>,
     events: mpsc::UnboundedReceiver<(Option<WindowId>, ServiceEvent)>,
     /// Everything seen so far, for failure messages.
     pub(super) seen: Vec<ServiceEvent>,
@@ -149,8 +161,9 @@ impl Fixture {
         };
         let (commands, rx) = mpsc::unbounded_channel();
         let (sink, events) = mpsc::unbounded_channel();
-        tokio::spawn(run(rx, TestSink(sink), cfg));
-        Some(Fixture { dir, commands, events, seen: Vec::new(), to: Vec::new() })
+        let (wake, wakes) = mpsc::unbounded_channel();
+        tokio::spawn(serve(rx, TestSink(sink), cfg, wakes));
+        Some(Fixture { dir, commands, wake, events, seen: Vec::new(), to: Vec::new() })
     }
 
     pub(super) fn root(&self) -> RemotePath {

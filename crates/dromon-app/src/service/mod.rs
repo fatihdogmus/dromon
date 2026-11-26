@@ -20,6 +20,10 @@
 //! on its SFTP session. The password store lives here only: cleared per host on Disconnect, and
 //! all of it when the UI goes away. `hostfiles.rs` owns the files: discovery and its watcher,
 //! the saved hosts' `hosts.conf`, and "Add to SSH config".
+//!
+//! The manager also watches the clocks for a sleep (`wake.rs`; Rune reports no wake or network
+//! change): after one, and when a window gains focus, every live connection checks its session
+//! and a reconnect waiting out its backoff tries at once.
 
 mod auth;
 mod conn;
@@ -31,12 +35,16 @@ pub(crate) mod lifecycle;
 /// Adaptive polling of the folder on screen (§4.5); the fixture backend's polls use it too.
 pub(crate) mod poll;
 mod transfers;
+/// Sleep detection and connection checks (spike S6).
+mod wake;
 /// The windows as a host's task sees them; the fixture backend uses it too.
 pub(crate) mod windows;
 
 // A shell-script fake ssh and OpenSSH's sftp-server: Unix only.
 #[cfg(all(test, unix))]
 mod tests;
+#[cfg(all(test, unix))]
+mod checks_tests;
 #[cfg(all(test, unix))]
 mod windows_e2e_tests;
 
@@ -45,6 +53,7 @@ use std::ffi::OsString;
 use std::future::pending;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use dromon_core::{ConnStatus, HostId, HostSpec};
 use dromon_sftp::Visibility;
@@ -221,8 +230,17 @@ async fn recv_opt<T>(rx: &mut Option<mpsc::Receiver<T>>) -> Option<T> {
     }
 }
 
-/// The manager: routes the UI's commands and ssh's askpass requests to the host tasks.
-pub async fn run<S: Sink>(mut commands: Commands, sink: S, cfg: Config) {
+/// The manager: routes the UI's commands and ssh's askpass requests to the host tasks, and
+/// tells them when the computer woke.
+pub async fn run<S: Sink>(commands: Commands, sink: S, cfg: Config) {
+    let (woke, wakes) = mpsc::unbounded_channel();
+    tokio::spawn(wake::watch(woke));
+    serve(commands, sink, cfg, wakes).await;
+}
+
+/// [`run`], hearing of wakes (how long the computer slept) from `wakes`: the clocks' watcher's,
+/// or a test's.
+async fn serve<S: Sink>(mut commands: Commands, sink: S, cfg: Config, mut wakes: mpsc::UnboundedReceiver<Duration>) {
     let (askpass, mut requests) = match AskpassServer::bind() {
         Ok(mut server) => {
             let requests = server.take_requests();
@@ -251,6 +269,7 @@ pub async fn run<S: Sink>(mut commands: Commands, sink: S, cfg: Config) {
             },
             Some(req) = recv_opt(&mut requests) => route(req, &conns),
             Some(update) = book_updates.recv() => book.update(update, &mut known, &sink),
+            Some(slept) = wakes.recv() => woke(slept, &conns),
         }
     }
     // The UI is gone: stop every connection and forget every secret.
@@ -275,16 +294,17 @@ fn dispatch<S: Sink>(
                 sink.emit_to(from, ServiceEvent::Status { host, status });
                 return;
             };
-            let alive = conns.get(&host).is_some_and(|c| !c.cmds.is_closed());
-            if !alive {
-                let c = conn::start(spec.clone(), shared.clone(), sink.clone());
-                for (w, vis) in windows.iter() {
-                    let _ = c.cmds.send(ConnCmd::Window(*w, *vis));
-                }
-                conns.insert(host.clone(), c);
-            }
-            if let Some(c) = conns.get(&host) {
-                let _ = c.cmds.send(ConnCmd::Connect(from, spec));
+            let c = task(spec.clone(), conns, shared, sink, windows);
+            let _ = c.cmds.send(ConnCmd::Connect(from, spec));
+        }
+        Command::Verbose { host, on } => {
+            // A host that never connected keeps it for when it does.
+            let c = match known.get(&host) {
+                Some(spec) => Some(task(spec.clone(), conns, shared, sink, windows)),
+                None => conns.get(&host),
+            };
+            if let Some(c) = c {
+                let _ = c.cmds.send(ConnCmd::Verbose(on));
             }
         }
         Command::List { host, path } => {
@@ -332,9 +352,14 @@ fn dispatch<S: Sink>(
                 (true, true) => Visibility::Focused,
                 (true, false) => Visibility::VisibleUnfocused,
             };
+            // A window gaining focus checks every live connection (`wake.rs`).
+            let gained = vis == Visibility::Focused && windows.get(&from) != Some(&Visibility::Focused);
             windows.insert(from, vis);
             for c in conns.values() {
                 let _ = c.cmds.send(ConnCmd::Window(from, vis));
+                if gained {
+                    let _ = c.cmds.send(ConnCmd::Focus);
+                }
             }
         }
         Command::Poll { host } => {
@@ -350,6 +375,35 @@ fn dispatch<S: Sink>(
         }
         // The manager's loop takes these first.
         Command::HostBook(_) => {}
+    }
+}
+
+/// `spec`'s host's task, started (and told how the windows show) if it has none running.
+fn task<'c, S: Sink>(
+    spec: HostSpec,
+    conns: &'c mut HashMap<HostId, ConnHandle>,
+    shared: &Shared,
+    sink: &S,
+    windows: &BTreeMap<WindowId, Visibility>,
+) -> &'c ConnHandle {
+    let host = spec.id.clone();
+    if conns.get(&host).is_none_or(|c| c.cmds.is_closed()) {
+        let c = conn::start(spec, shared.clone(), sink.clone());
+        for (w, vis) in windows {
+            let _ = c.cmds.send(ConnCmd::Window(*w, *vis));
+        }
+        conns.insert(host.clone(), c);
+    }
+    &conns[&host]
+}
+
+/// The computer woke after sleeping `slept`: every connection checks itself.
+fn woke(slept: Duration, conns: &HashMap<HostId, ConnHandle>) {
+    if crate::state::service::tracing() {
+        eprintln!("dromon-trace: Wake slept_s={} hosts={}", slept.as_secs(), conns.len());
+    }
+    for c in conns.values() {
+        let _ = c.cmds.send(ConnCmd::Wake);
     }
 }
 

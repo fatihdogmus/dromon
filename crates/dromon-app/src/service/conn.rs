@@ -10,6 +10,11 @@
 //! screen here is listed for it, polled while it shows, and listed again after a reconnect or
 //! an operation that changed it. One listing runs at a time: one a window waits for finishes
 //! before the next starts (a poll gives way at once).
+//!
+//! The checks after a wake or a window's focus, and verbose logging, are `conn_checks.rs`.
+
+#[path = "conn_checks.rs"]
+mod checks;
 
 use std::collections::VecDeque;
 use std::future::pending;
@@ -31,6 +36,7 @@ use super::fileops::{FileOps, Finished};
 use super::lifecycle::{Effect, Event, Lifecycle, Phase, step};
 use super::poll::{Collector, Outcome};
 use super::transfers::EngineMsg;
+use super::wake::{ProbeGate, Why};
 use super::windows::{Route, Watch, status_of};
 use super::{Config, Sink};
 use crate::state::{FileOp, OpId, ServiceEvent, WindowId};
@@ -55,6 +61,12 @@ pub enum ConnCmd {
     PollNow(WindowId),
     /// The window closed.
     Closed(WindowId),
+    /// The computer woke from sleep (`wake.rs`).
+    Wake,
+    /// A window gained focus: check the session, at most every 30 s.
+    Focus,
+    /// Run ssh with `-v` or without from now on (`Command::Verbose`).
+    Verbose(bool),
 }
 
 /// What the connection tasks share: configuration, the askpass endpoint, the password store,
@@ -81,6 +93,9 @@ pub fn start<S: Sink>(spec: HostSpec, shared: Shared, sink: S) -> ConnHandle {
     let task = Task {
         host: spec.id.clone(),
         spec,
+        verbose: shared.cfg.verbose,
+        probes: ProbeGate::default(),
+        probe: None,
         shared,
         sink,
         life: Lifecycle::default(),
@@ -174,8 +189,9 @@ async fn page_opt(run: &mut Option<ListRun>) -> Option<Result<Vec<Entry>, Error>
 }
 
 impl Session {
-    /// Starts ssh for `spec` with a fresh token, and the SFTP handshake on its stdio.
-    async fn start(spec: &HostSpec, shared: &Shared) -> Result<(Session, String), String> {
+    /// Starts ssh for `spec` (with `-v` if `verbose`) with a fresh token, and the SFTP handshake
+    /// on its stdio.
+    async fn start(spec: &HostSpec, shared: &Shared, verbose: bool) -> Result<(Session, String), String> {
         let cfg = &shared.cfg;
         let (env, askpass) = match &shared.askpass {
             Some(server) => {
@@ -191,7 +207,7 @@ impl Session {
                 server.unregister(&token);
             }
         };
-        let built = SshCommand::sftp(spec, &env, cfg.verbose).and_then(|cmd| match &cfg.config_file {
+        let built = SshCommand::sftp(spec, &env, verbose).and_then(|cmd| match &cfg.config_file {
             Some(file) => cmd.with_config_file(file),
             None => Ok(cmd),
         });
@@ -304,11 +320,17 @@ enum Input {
     Retry(u32),
     OpEnded(Finished),
     PollDue,
+    Probed(checks::Probed),
 }
 
 struct Task<S: Sink> {
     host: HostId,
     spec: HostSpec,
+    /// ssh runs with `-v` (the log's "Verbose logging").
+    verbose: bool,
+    /// When the session is checked, and the check running (`conn_checks.rs`).
+    probes: ProbeGate,
+    probe: Option<checks::Probe>,
     shared: Shared,
     sink: S,
     life: Lifecycle,
@@ -342,6 +364,7 @@ impl<S: Sink> Task<S> {
                 attempt = retry_due(&self.retry) => Input::Retry(attempt),
                 ended = self.ops.next() => Input::OpEnded(ended),
                 _ = sleep_opt(poll_at) => Input::PollDue,
+                probed = checks::next(&mut self.probe) => Input::Probed(probed),
             };
             match input {
                 Input::Cmd(cmd) => self.on_command(cmd).await,
@@ -357,6 +380,7 @@ impl<S: Sink> Task<S> {
                         self.start_poll(path);
                     }
                 }
+                Input::Probed(probed) => self.on_probed(probed).await,
             }
         }
         // The app is quitting: the session drops, killing ssh.
@@ -468,12 +492,18 @@ impl<S: Sink> Task<S> {
                     self.emit_to(to, ServiceEvent::Prompt(prompt));
                 }
             }
+            ConnCmd::Wake => self.drive(Event::Wake, None).await,
+            ConnCmd::Focus => self.probe(Why::Focus),
+            ConnCmd::Verbose(on) => self.set_verbose(on).await,
         }
     }
 
     /// `window` asks to connect: a host that's down starts; one that's up opens in that window
     /// at once; one on its way (back) opens there when it's up.
     async fn connect(&mut self, window: WindowId, spec: HostSpec) {
+        if self.verbose {
+            self.sink.emit_to(window, ServiceEvent::Verbose { host: self.host.clone(), on: true });
+        }
         match self.life.phase {
             Phase::Idle | Phase::Failed(_) | Phase::Disconnected => {
                 self.spec = spec;
@@ -698,10 +728,12 @@ impl<S: Sink> Task<S> {
             for fx in step(&mut self.life, event) {
                 match fx {
                     Effect::Spawn => {
+                        // An attempt now: no wait for one is left.
+                        self.retry = None;
                         if let Some(old) = self.session.take() {
                             self.session_gone(&old);
                         }
-                        match Session::start(&self.spec, &self.shared).await {
+                        match Session::start(&self.spec, &self.shared, self.verbose).await {
                             Ok((session, note)) => {
                                 self.session = Some(session);
                                 self.log(note);
@@ -756,6 +788,7 @@ impl<S: Sink> Task<S> {
                     }
                     Effect::ForgetSecrets => auth::lock(&self.shared.store).clear(&self.host),
                     Effect::Log(line) => self.log(line),
+                    Effect::Probe => self.probe(Why::Wake),
                 }
             }
         }

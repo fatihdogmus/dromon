@@ -386,3 +386,40 @@ fn the_demo_connects_everywhere_without_a_prompt() {
     }
     let _ = b.send(Command::AnswerPrompt { id: PromptId(99), answer: PromptAnswer::Text("stale".into()) });
 }
+
+/// Verbose logging as the service does it: a live connection comes back at once with `-v`,
+/// signing in from memory and listing the folder on screen again; off, back without it.
+#[test]
+fn verbose_logging_reconnects_with_dash_v_and_without() {
+    let mut b = backend(r#"[{"password": {"accept": "hunter2"}}]"#);
+    let p = asked(&connect(&mut b));
+    assert!(opened(&reply(&mut b, p.id, "hunter2")));
+    b.send(Command::List { host: prod(), path: RemotePath::new("/home/deploy") });
+
+    let evs = b.send(Command::Verbose { host: prod(), on: true });
+    assert_eq!(evs[0], ServiceEvent::Verbose { host: prod(), on: true });
+    assert_eq!(statuses(&evs), [ConnStatus::Reconnecting { attempt: 1 }, ConnStatus::Ready]);
+    assert!(prompts(&evs).is_empty() && !opened(&evs), "silent, the window keeps its folder");
+    let lines = logs(&evs);
+    let run = lines.iter().find(|l| l.starts_with("Running ssh")).unwrap();
+    assert!(run.ends_with(" -v -s prod sftp"), "{run}");
+    assert!(lines.contains(&"debug1: Connecting to prod.example.com port 22.".to_owned()), "{lines:#?}");
+    assert!(lines.contains(&"ssh asked “deploy@prod.example.com's password:”: answered from memory.".to_owned()));
+    assert!(evs.iter().any(|e| matches!(e, ServiceEvent::ListingPage { path, done: true, .. } if path.as_str() == "/home/deploy")));
+    // Connecting again from another window says it's on.
+    assert!(connect(&mut b).contains(&ServiceEvent::Verbose { host: prod(), on: true }));
+
+    let evs = b.send(Command::Verbose { host: prod(), on: false });
+    let lines = logs(&evs);
+    assert!(lines.iter().any(|l| l.starts_with("Running ssh") && l.ends_with(" -s prod sftp") && !l.contains(" -v ")), "{lines:#?}");
+    assert!(!lines.iter().any(|l| l.starts_with("debug1:")));
+    assert_eq!(statuses(&evs), [ConnStatus::Reconnecting { attempt: 1 }, ConnStatus::Ready]);
+    // The same again: said, nothing else.
+    assert_eq!(b.send(Command::Verbose { host: prod(), on: false }), [ServiceEvent::Verbose { host: prod(), on: false }]);
+    // A host that isn't connected takes it at its next connect.
+    let mut b = backend("[]");
+    let evs = b.send(Command::Verbose { host: prod(), on: true });
+    assert_eq!(evs[0], ServiceEvent::Verbose { host: prod(), on: true });
+    assert!(statuses(&evs).is_empty());
+    assert!(logs(&connect(&mut b)).iter().any(|l| l.ends_with(" -v -s prod sftp")));
+}

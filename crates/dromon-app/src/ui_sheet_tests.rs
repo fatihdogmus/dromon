@@ -200,3 +200,31 @@ fn the_status_opens_the_connection_log() {
     key(&mut rt, Key::Escape);
     assert!(!shown(&rt, "sheet"));
 }
+
+#[test]
+fn the_logs_verbose_switch_asks_for_ssh_with_dash_v_and_says_it_reconnects() {
+    let (mut rt, rec) = runtime();
+    apply(&mut rt, ServiceEvent::Status { host: prod(), status: ConnStatus::Ready });
+    click(&mut rt, "status-conn");
+    let switch = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("log-verbose")).expect("the switch");
+    assert_eq!((switch.role, switch.label.as_deref()), ("switch", Some("Verbose logging (reconnects)")));
+    assert_eq!(text_of(&rt, "log-verbose-note"), "reconnects");
+    let track = |rt: &Runtime<App>| rt.elements().into_iter().find(|e| e.key.as_deref() == Some("log-verbose-track")).unwrap().fill;
+    let off = track(&rt);
+
+    click(&mut rt, "log-verbose");
+    assert_eq!(rec.sent().last(), Some(&Command::Verbose { host: prod(), on: true }));
+    assert!(rt.state.conn().unwrap().log.verbose);
+    assert_ne!(track(&rt), off, "on: the accent track");
+    assert!(shown(&rt, "sheet"), "the log stays open to watch the reconnect");
+    // ssh's debug lines arrive in the log like any other.
+    apply(&mut rt, ServiceEvent::Log { host: prod(), line: "debug1: Connecting to prod port 22.".into() });
+    assert!(text_of(&rt, "log-lines").ends_with("debug1: Connecting to prod port 22."));
+
+    // Another window turned it off: this one's switch follows.
+    apply(&mut rt, ServiceEvent::Verbose { host: prod(), on: false });
+    assert!(!rt.state.conn().unwrap().log.verbose);
+    assert_eq!(track(&rt), off);
+    click(&mut rt, "log-verbose");
+    assert_eq!(rec.sent().last(), Some(&Command::Verbose { host: prod(), on: true }));
+}

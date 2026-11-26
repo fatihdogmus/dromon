@@ -62,6 +62,12 @@ pub enum Command {
     /// Saved and recent hosts, Add to SSH config (`state/hostbook.rs`); answered with
     /// `HostBook` events.
     HostBook(HostBookCommand),
+    /// The connection log's "Verbose logging" (§6.8): run ssh for `host` with `-v` (`on`) or
+    /// without, from now on in this session, so its `debug1:` lines reach the log. A live
+    /// connection reconnects at once to take it (silently, the folders on screen kept); a host
+    /// that isn't connected takes it at its next connect. Answered with `Verbose` to every
+    /// window, then the reconnect's `Status` changes and log lines.
+    Verbose { host: HostId, on: bool },
 }
 
 /// Identifies one file operation, chosen by the UI (unique per session).
@@ -192,6 +198,9 @@ pub enum ServiceEvent {
     FileOpFailed { id: OpId, host: HostId, error: Error },
     /// Saved hosts and the ssh config (`state/hostbook.rs`).
     HostBook(HostBookEvent),
+    /// Whether ssh for `host` runs with `-v` (the log's "Verbose logging"): after a
+    /// `Command::Verbose` from any window, and to a window that connects while it's on.
+    Verbose { host: HostId, on: bool },
 }
 
 /// Set to `1` to have [`super::App::apply`] write one [`trace_line`] per event to stderr.
@@ -238,6 +247,7 @@ pub fn trace_line(ev: &ServiceEvent) -> String {
         ServiceEvent::FileOpDone { id, host } => format!("FileOpDone host={host} id={}", id.0),
         ServiceEvent::FileOpFailed { id, host, .. } => format!("FileOpFailed host={host} id={}", id.0),
         ServiceEvent::HostBook(ev) => super::hostbook::trace_line(ev),
+        ServiceEvent::Verbose { host, on } => format!("Verbose host={host} on={on}"),
     }
 }
 
@@ -324,7 +334,8 @@ mod tests {
                 error: Some("secret".into()),
             }),
             ServiceEvent::PromptClosed(PromptId(7)),
-            ServiceEvent::Log { host, line: "debug1: secret".into() },
+            ServiceEvent::Log { host: host.clone(), line: "debug1: secret".into() },
+            ServiceEvent::Verbose { host, on: true },
         ];
         let lines: Vec<String> = events.iter().map(trace_line).collect();
         assert_eq!(
@@ -338,6 +349,7 @@ mod tests {
                 "Prompt host=prod id=7",
                 "PromptClosed id=7",
                 "Log host=prod",
+                "Verbose host=prod on=true",
             ]
         );
     }
