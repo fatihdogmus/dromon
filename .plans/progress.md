@@ -13,7 +13,7 @@ Tracks where implementation stands against `dromon-plan.md`. Newest first.
 | S3 Askpass round trip | ✅ Linux, macOS, Windows in CI with each OS's own ssh: host key, password, wrong password, passphrase, keyboard-interactive + TOTP (not macOS: no TOTP PAM there), ProxyJump, publickey,password; confirm prompts Linux/macOS only. Windows: named pipe `\\.\pipe\dromon-askpass-<pid>-<random>`, user-only DACL, client-user check | `crates/dromon-ssh/tests/askpass_e2e.rs`, `askpass_transport.rs`; helper start ≈ 2–6 ms |
 | S4 `copy-data` via russh-sftp | ✅ `RawSftpSession::extended`; 1 GiB in ~1.7 s vs ~15 s streaming | `fixture.rs` |
 | S5 Rune features (menus, clipboard files, drop, fonts, badge, notify) | ✅ fonts, tnum, titlebar; native popup menus (drawn on Linux); clipboard files; file drop; Dock badge / taskbar (`WindowHandle::set_taskbar`; Windows' bar is indeterminate: Rune's `TaskbarProgress` has no fraction); notifications (`rune-notify`) — headless-tested, real OS pending | `state/notify.rs`, `views/transfers.rs` |
-| S6 wake / network-change signal | ◐ Rune has no wake/network events; fallback (clock-jump sleep detection + connection probes on wake and focus) in progress | |
+| S6 wake / network-change signal | ✅ fallback: Rune has no wake/network events, so the service detects sleep (wall clock past monotonic, or a tick > 10 s late) and probes every live session (`realpath .`, 5 s) on wake and on window focus (≤ every 30 s per host); waiting reconnects retry at once. Verified in CI on all three OSes with a SIGSTOPped server; a real sleep/resume per OS is still to confirm | `service/wake.rs`, `service/conn_checks.rs`, `tests/wake_e2e.rs` |
 
 **Done**
 - `dromon-core`: `RemotePath`, `Entry`/`EntryKind`, natural sort, `sort_entries`, `HostSpec`, `PromptKind` (incl. `Confirm`, `Notice`), errors.
@@ -77,7 +77,7 @@ Tracks where implementation stands against `dromon-plan.md`. Newest first.
 - M5 server matrix (`DROMON_SERVER_MATRIX=1`, CI linux): Debian trixie (OpenSSH 10), bullseye (8.4, no copy-data: streamed copies), Alpine 3.24, toxiproxy (latency, caps, reset mid-transfer → resume); 100 / 10k / 100k folders, symlink loops, unreadable folders. CI windows: the runner's own OpenSSH Server, `/C:/` paths, round trip, rename, copy, delete.
 
 **Next**
-1. S6 fallback and per-host verbose logging (in progress); M5 performance gates and soak (in progress).
+1. M5 performance gates and soak, M5 accessibility pass (both in progress). (Done: S6 fallback; per-host "Verbose logging" in the connection log.)
 2. The accent pick (user).
 3. M5: accessibility pass (AccessKit tree, full keyboard reachability), packaging dry run.
 4. A first run in a real window on a macOS and a Linux desktop (real GPU, real input, Wayland), and on Windows.
