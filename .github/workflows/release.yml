@@ -181,9 +181,10 @@ jobs:
           ref: ${{ needs.plan.outputs.sha }}
           persist-credentials: false
       - name: System packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends dpkg-dev pkg-config libxkbcommon-dev libwayland-dev
+        uses: ./.github/actions/apt-install
+        with:
+          packages: dpkg-dev pkg-config libxkbcommon-dev libwayland-dev
+          save: ${{ github.ref == 'refs/heads/main' }}
       - name: Rust toolchain
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3

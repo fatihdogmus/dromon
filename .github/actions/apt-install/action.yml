@@ -1,0 +1,53 @@
+name: Install Ubuntu packages (cached)
+description: >-
+  apt-get install with the .deb files kept in the Actions cache. Ubuntu's mirrors can be slow from
+  GitHub's runners (CI once spent 7.5 minutes downloading 92 MB at 208 kB/s); with a cache hit
+  nothing is downloaded. The key is the exact list of .deb files apt resolves after
+  `apt-get update`, so new package versions make a new key and only the changed files download.
+  apt checks each cached file against the signed package lists before installing it (a file
+  that doesn't match is downloaded again), so the cache can't change what gets installed.
+inputs:
+  packages:
+    description: Packages to install, separated by spaces or newlines
+    required: true
+  save:
+    description: "Save the .deb files on a cache miss (pass: github.ref == 'refs/heads/main')"
+    required: false
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - id: plan
+      shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+      run: |
+        sudo apt-get update -qq
+        # shellcheck disable=SC2086 # PACKAGES is a word list
+        files=$(apt-get install -y --no-install-recommends --print-uris -qq $PACKAGES | cut -d' ' -f2 | sort)
+        # ImageOS: the runner image (ubuntu22, ubuntu24), set by GitHub's runners.
+        echo "key=apt-${ImageOS:-$(. /etc/os-release && echo "$ID$VERSION_ID")}-$(printf '%s' "$files" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+        echo "$(printf '%s' "$files" | grep -c . || true) .deb files to install"
+        mkdir -p "$RUNNER_TEMP/apt-debs"
+    - id: restore
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/apt-debs
+        key: ${{ steps.plan.outputs.key }}
+    - shell: bash
+      env:
+        PACKAGES: ${{ inputs.packages }}
+      run: |
+        if compgen -G "$RUNNER_TEMP/apt-debs/*.deb" > /dev/null; then
+          sudo cp "$RUNNER_TEMP"/apt-debs/*.deb /var/cache/apt/archives/
+        fi
+        # shellcheck disable=SC2086 # PACKAGES is a word list
+        sudo apt-get install -y --no-install-recommends -o APT::Keep-Downloaded-Packages=true $PACKAGES
+        if compgen -G "/var/cache/apt/archives/*.deb" > /dev/null; then
+          cp /var/cache/apt/archives/*.deb "$RUNNER_TEMP/apt-debs/"
+        fi
+    - if: inputs.save == 'true' && steps.restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/apt-debs
+        key: ${{ steps.plan.outputs.key }}
