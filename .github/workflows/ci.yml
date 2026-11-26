@@ -48,6 +48,10 @@ jobs:
       DROMON_REQUIRE_DOCKER: "1"
       # No GPU on the runner: Mesa's software Vulkan (lavapipe) renders the goldens and windows.
       VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.json
+      # Line tables only (file:line in panics and backtraces, no full debug info): a smaller
+      # build cache (GitHub keeps 10 GB per repository) and quicker links. Test jobs only:
+      # rust-cache hashes CARGO_* into its key, and the package jobs share the release's.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -121,6 +125,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     # The suite twice (plain, then against the native sshd).
     timeout-minutes: 75
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only # as in linux
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -171,6 +177,8 @@ jobs:
     runs-on: windows-2025
     # The suite twice (plain, then with the WSL2 Docker fixture) and the WSL setup in between.
     timeout-minutes: 75
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only # as in linux
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -314,8 +322,9 @@ jobs:
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          key: release-linux-x64
-          save-if: false
+          # The same cache as release.yml's build-linux (shared-key: no job name in the key).
+          shared-key: release-linux-x64
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Build, install and run the packages
         run: cargo package-linux --arch x64 --build host --verify --out "$RUNNER_TEMP/linux"
 
@@ -332,8 +341,8 @@ jobs:
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          key: release-macos-universal
-          save-if: false
+          shared-key: release-macos-universal # release.yml's build-macos
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Build Dromon.app and the DMG
         run: bash packaging/macos/build-app.sh "$RUNNER_TEMP/build"
       - name: Open and check the DMG
@@ -353,8 +362,8 @@ jobs:
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          key: release-windows-x64
-          save-if: false
+          shared-key: release-windows-x64 # release.yml's build-windows
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Build dromon.exe (release, version resource)
         shell: pwsh
         run: packaging/windows/build-exe.ps1 -Arch x64 -Out "$env:RUNNER_TEMP/windows"

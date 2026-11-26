@@ -188,7 +188,9 @@ jobs:
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          key: release-linux-x64
+          # Shared with ci.yml's linux-package (shared-key: no job name in the key), which
+          # keeps it warm on every push to main.
+          shared-key: release-linux-x64
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Build the binary and the .deb
         run: cargo package-linux --arch x64 --build host --no-arch --out "$RUNNER_TEMP/linux"
@@ -237,7 +239,7 @@ jobs:
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          key: release-macos-universal
+          shared-key: release-macos-universal # ci.yml's macos-package
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Build Dromon.app (universal, Apple silicon + Intel) and the unsigned DMG
         run: |
@@ -263,7 +265,7 @@ jobs:
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          key: release-windows-x64
+          shared-key: release-windows-x64 # ci.yml's windows-package
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Build dromon.exe
         shell: pwsh
