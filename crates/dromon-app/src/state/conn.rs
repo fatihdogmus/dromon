@@ -483,7 +483,7 @@ mod tests {
     use dromon_core::{EntryKind, LinkTarget};
 
     fn e(name: &str, kind: EntryKind, size: u64) -> Entry {
-        Entry { name: name.into(), kind, size, mtime: Some(size as i64), mode: None }
+        Entry { name: name.into(), kind, size, mtime: Some(size as i64), mode: None, owner: None, group: None }
     }
 
     fn ready(path: &str) -> ConnView {

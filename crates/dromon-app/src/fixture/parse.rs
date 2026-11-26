@@ -600,7 +600,7 @@ fn item(v: &Value, at: &At) -> R<Item> {
         known(m, &["generate"], at)?;
         return Ok(Item::Generate(generator(g, &at.key("generate"))?));
     }
-    known(m, &["name", "kind", "target", "size", "mtime", "mode"], at)?;
+    known(m, &["name", "kind", "target", "size", "mtime", "mode", "owner", "group"], at)?;
     let name = text(required(m, "name", at)?, &at.key("name"))?;
     if name.contains('/') || name == "." || name == ".." {
         return at.key("name").err(format!("{name:?} is not a file name"));
@@ -626,7 +626,10 @@ fn item(v: &Value, at: &At) -> R<Item> {
         Some(v) => Some(mode(v, kind, &at.key("mode"))?),
         None => default_mode(kind),
     };
-    Ok(Item::Entry(Entry { name, kind, size, mtime, mode }))
+    // As the server's `ls -l` names them (or the numeric ids, as text); none: unknown.
+    let owner = optional(m, "owner").map(|v| text(v, &at.key("owner"))).transpose()?;
+    let group = optional(m, "group").map(|v| text(v, &at.key("group"))).transpose()?;
+    Ok(Item::Entry(Entry { name, kind, size, mtime, mode, owner, group }))
 }
 
 fn generator(v: &Value, at: &At) -> R<Generator> {

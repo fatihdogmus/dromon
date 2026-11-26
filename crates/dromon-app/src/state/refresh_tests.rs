@@ -50,7 +50,7 @@ fn entries(s: &App) -> Vec<Entry> {
 }
 
 fn file(name: &str, size: u64) -> Entry {
-    Entry { name: name.into(), kind: EntryKind::File, size, mtime: Some(fixture::DEMO_NOW), mode: None }
+    Entry { name: name.into(), kind: EntryKind::File, size, mtime: Some(fixture::DEMO_NOW), mode: None, owner: None, group: None }
 }
 
 fn refreshed(s: &mut App, path: &str, entries: Vec<Entry>) {

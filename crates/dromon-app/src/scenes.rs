@@ -466,6 +466,8 @@ pub fn icons(s: &mut App) {
         size,
         mtime: Some(1_795_000_000),
         mode: Some(0o644),
+        owner: None,
+        group: None,
     };
     use dromon_core::EntryKind::{Dir, File};
     let entries = vec![
@@ -498,7 +500,7 @@ pub fn poll_added(s: &mut App) {
     listing(s);
     let at = s.now - 20;
     polled(s, |entries| {
-        let file = |name: &str, size| dromon_core::Entry { name: name.into(), kind: dromon_core::EntryKind::File, size, mtime: Some(at), mode: Some(0o100_644) };
+        let file = |name: &str, size| dromon_core::Entry { name: name.into(), kind: dromon_core::EntryKind::File, size, mtime: Some(at), mode: Some(0o100_644), owner: None, group: None };
         entries.retain(|e| e.name != "favicon.ico");
         entries.extend([file("deploy.log", 2_412), file("notes.md", 860)]);
         if let Some(log) = entries.iter_mut().find(|e| e.name == "server.log") {
@@ -595,6 +597,44 @@ pub fn palette_path(s: &mut App) {
     act(s, Action::Palette(PaletteAction::OpenPath));
 }
 
+/// prod's site as its server's `ls -l` would name the owners (the demo's entries have none), with
+/// `name` selected and its Properties sheet open.
+fn properties_of(s: &mut App, name: &str) {
+    listing(s);
+    // As if the first listing had brought them (a later one with the same rows changes nothing
+    // on screen: owners aren't part of what a refresh compares).
+    if let Some(c) = s.conn_mut()
+        && let crate::state::Listing::Ready(entries) = &mut c.listing
+    {
+        for e in entries {
+            (e.owner, e.group) = (Some("deploy".into()), Some("www-data".into()));
+        }
+    }
+    click(s, name, false);
+    file(s, FileAction::Properties);
+}
+
+/// ⌥↩ (⌘I) on index.html: its kind, folder, exact size, date and time, mode and owner.
+pub fn properties_file(s: &mut App) {
+    properties_of(s, "index.html");
+}
+
+/// The releases folder's Properties after Calculate: its total, what it holds, Recalculate.
+pub fn properties_folder(s: &mut App) {
+    properties_of(s, "releases");
+    file(s, FileAction::Calculate);
+}
+
+/// [`properties_file`] in the light theme.
+pub fn properties_file_light(s: &mut App) {
+    lit(s, properties_file);
+}
+
+/// [`properties_folder`] in the light theme.
+pub fn properties_folder_light(s: &mut App) {
+    lit(s, properties_folder);
+}
+
 /// A named state: what `AppSpec::scenes` takes.
 pub type Scene = (&'static str, fn(&mut App));
 
@@ -652,6 +692,10 @@ pub const SCENES: &[Scene] = &[
     ("palette", palette),
     ("palette-filtered", palette_filtered),
     ("palette-path", palette_path),
+    ("properties-file", properties_file),
+    ("properties-folder", properties_folder),
+    ("properties-file-light", properties_file_light),
+    ("properties-folder-light", properties_folder_light),
     ("listing-compact", settings::listing_compact),
     ("settings", settings::settings),
     ("settings-light", settings::settings_light),

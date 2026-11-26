@@ -230,7 +230,7 @@ impl Server {
 }
 
 fn implied_dir(name: String) -> Entry {
-    Entry { name, kind: EntryKind::Dir, size: default_size(EntryKind::Dir), mtime: None, mode: default_mode(EntryKind::Dir) }
+    Entry { name, kind: EntryKind::Dir, size: default_size(EntryKind::Dir), mtime: None, mode: default_mode(EntryKind::Dir), owner: None, group: None }
 }
 
 /// A folder's entries with its generators run, in order.

@@ -45,6 +45,17 @@ pub fn thousands(n: u64) -> String {
     out
 }
 
+/// The exact count: "1 byte", "4,321 bytes".
+pub fn bytes(n: u64) -> String {
+    if n == 1 { "1 byte".into() } else { format!("{} bytes", thousands(n)) }
+}
+
+/// A size with its exact bytes, as Finder's Get Info writes it: "4.3 KB (4,321 bytes)"; just
+/// "512 bytes" when that's the whole of it.
+pub fn size_exact(n: u64) -> String {
+    if n < 1000 { size(n) } else { format!("{} ({})", size(n), bytes(n)) }
+}
+
 /// "1 item", "42 items", "10,000 items".
 pub fn items(n: usize) -> String {
     if n == 1 { "1 item".into() } else { format!("{} items", thousands(n as u64)) }
@@ -70,6 +81,12 @@ fn civil(days: i64) -> (i64, u32, u32) {
 pub fn date(secs: i64, offset_secs: i64) -> String {
     let (y, m, d) = civil((secs + offset_secs).div_euclid(86_400));
     format!("{} {d}, {y}", MONTHS[m as usize - 1])
+}
+
+/// A date with its time of day, 24-hour: "Nov 3, 2026 at 14:05".
+pub fn date_time(secs: i64, offset_secs: i64) -> String {
+    let day_secs = (secs + offset_secs).rem_euclid(86_400);
+    format!("{} at {:02}:{:02}", date(secs, offset_secs), day_secs / 3600, day_secs / 60 % 60)
 }
 
 /// The Modified column: "Just now", "12 min ago", "3 hr ago" (today), "Yesterday", then the
@@ -141,7 +158,7 @@ mod tests {
 
     #[test]
     fn folders_have_no_size() {
-        let dir = Entry { name: "a".into(), kind: EntryKind::Dir, size: 4096, mtime: None, mode: None };
+        let dir = Entry { name: "a".into(), kind: EntryKind::Dir, size: 4096, mtime: None, mode: None, owner: None, group: None };
         assert_eq!(entry_size(&dir), "—");
         let file = Entry { kind: EntryKind::File, ..dir };
         assert_eq!(entry_size(&file), "4.1 KB");
@@ -155,6 +172,26 @@ mod tests {
         assert_eq!(thousands(1_234_567), "1,234,567");
         assert_eq!(items(1), "1 item");
         assert_eq!(items(10_000), "10,000 items");
+    }
+
+    #[test]
+    fn exact_sizes_add_the_bytes() {
+        assert_eq!(bytes(0), "0 bytes");
+        assert_eq!(bytes(1), "1 byte");
+        assert_eq!(bytes(4_321), "4,321 bytes");
+        assert_eq!(size_exact(512), "512 bytes");
+        assert_eq!(size_exact(1), "1 byte");
+        assert_eq!(size_exact(4_321), "4.3 KB (4,321 bytes)");
+        assert_eq!(size_exact(18_200_123), "18.2 MB (18,200,123 bytes)");
+    }
+
+    #[test]
+    fn dates_with_times_are_24_hour_in_the_offset() {
+        assert_eq!(date_time(NOW, 0), "Nov 25, 2026 at 14:00");
+        assert_eq!(date_time(NOW + 5 * 60 + 59, 0), "Nov 25, 2026 at 14:05");
+        assert_eq!(date_time(NOW, 11 * 3600), "Nov 26, 2026 at 01:00");
+        assert_eq!(date_time(0, 0), "Jan 1, 1970 at 00:00");
+        assert_eq!(date_time(-60, 0), "Dec 31, 1969 at 23:59");
     }
 
     // 2026-11-25 14:00:00 UTC.

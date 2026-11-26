@@ -17,7 +17,7 @@
 //! The manager ([`run`]) routes commands and askpass requests to one task per host
 //! (`conn.rs`), whose lifecycle is the pure machine in `lifecycle.rs` and whose prompts go
 //! through `auth.rs`; its file operations (new folder, rename, delete) run in `fileops.rs`
-//! on its SFTP session. The password store lives here only: cleared per host on Disconnect, and
+//! on its SFTP session, and the Properties sheet's folder size walks in `sizes.rs`. The password store lives here only: cleared per host on Disconnect, and
 //! all of it when the UI goes away. `hostfiles.rs` owns the files: discovery and its watcher,
 //! the saved hosts' `hosts.conf`, and "Add to SSH config".
 //!
@@ -34,6 +34,8 @@ pub(crate) mod hosts;
 pub(crate) mod lifecycle;
 /// Adaptive polling of the folder on screen (§4.5); the fixture backend's polls use it too.
 pub(crate) mod poll;
+/// Folder size walks for the Properties sheet; the fixture backend counts with it too.
+pub(crate) mod sizes;
 mod transfers;
 /// Sleep detection and connection checks (spike S6).
 mod wake;
@@ -62,6 +64,7 @@ use tokio::sync::mpsc;
 
 use self::auth::PromptIds;
 use self::conn::{ConnCmd, ConnHandle, Shared};
+use self::sizes::SizeCmd;
 use crate::state::{App, Backend, Command, ServiceEvent, WindowId};
 
 /// Where the service's events go.
@@ -376,6 +379,19 @@ fn dispatch<S: Sink>(
             windows.remove(&from);
             for c in conns.values() {
                 let _ = c.cmds.send(ConnCmd::Closed(from));
+            }
+        }
+        Command::FolderSize { id, host, path } => {
+            // The host's task walks it; a host without one isn't connected.
+            let unsent = conns.get(&host).is_none_or(|c| c.cmds.send(ConnCmd::Size(from, SizeCmd::Start { id, path })).is_err());
+            if unsent {
+                let total = crate::state::SizeTotal::default();
+                sink.emit_to(from, ServiceEvent::FolderSizeFailed { id, host, total, error: dromon_core::Error::ConnectionLost });
+            }
+        }
+        Command::CancelFolderSize { id, host } => {
+            if let Some(c) = conns.get(&host) {
+                let _ = c.cmds.send(ConnCmd::Size(from, SizeCmd::Cancel(id)));
             }
         }
         // The manager's loop takes these first.

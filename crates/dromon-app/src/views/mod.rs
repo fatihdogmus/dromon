@@ -10,6 +10,7 @@ mod edit;
 mod list;
 mod menu;
 mod palette;
+mod properties;
 mod quick;
 mod quit;
 pub mod settings;

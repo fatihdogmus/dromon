@@ -3,12 +3,13 @@
 //! takes the press, and leaves room for Windows' caption buttons (`ChromeInsets::trailing`).
 
 use dromon_core::{ConnStatus, RemotePath};
-use rune::{El, HasPopup, Key, KeyEvent, LoopSpec, Tx, el, icon, row, text, text_input};
+use rune::{El, HasPopup, Key, KeyEvent, KeyPlatform, LoopSpec, Tx, el, icon, row, text, text_input};
 
 use super::widgets::{Keyboard, chord, icon_button, kbd};
 use super::{Paint, run, transfers};
 use crate::icons;
-use crate::state::{Action, App, ConnView, Filter, PaletteAction, RowTarget};
+use crate::state::keys::{self, FileKey};
+use crate::state::{Action, App, ConnView, FileAction, Filter, PaletteAction, RowTarget, Shortcut};
 use crate::theme::{radius, size, space, type_};
 
 pub fn view(s: &App, p: Paint) -> El {
@@ -198,9 +199,12 @@ fn filter(s: &App, c: &ConnView, p: Paint) -> El {
     field.child(input).child(clear)
 }
 
-/// Keys the filter field hands to the list before its editor sees them.
+/// Keys the filter field hands to the list before its editor sees them; Properties (⌘I,
+/// Alt+Return) too, which a field keeps from the window's shortcuts otherwise.
 fn filter_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
+    let properties = Some(Shortcut::File(FileKey::Properties));
     let action = match ev.key {
+        _ if keys::shortcut(ev, KeyPlatform::current()) == properties => Action::File(FileAction::Properties),
         Key::Escape => Action::CloseFilter,
         Key::Up => Action::Move { delta: -1, extend: ev.mods.shift },
         Key::Down => Action::Move { delta: 1, extend: ev.mods.shift },

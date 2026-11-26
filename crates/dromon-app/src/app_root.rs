@@ -33,6 +33,8 @@ mod ui_palette_tests;
 #[cfg(test)]
 mod ui_poll_tests;
 #[cfg(test)]
+mod ui_properties_tests;
+#[cfg(test)]
 mod ui_quick_tests;
 #[cfg(test)]
 mod ui_settings_tests;

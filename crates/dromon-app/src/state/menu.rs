@@ -68,6 +68,11 @@ pub fn delete_chord() -> &'static str {
     if cfg!(target_os = "macos") { "mod+backspace" } else { "delete" }
 }
 
+/// Properties' chord: ⌘I on macOS (Finder's Get Info), Alt+Return elsewhere (Explorer's).
+pub fn properties_chord() -> &'static str {
+    if cfg!(target_os = "macos") { "mod+i" } else { "alt+enter" }
+}
+
 impl App {
     /// The menu's entries, as things stand.
     pub fn menu(&self, kind: &MenuKind) -> Vec<MenuEntry> {
@@ -87,6 +92,9 @@ impl App {
                     MenuEntry::Separator,
                     item("rename", "Rename", live && one, Some("f2")),
                     MenuEntry::Item(MenuItem { id: "delete", title: "Delete", enabled: live, checked: None, danger: true, shortcut: Some(delete_chord()) }),
+                    MenuEntry::Separator,
+                    // Shows what the listing knows, so it works while reconnecting too.
+                    item("properties", "Properties", self.properties_row().is_some(), Some(properties_chord())),
                 ]
             }
             MenuKind::Empty => {
@@ -130,6 +138,7 @@ impl App {
             (_, "new-folder") => Action::File(FileAction::NewFolder),
             (_, "refresh") => Action::File(FileAction::Refresh),
             (_, "hidden") => Action::ToggleHidden,
+            (MenuKind::Row(_), "properties") => Action::File(FileAction::Properties),
             _ => return None,
         })
     }

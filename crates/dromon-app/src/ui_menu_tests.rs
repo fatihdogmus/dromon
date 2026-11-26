@@ -77,7 +77,7 @@ fn a_rows_menu_selects_it_and_lists_its_actions() {
     assert!(shown(&rt, "ctx-menu"));
     let c = rt.state.conn().unwrap();
     assert!(c.selection.contains("index.html") && !c.selection.contains("README.md"), "right-click selects the row");
-    assert_eq!(items(&rt), ["Open", "Download", "Copy", "Cut", "Paste", "Copy path", "Rename", "Delete"]);
+    assert_eq!(items(&rt), ["Open", "Download", "Copy", "Cut", "Paste", "Copy path", "Rename", "Delete", "Properties"]);
     // Paste without a clip is disabled: clicking it does nothing, and the menu stays.
     click(&mut rt, "ctx-paste");
     assert!(shown(&rt, "ctx-menu"));
@@ -166,21 +166,22 @@ fn rect_of(rt: &Runtime<App>, key: &str) -> [f32; 4] {
 
 #[test]
 fn shift_f10_opens_the_cursor_rows_menu_at_the_row_and_the_menu_key_too() {
-    let row_items = ["Open", "Download", "Copy", "Cut", "Paste", "Copy path", "Rename", "Delete"];
+    let row_items = ["Open", "Download", "Copy", "Cut", "Paste", "Copy path", "Rename", "Delete", "Properties"];
     for (key, mods) in [(Key::Function(10), SHIFT), (Key::ContextMenu, Mods::default())] {
         let mut rt = runtime();
-        click(&mut rt, "rows/index.html");
+        // A row near the top, so the whole menu fits below it (lower down it flips above).
+        click(&mut rt, "rows/assets");
         assert!(!shown(&rt, "ctx-menu"));
         press(&mut rt, key, mods);
         assert!(shown(&rt, "ctx-menu"), "the menu opens");
         assert_eq!(items(&rt), row_items);
         // Anchored below the cursor row's bottom-left, as a right-click's is at the pointer.
         let (list, menu) = (rect_of(&rt, "list"), rect_of(&rt, "ctx-menu"));
-        let (_, centre) = at(&rt, "rows/index.html");
+        let (_, centre) = at(&rt, "rows/assets");
         let bottom = centre + rt.state.settings.density.row() / 2.0;
         assert!((menu[0] - list[0]).abs() < 1.5, "menu x {} at the row's left {}", menu[0], list[0]);
         assert!((menu[1] - (bottom + 2.0)).abs() < 1.5, "menu y {} below the row's bottom {bottom}", menu[1]);
-        assert_eq!(rt.state.conn().unwrap().selection.cursor(), Some("index.html"));
+        assert_eq!(rt.state.conn().unwrap().selection.cursor(), Some("assets"));
         press(&mut rt, Key::Escape, Mods::default());
         assert!(!shown(&rt, "ctx-menu"));
     }
@@ -231,9 +232,13 @@ fn the_native_menu_has_the_same_items_and_shortcut_hints() {
             _ => "—".to_owned(),
         })
         .collect();
-    assert_eq!(ids, ["open", "download", "—", "copy", "cut", "paste", "copy-path", "—", "rename", "delete"]);
+    assert_eq!(ids, ["open", "download", "—", "copy", "cut", "paste", "copy-path", "—", "rename", "delete", "—", "properties"]);
     let copy = menu.find("copy").unwrap();
     assert_eq!(copy.key_equivalent_shortcut().map(ToString::to_string), "mod+c".parse::<rune::Shortcut>().ok().map(|s| s.to_string()));
+    let chord = crate::state::menu::properties_chord();
+    let properties = menu.find("properties").unwrap();
+    assert!(chord.parse::<rune::Shortcut>().is_ok(), "{chord} is a shortcut");
+    assert_eq!(properties.key_equivalent_shortcut().map(ToString::to_string), chord.parse::<rune::Shortcut>().ok().map(|s| s.to_string()));
     assert!(!menu.find("rename").unwrap().is_enabled() || rt.state.conn().unwrap().selection.len() == 1);
     let empty = crate::views::menu_popup(&rt.state.menu(&MenuKind::Empty));
     assert!(empty.find("hidden").unwrap().is_checked());

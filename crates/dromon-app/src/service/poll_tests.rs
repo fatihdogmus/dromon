@@ -6,7 +6,7 @@ const MS: fn(u64) -> Duration = Duration::from_millis;
 const S: fn(u64) -> Duration = Duration::from_secs;
 
 fn e(name: &str, size: u64) -> Entry {
-    Entry { name: name.into(), kind: EntryKind::File, size, mtime: Some(1), mode: None }
+    Entry { name: name.into(), kind: EntryKind::File, size, mtime: Some(1), mode: None, owner: None, group: None }
 }
 
 fn got(entries: &[Entry]) -> Collector {

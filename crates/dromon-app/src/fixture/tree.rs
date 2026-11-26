@@ -19,6 +19,8 @@ use dromon_core::{Entry, EntryKind, Error, HostId, RemotePath};
 use dromon_transfer::unique_name;
 
 use super::{Fixture, TreeError, default_mode, default_size};
+use crate::service::sizes;
+use crate::state::SizeTotal;
 
 /// How deep a moved tree or a tidy goes before it stops looking.
 const MAX_DEPTH: usize = 64;
@@ -58,7 +60,7 @@ pub(super) fn outermost(paths: &[RemotePath]) -> Vec<RemotePath> {
 
 fn dir_entry(name: &str, mtime: Option<i64>) -> Entry {
     let kind = EntryKind::Dir;
-    Entry { name: name.to_owned(), kind, size: default_size(kind), mtime, mode: default_mode(kind) }
+    Entry { name: name.to_owned(), kind, size: default_size(kind), mtime, mode: default_mode(kind), owner: None, group: None }
 }
 
 impl Tree {
@@ -180,7 +182,7 @@ impl Tree {
     /// A file of `size` bytes lands at `path` (replacing what was there).
     pub fn put_file(&mut self, host: &HostId, path: &RemotePath, size: u64, mtime: Option<i64>) -> Result<(), Error> {
         let kind = EntryKind::File;
-        self.place(host, path, Entry { name: String::new(), kind, size, mtime, mode: default_mode(kind) })
+        self.place(host, path, Entry { name: String::new(), kind, size, mtime, mode: default_mode(kind), owner: None, group: None })
     }
 
     /// Makes the folder `path` unless one is there; anything else in the way is an error (as
@@ -315,6 +317,23 @@ impl Tree {
         }
         for root in &roots {
             self.remove(host, root)?;
+        }
+        Ok(total)
+    }
+
+    /// The Properties sheet's Calculate on the folder `dir`, as the service's walk counts it
+    /// (`service/sizes.rs`): files, links and other non-folders by their size, links never
+    /// followed, folders that can't be listed counted as unreadable; a lost connection stops it
+    /// with what it had counted.
+    pub fn folder_size(&self, host: &HostId, dir: &RemotePath) -> Result<SizeTotal, (SizeTotal, Error)> {
+        let mut total = SizeTotal::default();
+        let mut todo = vec![dir.clone()];
+        while let Some(d) = todo.pop() {
+            match self.list(host, &d) {
+                Ok(entries) => sizes::count(&mut total, &d, entries, &mut todo),
+                Err(e) if sizes::skippable(&e) => total.unreadable += 1,
+                Err(e) => return Err((total, e)),
+            }
         }
         Ok(total)
     }

@@ -39,23 +39,32 @@ fn a_rows_menu_and_its_disabled_items() {
             ("copy-path", true),
             ("—", false),
             ("rename", true),
-            ("delete", true)
+            ("delete", true),
+            ("—", false),
+            ("properties", true)
         ],
         "no clip: Paste is off"
     );
-    let delete = s.menu(&row).into_iter().filter_map(|e| e.item().cloned()).find(|i| i.id == "delete").unwrap();
-    assert!(delete.danger);
-    // With two selected, Rename is off; with a clip, Paste is on.
+    let item = |s: &App, id| s.menu(&row).into_iter().filter_map(|e| e.item().cloned()).find(|i| i.id == id).unwrap();
+    assert!(item(&s, "delete").danger);
+    assert_eq!(item(&s, "properties").shortcut, Some(properties_chord()));
+    assert_eq!(properties_chord(), if cfg!(target_os = "macos") { "mod+i" } else { "alt+enter" });
+    assert_eq!(s.menu_action(&row, "properties"), Some(Action::File(FileAction::Properties)));
+    // With two selected, Rename and Properties are off; with a clip, Paste is on.
     s.act(Action::Click { name: "robots.txt".into(), extend: false, toggle: true });
     s.act(Action::File(FileAction::Copy));
     let enabled = |s: &App, id| shape(s, &row).into_iter().find(|(i, _)| *i == id).unwrap().1;
-    assert!(!enabled(&s, "rename") && enabled(&s, "paste"));
-    // Reconnecting: everything that touches the server is off; copy and copy path stay.
+    assert!(!enabled(&s, "rename") && !enabled(&s, "properties") && enabled(&s, "paste"));
+    assert_eq!(s.menu_action(&row, "properties"), None);
+    s.act(Action::Click { name: "index.html".into(), extend: false, toggle: false });
+    assert!(enabled(&s, "properties"));
+    // Reconnecting: everything that touches the server is off; copy, copy path and Properties
+    // (what the listing knows) stay.
     s.apply(ServiceEvent::Status { host: prod(), status: ConnStatus::Reconnecting { attempt: 1 } });
     for id in ["open", "download", "paste", "rename", "delete"] {
         assert!(!enabled(&s, id), "{id}");
     }
-    assert!(enabled(&s, "copy") && enabled(&s, "cut") && enabled(&s, "copy-path"));
+    assert!(enabled(&s, "copy") && enabled(&s, "cut") && enabled(&s, "copy-path") && enabled(&s, "properties"));
     assert_eq!(s.menu_action(&row, "delete"), None, "a disabled item does nothing");
     assert_eq!(s.menu_action(&row, "copy"), Some(Action::File(FileAction::Copy)));
 }

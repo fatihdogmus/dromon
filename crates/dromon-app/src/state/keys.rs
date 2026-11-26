@@ -70,6 +70,8 @@ pub enum FileKey {
     MoveHere,
     /// ⌘R, and F5 on Windows and Linux: list the folder on screen again.
     Refresh,
+    /// ⌘I on macOS, Alt+Return on Windows and Linux: the selected row's Properties.
+    Properties,
 }
 
 impl FileKey {
@@ -84,6 +86,7 @@ impl FileKey {
             FileKey::CopyPath => F::CopyPath,
             FileKey::MoveHere => F::RequestPaste { as_move: true },
             FileKey::Refresh => F::Refresh,
+            FileKey::Properties => F::Properties,
         }
     }
 }
@@ -157,6 +160,8 @@ pub fn shortcut(ev: &KeyEvent, platform: KeyPlatform) -> Option<Shortcut> {
         Key::Right if m.alt && !mac => Shortcut::Forward,
         Key::Up if m.cmd || (m.alt && !mac) => Shortcut::Up,
         Key::Down if m.cmd => Shortcut::Open,
+        Key::Command('i') if mac && !m.shift && !m.alt => Shortcut::File(FileKey::Properties),
+        Key::Enter if !mac && m.alt && !m.cmd && !m.shift => Shortcut::File(FileKey::Properties),
         Key::Enter if !m.cmd && !m.alt => Shortcut::Open,
         Key::Escape => Shortcut::Escape,
         Key::ContextMenu if !m.cmd && !m.alt => Shortcut::ContextMenu,
@@ -259,6 +264,22 @@ mod tests {
         // macOS may name ⌥⌘C and ⌥⌘V by what ⌥ types.
         assert_eq!(k(Key::Command('ç'), alt(CMD)), f(FileKey::CopyPath));
         assert_eq!(k(Key::Command('√'), alt(CMD)), f(FileKey::MoveHere));
+    }
+
+    #[test]
+    fn properties_is_cmd_i_on_macos_and_alt_return_elsewhere() {
+        let props = Some(Shortcut::File(FileKey::Properties));
+        let ctrl = Mods { ctrl: true, logo: false, ..CMD };
+        assert_eq!(k(Key::Command('i'), CMD), props);
+        assert_eq!(k(Key::Command('i'), Mods { shift: true, ..CMD }), None);
+        assert_eq!(k(Key::Enter, ALT), None, "⌥↩ is nothing on macOS");
+        for p in [KeyPlatform::Windows, KeyPlatform::Linux] {
+            assert_eq!(on(Key::Enter, ALT, p), props, "{p:?}");
+            assert_eq!(on(Key::Command('i'), ctrl, p), None, "{p:?}: Ctrl+I is nothing");
+            assert_eq!(on(Key::Enter, Mods { shift: true, ..ALT }, p), None);
+            assert_eq!(on(Key::Enter, NONE, p), Some(Shortcut::Open), "plain Return still opens");
+        }
+        assert_eq!(FileKey::Properties.action(), crate::state::FileAction::Properties);
     }
 
     #[test]

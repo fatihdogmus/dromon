@@ -330,7 +330,7 @@ fn highlight(seq: u64, seen: bool, p: Paint) -> El {
 
 /// The glyph for an entry: folders in the accent, file categories in a quiet tint, a link
 /// badge on symlinks; selection lifts neutral icons to `text`.
-fn file_icon(p: Paint, e: &Entry, selected: bool) -> El {
+pub(super) fn file_icon(p: Paint, e: &Entry, selected: bool) -> El {
     let t = p.t;
     let (glyph, color) = if e.kind.is_dir_like() {
         (&icons::FOLDER, t.folder)
