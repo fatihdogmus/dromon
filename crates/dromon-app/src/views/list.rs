@@ -278,8 +278,9 @@ fn file_row(s: &App, c: &ConnView, i: usize, p: Paint) -> El {
     if edit::renaming(s, c, e).is_none() {
         r = drag::row(r, &e.name);
     }
+    // A double-click opens a folder and downloads anything else (`App::open`).
+    r = r.on_double_press_tx(move |s: &mut App, tx: &mut Tx| run(s, Action::Open(n2.clone()), tx));
     if open {
-        r = r.on_double_press_tx(move |s: &mut App, tx: &mut Tx| run(s, Action::Open(n2.clone()), tx));
         r = drop::folder_row(r, &e.name).data(target);
     }
     r
