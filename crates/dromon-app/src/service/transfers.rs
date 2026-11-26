@@ -9,7 +9,9 @@
 //!   at most every [`EMIT_EVERY`].
 //! - A dropped connection aborts the running files of every job touching the host (their part
 //!   files stay, and they resume from them when the host is back); naming, scanning and tidying
-//!   work it cut off is replayed once the job's hosts are back instead of failing.
+//!   work it cut off is replayed (the same [`Action`]) once the job's hosts are back instead of
+//!   failing, see [`Engine::again`]. Every SFTP request ends (a reply, the session closing, or
+//!   `dromon-sftp`'s reply timeout), so every task reports back.
 //! - Pause and cancel abort a file's task; its part file stays (pause) or is deleted (cancel).
 
 use std::collections::HashMap;
@@ -37,6 +39,10 @@ mod tests;
 pub const PER_HOST: usize = 3;
 /// The most often the UI hears about transfers.
 pub const EMIT_EVERY: Duration = Duration::from_millis(100);
+/// Work cut off by a lost connection on sessions that are still current waits for the host to
+/// come back, or at most this long: a request that timed out on a connection that stays up
+/// brings no `HostUp`.
+pub const RETRY_AFTER: Duration = Duration::from_secs(5);
 
 /// What the engine hears from the rest of the service.
 pub enum EngineMsg {
@@ -50,20 +56,42 @@ pub enum EngineMsg {
 /// The sessions a naming, scanning or tidying task ran on, by host.
 type Used = Vec<(HostId, Sftp)>;
 
-/// What a task the engine started found out.
+/// What a task the engine started found out. Each answers one [`Action`]; a lost connection
+/// replays that same action.
 enum Outcome {
-    /// The item's free name: local for a download (or an error, e.g. the Downloads folder
-    /// can't be made), remote for Keep both.
-    Named { job: JobId, item: usize, dst: Result<ItemDst, Error>, used: Used },
-    /// Upload, copy, move: what is at `into/name` on the destination.
+    /// [`Action::Name`] of a download: the item's free local name (or an error, e.g. the
+    /// Downloads folder can't be made).
+    Named { job: JobId, item: usize, dst: Result<PathBuf, Error> },
+    /// [`Action::FreeRemoteName`] (Keep both): a free name in the destination folder.
+    FreeName { job: JobId, item: usize, dst: Result<ItemDst, Error>, used: Used },
+    /// [`Action::Name`] of an upload, copy, move: what is at `into/name` on the destination.
     /// `incoming` is what the item to transfer looks like (for the conflict sheet).
     Exists { job: JobId, item: usize, existing: Result<Option<Existing>, Error>, incoming: Side, used: Used },
     ScanProgress { job: JobId, item: usize, found: u64 },
-    Scanned { job: JobId, item: usize, scan: Result<Scan, Error>, used: Used },
-    Progress { job: JobId, file: FileId, done: u64 },
-    Finished { job: JobId, file: FileId, result: Result<(), Error> },
+    /// [`Action::Scan`] into `dst`.
+    Scanned { job: JobId, item: usize, dst: ItemDst, scan: Result<Scan, Error>, used: Used },
+    /// From run `run` of the file ([`Engine::running`]); a run aborted since is ignored.
+    Progress { job: JobId, file: FileId, run: u64, done: u64 },
+    Finished { job: JobId, file: FileId, run: u64, result: Result<(), Error> },
     /// Cross-host move: the item's empty source folders were removed.
     Tidied { job: JobId, item: usize, result: Result<(), Error>, used: Used },
+}
+
+/// A file copy in flight.
+struct Running {
+    /// The hosts it uses.
+    hosts: Vec<HostId>,
+    /// Which start of the file this is: outcomes of an earlier, aborted run of the same file
+    /// can still be on their way and must not touch this one.
+    run: u64,
+    handle: AbortHandle,
+}
+
+/// Work waiting to run again.
+struct Deferred {
+    action: Action,
+    /// Run again at the next `HostUp`, or at this time (see [`RETRY_AFTER`]).
+    due: Instant,
 }
 
 /// Starts the engine task; send it [`EngineMsg`]s.
@@ -78,13 +106,13 @@ struct Engine<S: Sink> {
     /// Each job's request: the item paths and destinations the queue's actions refer to.
     requests: HashMap<JobId, JobRequest>,
     sessions: HashMap<HostId, Sftp>,
-    /// Running file copies, by job and file, with the hosts they use.
-    running: HashMap<(JobId, FileId), (Vec<HostId>, AbortHandle)>,
+    /// Running file copies, by job and file.
+    running: HashMap<(JobId, FileId), Running>,
+    /// Counts file starts, for [`Running::run`].
+    runs: u64,
     /// Naming, scanning and tidying cut off by a dropped connection (or waiting for a session),
-    /// tried again whenever a host comes up.
-    deferred: Vec<Action>,
-    /// Each scan in flight's destination, to run it again after a dropped connection.
-    scans: HashMap<(JobId, usize), ItemDst>,
+    /// tried again whenever a host comes up (or when due).
+    deferred: Vec<Deferred>,
     outcomes: (mpsc::UnboundedSender<Outcome>, mpsc::UnboundedReceiver<Outcome>),
     sink: S,
     started: Instant,
@@ -98,8 +126,8 @@ impl<S: Sink> Engine<S> {
             requests: HashMap::new(),
             sessions: HashMap::new(),
             running: HashMap::new(),
+            runs: 0,
             deferred: Vec::new(),
-            scans: HashMap::new(),
             outcomes: mpsc::unbounded_channel(),
             sink,
             started: Instant::now(),
@@ -127,14 +155,16 @@ impl<S: Sink> Engine<S> {
                     if std::mem::take(&mut self.dirty) {
                         self.sink.emit(ServiceEvent::Transfers(self.queue.views(self.now())));
                     }
-                    continue;
+                    if !self.retry_due(Instant::now()) {
+                        continue;
+                    }
                 }
             }
             self.drive();
             self.dirty = true;
         }
-        for (_, (_, handle)) in self.running.drain() {
-            handle.abort();
+        for (_, running) in self.running.drain() {
+            running.handle.abort();
         }
     }
 
@@ -171,16 +201,16 @@ impl<S: Sink> Engine<S> {
                 // Whatever still lacks a session (the other host of a cross-host job) is
                 // deferred again.
                 let again = std::mem::take(&mut self.deferred);
-                self.carry_out(again);
+                self.replay(again);
             }
             EngineMsg::HostDown(host) => {
                 self.sessions.remove(&host);
                 self.queue.host_down(&host);
                 let gone: Vec<(JobId, FileId)> =
-                    self.running.iter().filter(|(_, (hosts, _))| hosts.contains(&host)).map(|(k, _)| *k).collect();
+                    self.running.iter().filter(|(_, r)| r.hosts.contains(&host)).map(|(k, _)| *k).collect();
                 for (job, file) in gone {
-                    if let Some((_, handle)) = self.running.remove(&(job, file)) {
-                        handle.abort();
+                    if let Some(running) = self.running.remove(&(job, file)) {
+                        running.handle.abort();
                     }
                     self.queue.file_interrupted(job, file);
                 }
@@ -191,34 +221,46 @@ impl<S: Sink> Engine<S> {
     fn on_outcome(&mut self, outcome: Outcome) {
         let now = self.now();
         match outcome {
-            Outcome::Named { job, item, dst, used } => match dst {
+            Outcome::Named { job, item, dst } => match dst {
+                Ok(dst) => self.queue.named(job, item, ItemDst::Local(dst)),
+                Err(e) => self.queue.item_failed(job, item, e.to_string()),
+            },
+            Outcome::FreeName { job, item, dst, used } => match dst {
                 Ok(dst) => self.queue.named(job, item, dst),
-                Err(e) => self.item_error(job, item, e, Action::Name { job, item }, &used),
+                Err(e) => self.item_error(job, item, e, Action::FreeRemoteName { job, item }, &used),
             },
             Outcome::Exists { job, item, existing, incoming, used } => match existing {
                 Ok(existing) => self.queue.exists(job, item, existing, incoming),
                 Err(e) => self.item_error(job, item, e, Action::Name { job, item }, &used),
             },
             Outcome::ScanProgress { job, item, found } => self.queue.scan_progress(job, item, found),
-            Outcome::Scanned { job, item, scan, used } => {
-                let dst = self.scans.remove(&(job, item));
-                match (scan, dst) {
-                    (Ok(scan), _) => self.queue.scanned(job, item, scan),
-                    // A scan cut off by the connection runs again into the same destination.
-                    (Err(e), Some(dst)) => self.item_error(job, item, e, Action::Scan { job, item, dst }, &used),
-                    (Err(e), None) => self.queue.item_failed(job, item, e.to_string()),
+            Outcome::Scanned { job, item, dst, scan, used } => match scan {
+                Ok(scan) => self.queue.scanned(job, item, scan),
+                // A scan cut off by the connection runs again into the same destination.
+                Err(e) => self.item_error(job, item, e, Action::Scan { job, item, dst }, &used),
+            },
+            Outcome::Progress { job, file, run, done } => {
+                if self.running.get(&(job, file)).is_some_and(|r| r.run == run) {
+                    self.queue.file_progress(job, file, done, now);
                 }
             }
-            Outcome::Progress { job, file, done } => self.queue.file_progress(job, file, done, now),
-            Outcome::Finished { job, file, result } => {
-                if self.running.remove(&(job, file)).is_none() {
+            Outcome::Finished { job, file, run, result } => {
+                if !self.running.get(&(job, file)).is_some_and(|r| r.run == run) {
                     // Aborted (paused, cancelled, host down) after it finished: the queue
-                    // already moved the file on.
+                    // already moved the file on. If it started the file again, that run would
+                    // copy it a second time: it stops, and its part file goes.
                     if result.is_ok() {
+                        if let Some(again) = self.running.remove(&(job, file)) {
+                            again.handle.abort();
+                            if let Some(plan) = self.queue.plan(job, file).cloned() {
+                                self.carry_out_one(Action::Cleanup { job, plans: vec![plan] });
+                            }
+                        }
                         self.queue.file_done(job, file, now);
                     }
                     return;
                 }
+                self.running.remove(&(job, file));
                 match result {
                     Ok(()) => self.queue.file_done(job, file, now),
                     Err(Error::ConnectionLost) => self.queue.file_interrupted(job, file),
@@ -226,7 +268,7 @@ impl<S: Sink> Engine<S> {
                 }
             }
             Outcome::Tidied { job, item, result, used } => match result {
-                Err(Error::ConnectionLost) if self.requests.contains_key(&job) => self.again(Action::Tidy { job, item }, &used),
+                Err(Error::ConnectionLost) if self.queue.is_live(job) => self.again(Action::Tidy { job, item }, &used),
                 // Best effort: folders that couldn't go stay.
                 _ => self.queue.tidied(job, item),
             },
@@ -237,22 +279,58 @@ impl<S: Sink> Engine<S> {
     /// back; anything else fails the item.
     fn item_error(&mut self, job: JobId, item: usize, error: Error, again: Action, used: &Used) {
         match error {
-            Error::ConnectionLost if self.requests.contains_key(&job) => self.again(again, used),
+            Error::ConnectionLost if self.queue.is_live(job) => self.again(again, used),
             error => self.queue.item_failed(job, item, error.to_string()),
         }
     }
 
-    /// Work cut off by a lost connection. The task's outcome and the engine's [`EngineMsg`]s
-    /// come on different channels, so the reconnect may already be here: if a session the task
-    /// used has been replaced (or is gone), the work runs now, on the current sessions (or is
-    /// deferred by [`Engine::session`] if one is missing); while they're all still current,
-    /// their `HostDown` is yet to come and the next `HostUp` replays it.
+    /// Work cut off by a lost connection: `action` is what the task carried out, and runs
+    /// again. The task's outcome and the engine's [`EngineMsg`]s come on different channels,
+    /// so the reconnect may already be here: if a session the task used has been replaced (or
+    /// is gone), the work runs now, on the current sessions (or is deferred by
+    /// [`Engine::session`] if one is missing); while they're all still current, their
+    /// `HostDown` is yet to come and the next `HostUp` replays it (or [`RETRY_AFTER`] does, if
+    /// the connection stays up after all).
     fn again(&mut self, action: Action, used: &Used) {
         let replaced = used.iter().any(|(host, s)| !self.sessions.get(host).is_some_and(|now| now.same_session(s)));
         if replaced {
             self.carry_out_one(action);
         } else {
-            self.deferred.push(action);
+            self.defer(action);
+        }
+    }
+
+    fn defer(&mut self, action: Action) {
+        self.deferred.push(Deferred { action, due: Instant::now() + RETRY_AFTER });
+    }
+
+    /// Runs the deferred work that is due at `now` (on the sessions there are; what still lacks
+    /// one is deferred again). True if there was any.
+    fn retry_due(&mut self, now: Instant) -> bool {
+        if !self.deferred.iter().any(|d| d.due <= now) {
+            return false;
+        }
+        let (due, wait): (Vec<Deferred>, Vec<Deferred>) = std::mem::take(&mut self.deferred).into_iter().partition(|d| d.due <= now);
+        self.deferred = wait;
+        self.replay(due);
+        true
+    }
+
+    /// Carries out deferred work, but none for a job that finished meanwhile (cancelled, say).
+    fn replay(&mut self, deferred: Vec<Deferred>) {
+        for Deferred { action, .. } in deferred {
+            let job = match &action {
+                Action::Name { job, .. }
+                | Action::FreeRemoteName { job, .. }
+                | Action::Scan { job, .. }
+                | Action::Start { job, .. }
+                | Action::Abort { job, .. }
+                | Action::Cleanup { job, .. }
+                | Action::Tidy { job, .. } => *job,
+            };
+            if self.queue.is_live(job) {
+                self.carry_out_one(action);
+            }
         }
     }
 
@@ -281,8 +359,8 @@ impl<S: Sink> Engine<S> {
                 match &req {
                     JobRequest::Download { items, into, .. } => {
                         let name = items.get(item).and_then(|i| i.path.file_name()).unwrap_or("download").to_owned();
-                        let dst = self.free_local_name(into, &name).map(ItemDst::Local);
-                        let _ = tx.send(Outcome::Named { job, item, dst, used: Vec::new() });
+                        let dst = self.free_local_name(into, &name);
+                        let _ = tx.send(Outcome::Named { job, item, dst });
                     }
                     _ => {
                         // Upload, copy, move: is the name taken at the destination?
@@ -290,25 +368,28 @@ impl<S: Sink> Engine<S> {
                             self.queue.item_failed(job, item, "This item has no name".into());
                             return;
                         };
-                        let Some(sftp) = self.session(req.host(), Action::Name { job, item }) else { return };
+                        // The destination's session, and the source's for what is being
+                        // transferred (one session but between hosts).
+                        let Some((from, to)) = self.sessions_for(&req, Action::Name { job, item }) else { return };
                         let path = into.join(&name);
-                        let host = req.host().clone();
+                        let used = vec![(req.source_host().clone(), from.clone()), (req.host().clone(), to.clone())];
                         // What is being transferred, read in the task: a local file's metadata,
-                        // or the source's mtime on its own session (best effort).
+                        // or the source's mtime on the source's session.
                         let source = match &req {
                             JobRequest::Upload { items, .. } => items.get(item).cloned().map(Incoming::Local),
-                            req => req.remote_items().and_then(|i| i.get(item)).map(|i| {
-                                let from = self.sessions.get(req.source_host()).cloned();
-                                Incoming::Remote { item: i.clone(), from }
-                            }),
+                            req => req.remote_items().and_then(|i| i.get(item)).cloned().map(Incoming::Remote),
                         };
                         tokio::spawn(async move {
-                            let existing = io::remote_existing(&sftp, &path).await;
-                            let incoming = match source {
-                                Some(source) if matches!(existing, Ok(Some(_))) => source.side().await,
-                                _ => Side::default(),
+                            let (existing, incoming) = match (io::remote_existing(&to, &path).await, source) {
+                                // Only a clash needs the incoming side; a lost connection while
+                                // reading it checks the name again.
+                                (Ok(Some(existing)), Some(source)) => match source.side(&from).await {
+                                    Ok(incoming) => (Ok(Some(existing)), incoming),
+                                    Err(e) => (Err(e), Side::default()),
+                                },
+                                (existing, _) => (existing, Side::default()),
                             };
-                            let _ = tx.send(Outcome::Exists { job, item, existing, incoming, used: vec![(host, sftp)] });
+                            let _ = tx.send(Outcome::Exists { job, item, existing, incoming, used });
                         });
                     }
                 }
@@ -322,7 +403,7 @@ impl<S: Sink> Engine<S> {
                     let dst = io::free_remote_name(&sftp, &into, &name)
                         .await
                         .map(|free| ItemDst::Remote { path: into.join(&free), overwrite: false });
-                    let _ = tx.send(Outcome::Named { job, item, dst, used: vec![(host, sftp)] });
+                    let _ = tx.send(Outcome::FreeName { job, item, dst, used: vec![(host, sftp)] });
                 });
             }
             Action::Scan { job, item, dst } => {
@@ -333,14 +414,13 @@ impl<S: Sink> Engine<S> {
                 };
                 let Some(src) = src else { return };
                 let Some((from, to)) = self.sessions_for(&req, Action::Scan { job, item, dst: dst.clone() }) else { return };
-                self.scans.insert((job, item), dst.clone());
                 let hosts = (req.source_host().clone(), req.host().clone());
                 tokio::spawn(async move {
                     let progress = |found| {
                         let _ = tx.send(Outcome::ScanProgress { job, item, found });
                     };
-                    let scan = scan(&from, &to, src, dst, progress).await;
-                    let _ = tx.send(Outcome::Scanned { job, item, scan, used: vec![(hosts.0, from), (hosts.1, to)] });
+                    let scan = scan(&from, &to, src, dst.clone(), progress).await;
+                    let _ = tx.send(Outcome::Scanned { job, item, dst, scan, used: vec![(hosts.0, from), (hosts.1, to)] });
                 });
             }
             Action::Start { job, file, plan } => {
@@ -353,18 +433,20 @@ impl<S: Sink> Engine<S> {
                     self.queue.file_interrupted(job, file);
                     return;
                 };
+                self.runs += 1;
+                let run = self.runs;
                 let task = tokio::spawn(async move {
                     let progress = |done| {
-                        let _ = tx.send(Outcome::Progress { job, file, done });
+                        let _ = tx.send(Outcome::Progress { job, file, run, done });
                     };
                     let result = run_file(&from, &to, kind, &plan, progress).await;
-                    let _ = tx.send(Outcome::Finished { job, file, result });
+                    let _ = tx.send(Outcome::Finished { job, file, run, result });
                 });
-                self.running.insert((job, file), (hosts, task.abort_handle()));
+                self.running.insert((job, file), Running { hosts, run, handle: task.abort_handle() });
             }
             Action::Abort { job, file } => {
-                if let Some((_, handle)) = self.running.remove(&(job, file)) {
-                    handle.abort();
+                if let Some(running) = self.running.remove(&(job, file)) {
+                    running.handle.abort();
                 }
             }
             Action::Cleanup { job, plans } => {
@@ -399,7 +481,7 @@ impl<S: Sink> Engine<S> {
         match self.sessions.get(host) {
             Some(sftp) => Some(sftp.clone()),
             None => {
-                self.deferred.push(again);
+                self.defer(again);
                 None
             }
         }
@@ -411,7 +493,7 @@ impl<S: Sink> Engine<S> {
         match (self.sessions.get(req.source_host()), self.sessions.get(req.host())) {
             (Some(from), Some(to)) => Some((from.clone(), to.clone())),
             _ => {
-                self.deferred.push(again);
+                self.defer(again);
                 None
             }
         }
@@ -429,21 +511,24 @@ impl<S: Sink> Engine<S> {
 /// The item a name check is for, to describe it if its name is taken.
 enum Incoming {
     Local(PathBuf),
-    /// The picked item and the session of the host it is on (none if that host is down).
-    Remote { item: RemoteItem, from: Option<Sftp> },
+    /// The picked item, on the job's source host.
+    Remote(RemoteItem),
 }
 
 impl Incoming {
-    async fn side(self) -> Side {
+    /// Its size and mtime, best effort (unknown if it can't be read), read on `from` (the
+    /// source's session) for a remote item; only a lost connection is an error.
+    async fn side(self, from: &Sftp) -> Result<Side, Error> {
         match self {
-            Incoming::Local(path) => io::local_side(&path).await,
-            Incoming::Remote { item, from } => {
-                let mtime = match &from {
-                    Some(sftp) => io::remote_side(sftp, &item.path).await.mtime,
-                    None => None,
+            Incoming::Local(path) => Ok(io::local_side(&path).await),
+            Incoming::Remote(item) => {
+                let mtime = match io::remote_existing(from, &item.path).await {
+                    Ok(found) => found.and_then(|e| e.side.mtime),
+                    Err(Error::ConnectionLost) => return Err(Error::ConnectionLost),
+                    Err(_) => None,
                 };
                 let is_dir = item.kind.is_dir_like();
-                Side { size: (!is_dir).then_some(item.size), mtime }
+                Ok(Side { size: (!is_dir).then_some(item.size), mtime })
             }
         }
     }

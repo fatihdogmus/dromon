@@ -745,6 +745,12 @@ impl Queue {
         self.jobs.iter().find(|j| j.id == job).map(|j| self.make_view(j, now))
     }
 
+    /// Whether the job is there and not finished (it still takes facts: work cut off for it is
+    /// worth running again).
+    pub fn is_live(&self, job: JobId) -> bool {
+        self.jobs.iter().any(|j| j.id == job && !j.state.is_finished())
+    }
+
     /// Jobs whose state `is_active()`.
     pub fn active_count(&self) -> usize {
         self.jobs.iter().filter(|j| j.state.is_active()).count()

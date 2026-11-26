@@ -538,8 +538,11 @@ fn cancel_before_anything_ran_has_no_cleanup() {
     let mut q = Queue::new(2);
     q.host_up(&host("a"));
     let id = q.add(download("a", &["x"]), T0);
+    assert!(q.is_live(id));
     assert!(q.cancel(id).is_empty());
     assert_eq!(view(&q, id).state, TaskState::Cancelled);
+    assert!(!q.is_live(id), "work cut off for it isn't run again");
+    assert!(!q.is_live(JobId(99)));
 }
 
 #[test]

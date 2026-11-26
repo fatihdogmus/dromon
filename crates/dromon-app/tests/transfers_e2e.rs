@@ -19,7 +19,7 @@
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, mpsc};
 use std::time::{Duration, Instant};
 
 use dromon_app::service::{self, Config, Sink};
@@ -38,6 +38,27 @@ fn host() -> HostId {
 /// A second alias for the same server and user: "another host" with its own connection.
 fn host2() -> HostId {
     HostId("fx-key-2".into())
+}
+
+/// [`Fixture::kill_sessions`] ends every session of the key user, every other test's too: the
+/// tests that drop connections hold this for writing, every other harness for reading, so they
+/// never run beside another test of this binary.
+static SESSIONS: RwLock<()> = RwLock::new(());
+
+#[allow(dead_code)] // held, never read
+enum SessionsGuard {
+    Shared(RwLockReadGuard<'static, ()>),
+    Exclusive(RwLockWriteGuard<'static, ()>),
+}
+
+impl SessionsGuard {
+    fn shared() -> SessionsGuard {
+        SessionsGuard::Shared(SESSIONS.read().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    fn exclusive() -> SessionsGuard {
+        SessionsGuard::Exclusive(SESSIONS.write().unwrap_or_else(|e| e.into_inner()))
+    }
 }
 
 #[derive(Clone)]
@@ -60,6 +81,8 @@ struct Harness {
     scratch: RemotePath,
     /// Every connection-log line (ssh's stderr among them) and prompt, for failure messages.
     log: Vec<String>,
+    /// Declared last: released once the service is told to stop.
+    _sessions: SessionsGuard,
 }
 
 impl Harness {
@@ -70,6 +93,16 @@ impl Harness {
 
     /// Connected to every host in `hosts`.
     fn connected(name: &str, hosts: &[HostId]) -> Option<Harness> {
+        Harness::start(name, hosts, SessionsGuard::shared())
+    }
+
+    /// [`Harness::connected`] for a test that drops the key user's sessions: no other test of
+    /// this binary runs meanwhile.
+    fn dropping(name: &str, hosts: &[HostId]) -> Option<Harness> {
+        Harness::start(name, hosts, SessionsGuard::exclusive())
+    }
+
+    fn start(name: &str, hosts: &[HostId], sessions: SessionsGuard) -> Option<Harness> {
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         let fx = rt.block_on(dromon_testkit::fixture(name))?;
         let dir = tempfile::tempdir().unwrap();
@@ -94,7 +127,7 @@ impl Harness {
         // `exec` runs as root: the folder goes to the user the app signs in as.
         let make = format!("rm -rf '{0}' && mkdir -p '{0}' && chown {1} '{0}'", scratch.as_str(), fx.owner(Role::Key));
         fx.exec(&["sh", "-c", &make]).unwrap();
-        let mut h = Harness { fx, dir, backend, events, jobs: Vec::new(), scratch, log: Vec::new() };
+        let mut h = Harness { fx, dir, backend, events, jobs: Vec::new(), scratch, log: Vec::new(), _sessions: sessions };
         for want in hosts {
             h.backend.send(Command::Connect { host: want.clone() });
             h.wait_for("the connection to open", |ev, _| matches!(ev, ServiceEvent::Opened { host, .. } if host == want));
@@ -265,7 +298,7 @@ fn uploads_land_on_the_server_and_a_clash_can_keep_both() {
 
 #[test]
 fn a_dropped_connection_resumes_the_download_where_it_stopped() {
-    let Some(mut h) = Harness::new("resume") else { return };
+    let Some(mut h) = Harness::dropping("resume", &[host()]) else { return };
     let src = h.scratch.join("big.bin");
     h.remote(&format!("head -c 67108864 /dev/urandom > '{}'", src.as_str()));
     // SHA-1 on the server and here (no hashing tool needed on the host: macOS has no sha256sum).
@@ -421,6 +454,86 @@ fn copies_and_moves_between_two_hosts_stream_through_the_app() {
     assert_eq!(h.fx.sha1(h.at("b/x (1).bin").as_str()).unwrap(), want);
     assert!(!h.there("a/x.bin"));
     assert_eq!(h.remote(&format!("find '{}' -name '*.dromon-part' | wc -l", h.scratch)).trim(), "0");
+}
+
+/// Stress: rounds of jobs of every kind on one host and across two (clashes answered Keep
+/// both, folders to create and to tidy), with every session of the key user dropped at a
+/// different moment of each round; every job must still end, and end well. Rounds:
+/// `DROMON_DROP_ROUNDS` (default 12).
+#[test]
+#[ignore = "stress, about a minute: cargo test -p dromon-app --test transfers_e2e -- --ignored"]
+fn every_job_ends_when_the_connections_drop_at_any_moment() {
+    let Some(mut h) = Harness::dropping("drops", &[host(), host2()]) else { return };
+    let rounds: u64 = std::env::var("DROMON_DROP_ROUNDS").ok().and_then(|n| n.parse().ok()).unwrap_or(12);
+    let local = h.dir.path().join("out");
+    std::fs::create_dir_all(local.join("tree/sub")).unwrap();
+    std::fs::write(local.join("up.txt"), "up\n").unwrap();
+    std::fs::write(local.join("tree/sub/deep.txt"), "deep\n").unwrap();
+    let mut next = 1;
+    for round in 0..rounds {
+        let r = format!("r{round}");
+        h.seed(&format!(
+            "R=\"$D/{r}\"; mkdir -p \"$R/a/dir/inner\" \"$R/a/gone/empty\" \"$R/b\" \"$R/c\"; \
+             head -c 1048576 /dev/urandom >\"$R/a/x.bin\"; cp \"$R/a/x.bin\" \"$R/b/x.bin\"; \
+             head -c 524288 /dev/urandom >\"$R/a/m.bin\"; cp \"$R/a/m.bin\" \"$R/b/m.bin\"; \
+             printf 'one\\n' >\"$R/a/dir/inner/one.txt\"; printf 'two\\n' >\"$R/a/gone/two.txt\""
+        ));
+        let at = |rel: &str, kind| ritem(&h, &format!("{r}/{rel}"), kind);
+        let (b, c) = (h.at(&format!("{r}/b")), h.at(&format!("{r}/c")));
+        let reqs = vec![
+            JobRequest::CrossHostCopy {
+                from: host(),
+                items: vec![at("a/x.bin", EntryKind::File), at("a/dir", EntryKind::Dir)],
+                to: host2(),
+                into: b.clone(),
+            },
+            JobRequest::CrossHostMove { from: host(), items: vec![at("a/m.bin", EntryKind::File)], to: host2(), into: b.clone() },
+            JobRequest::CrossHostMove { from: host(), items: vec![at("a/gone", EntryKind::Dir)], to: host2(), into: b },
+            JobRequest::RemoteCopy { host: host(), items: vec![at("a/dir", EntryKind::Dir)], into: c.clone() },
+            JobRequest::Upload { host: host2(), items: vec![local.join("up.txt"), local.join("tree")], into: c },
+            JobRequest::Download {
+                host: host(),
+                items: vec![at("a/x.bin", EntryKind::File), at("a/dir", EntryKind::Dir)],
+                into: h.downloads().join(&r),
+            },
+        ];
+        let ids: Vec<JobId> = (next..next + reqs.len() as u64).map(JobId).collect();
+        next += reqs.len() as u64;
+        for req in reqs {
+            h.transfer(TransferCommand::Start(req));
+        }
+        std::thread::sleep(Duration::from_millis(round * 53 % 700));
+        h.fx.kill_sessions(Role::Key).unwrap();
+
+        let deadline = Instant::now() + WAIT;
+        loop {
+            let ours: Vec<&JobView> = h.jobs.iter().filter(|j| ids.contains(&j.id)).collect();
+            if ours.len() == ids.len() && ours.iter().all(|j| j.state.is_finished()) {
+                break;
+            }
+            let clashes: Vec<JobId> = ours.iter().filter(|j| j.conflict.is_some()).map(|j| j.id).collect();
+            for job in clashes {
+                h.transfer(TransferCommand::Resolve { job, choice: ConflictChoice::KeepBoth, apply_all: true });
+            }
+            assert!(Instant::now() < deadline, "round {round}: jobs {ids:?} didn't end; jobs: {:#?}\nconnection log:\n{}", h.jobs, h.log.join("\n"));
+            h.wait_for(&format!("round {round}: jobs {ids:?} to end"), |ev, _| matches!(ev, ServiceEvent::Transfers(_)));
+        }
+        for id in &ids {
+            let job = h.job(*id);
+            assert_eq!(job.state, TaskState::Done, "round {round}: {job:#?}\nconnection log:\n{}", h.log.join("\n"));
+        }
+        // Everything once, in place, no part files left.
+        let tree = h.remote(&format!("cd '{}' && find . | LC_ALL=C sort", h.at(&r)));
+        let want = [
+            ".", "./a", "./a/dir", "./a/dir/inner", "./a/dir/inner/one.txt", "./a/x.bin", "./b", "./b/dir", "./b/dir/inner",
+            "./b/dir/inner/one.txt", "./b/gone", "./b/gone/empty", "./b/gone/two.txt", "./b/m (1).bin", "./b/m.bin",
+            "./b/x (1).bin", "./b/x.bin", "./c", "./c/dir", "./c/dir/inner", "./c/dir/inner/one.txt", "./c/tree",
+            "./c/tree/sub", "./c/tree/sub/deep.txt", "./c/up.txt",
+        ];
+        assert_eq!(tree.lines().collect::<Vec<_>>(), want, "round {round}");
+        let downloaded: Vec<PathBuf> = walk(&h.downloads().join(&r)).into_iter().collect();
+        assert_eq!(downloaded.len(), 4, "round {round}: {downloaded:?}");
+    }
 }
 
 fn walk(dir: &Path) -> Vec<PathBuf> {
