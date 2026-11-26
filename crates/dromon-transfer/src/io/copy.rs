@@ -102,10 +102,42 @@ pub async fn move_between(
     opts: CopyOptions,
     progress: impl FnMut(u64) + Send,
 ) -> Result<Copied> {
-    let src = Plan::of(plan, "move_between")?.src;
+    let p = Plan::of(plan, "move_between")?;
+    if let Some(done) = landed_before(from, to, &p).await? {
+        return Ok(done);
+    }
     let copied = copy_between(from, to, plan, opts, progress).await?;
-    delete_verified(from, to, src, &copied).await?;
+    delete_verified(from, to, p.src, &copied).await?;
     Ok(copied)
+}
+
+/// What an earlier run of this move already did, when a drop lost its result (the engine
+/// aborts a running file on `HostDown`, even one that just finished): the copy is at `dst`
+/// and the source is gone (done), or still there (deleted now, verified as usual). Only for a
+/// destination the job named itself (no `overwrite`: nothing was there when it was named), and
+/// only when the file there has exactly the planned size and mtime (copies keep the source's
+/// mtime). Anything else: `None`, and the move runs as usual.
+async fn landed_before(from: &Sftp, to: &Sftp, p: &Plan<'_>) -> Result<Option<Copied>> {
+    if p.overwrite || p.mtime.is_none() {
+        return Ok(None);
+    }
+    let there = match to.stat(p.dst).await {
+        Ok(e) => e,
+        Err(Error::NotFound(_)) => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    if there.kind != EntryKind::File || there.size != p.size || there.mtime != p.mtime {
+        return Ok(None);
+    }
+    let copied = Copied { dst: p.dst.clone(), size: p.size, mtime: p.mtime };
+    match from.stat(p.src).await {
+        Err(Error::NotFound(_)) => Ok(Some(copied)),
+        Ok(_) => {
+            delete_verified(from, to, p.src, &copied).await?;
+            Ok(Some(copied))
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// Deletes `src` on `from` if `copied.dst` on `to` has the size that was copied and `src` still

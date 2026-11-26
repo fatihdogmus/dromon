@@ -379,6 +379,59 @@ async fn a_cross_host_move_deletes_only_verified_sources() {
     rm_rf(&a.sftp, &dir).await;
 }
 
+/// The engine aborts a running file when its host goes down, even one that had just finished,
+/// and runs it again: a move run twice must neither fail on its missing source nor leave a
+/// second copy.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_move_run_again_after_it_finished_is_done_without_a_second_copy() {
+    let Some((fx, a, b)) = two_hosts("a_move_run_again_after_it_finished_is_done_without_a_second_copy").await else { return };
+    let dir = scratch(fx, &a.sftp, "move-again").await;
+    b.sftp.mkdir(&dir.join("b")).await.unwrap();
+    let listing = |s: &Sftp, d: RemotePath| {
+        let s = s.clone();
+        async move {
+            let mut n: Vec<String> = s.list(&d).await.unwrap().into_iter().map(|e| e.name).collect();
+            n.sort();
+            n
+        }
+    };
+
+    // Between hosts, finished whole: run again, it's done (no error, no "x (1).bin").
+    let src = dir.join("x.bin");
+    random_remote(fx, &src, 300_007);
+    let want = sha(fx, &src);
+    let dst = dir.join("b/x.bin");
+    let plan = the_plan(scan_remote_copy(&a.sftp, &src, &dst, false, |_| {}).await.unwrap());
+    move_between(&a.sftp, &b.sftp, &plan, CopyOptions::default(), |_| {}).await.unwrap();
+    let again = move_between(&a.sftp, &b.sftp, &plan, CopyOptions::default(), |_| {}).await.unwrap();
+    assert_eq!((again.dst, again.size), (dst.clone(), 300_007));
+    assert_eq!(listing(&b.sftp, dir.join("b")).await, ["x.bin"]);
+    assert_eq!(sha(fx, &dst), want);
+
+    // Between hosts, copied but not yet deleted: run again, the source goes, still one copy.
+    let src = dir.join("y.bin");
+    random_remote(fx, &src, 4097);
+    let dst = dir.join("b/y.bin");
+    let plan = the_plan(scan_remote_copy(&a.sftp, &src, &dst, false, |_| {}).await.unwrap());
+    copy_between(&a.sftp, &b.sftp, &plan, CopyOptions::default(), |_| {}).await.unwrap();
+    move_between(&a.sftp, &b.sftp, &plan, CopyOptions::default(), |_| {}).await.unwrap();
+    assert!(!a.sftp.exists(&src).await.unwrap(), "the verified source is deleted");
+    assert_eq!(listing(&b.sftp, dir.join("b")).await, ["x.bin", "y.bin"]);
+
+    // On one host, renamed already: run again, it's done.
+    let (src, dst) = (dir.join("z.txt"), dir.join("b/z.txt"));
+    write_remote(&a.sftp, &src, b"zed").await;
+    let plan = FilePlan::Move { src: src.clone(), dst: dst.clone(), size: 3, overwrite: false };
+    assert_eq!(move_remote(&a.sftp, &plan).await.unwrap(), dst);
+    assert_eq!(move_remote(&a.sftp, &plan).await.unwrap(), dst, "run again: done, not an error");
+    assert_eq!(read_remote(&a.sftp, &dst).await, b"zed");
+
+    // A missing source with nothing at the destination is still an error.
+    let gone = FilePlan::Move { src: dir.join("never.txt"), dst: dir.join("b/never.txt"), size: 1, overwrite: false };
+    assert!(move_remote(&a.sftp, &gone).await.is_err());
+    rm_rf(&a.sftp, &dir).await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn tidying_removes_only_empty_source_folders() {
     let Some((fx, a, _b)) = two_hosts("tidying_removes_only_empty_source_folders").await else { return };

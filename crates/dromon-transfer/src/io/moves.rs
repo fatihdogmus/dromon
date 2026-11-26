@@ -25,6 +25,11 @@ pub async fn move_remote(sftp: &Sftp, plan: &FilePlan) -> Result<RemotePath> {
     let (Some(folder), Some(name)) = (dst.parent(), dst.file_name()) else {
         return Err(Error::Other(format!("Can't move to {dst}")));
     };
+    // An earlier run renamed it and a drop lost the result: the source is gone and the item is
+    // at the name the job chose (no `overwrite`: nothing was there when it was named).
+    if !*overwrite && moved_before(sftp, plan, src, dst).await? {
+        return Ok(dst.clone());
+    }
     if *overwrite {
         replace(sftp, src, dst).await?;
         return Ok(dst.clone());
@@ -38,6 +43,21 @@ pub async fn move_remote(sftp: &Sftp, plan: &FilePlan) -> Result<RemotePath> {
             sftp.rename(src, &again).await?;
             Ok(again)
         }
+        Err(e) => Err(e),
+    }
+}
+
+/// Whether `src` is gone and `dst` holds the item (a file of the planned size, or a folder).
+async fn moved_before(sftp: &Sftp, plan: &FilePlan, src: &RemotePath, dst: &RemotePath) -> Result<bool> {
+    match sftp.lstat(src).await {
+        Err(Error::NotFound(_)) => {}
+        Ok(_) => return Ok(false),
+        Err(e) => return Err(e),
+    }
+    match sftp.lstat(dst).await {
+        Ok(e) if e.kind == EntryKind::Dir => Ok(true),
+        Ok(e) => Ok(e.size == plan.size()),
+        Err(Error::NotFound(_)) => Ok(false),
         Err(e) => Err(e),
     }
 }
