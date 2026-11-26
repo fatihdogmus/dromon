@@ -53,6 +53,8 @@ pub enum ConnCmd {
     Connect(WindowId, HostSpec),
     List(WindowId, RemotePath),
     Answer(WindowId, PromptId, PromptAnswer),
+    /// The window's Sign in: the host's open prompts, shown there.
+    ShowPrompts(WindowId),
     Disconnect,
     FileOp(OpId, FileOp),
     /// How the window shows now (`windows.rs`).
@@ -472,6 +474,11 @@ impl<S: Sink> Task<S> {
                     self.emit(ServiceEvent::PromptClosed(id));
                     self.log("Answered ssh's prompt.");
                     self.drive(Event::PromptClosed, None).await;
+                }
+            }
+            ConnCmd::ShowPrompts(window) => {
+                for prompt in self.route.show_in(window) {
+                    self.sink.emit_to(window, ServiceEvent::Prompt(prompt));
                 }
             }
             ConnCmd::Disconnect => self.drive(Event::Disconnect, None).await,

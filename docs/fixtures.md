@@ -340,6 +340,9 @@ fixture, as the real app does on the one service: one connection per host, one s
 trees and transfers. Each window has its own host and folder on screen; listings, statuses,
 operations and transfers reach every window, a prompt shows in the focused window (else the
 one whose command asked), and a host already up for one window opens at once in another.
+The reconnecting banner's Sign in in another window asks for the host's open prompt again: it
+shows there alone, and the host's later prompts go to that window until the connection
+settles; answering in either closes it in both.
 Headless runs (`--snap`, `--script`) have one window: ⌘N does nothing there, so flows can't
 drive two windows; the in-crate tests do (`fixture/windows_tests.rs`, `ui_window_tests.rs`).
 

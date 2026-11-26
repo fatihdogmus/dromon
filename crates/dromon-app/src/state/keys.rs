@@ -40,6 +40,9 @@ pub enum Shortcut {
     NewWindow,
     /// ⌘W (Ctrl+W elsewhere): close this window.
     CloseWindow,
+    /// Shift+F10 or the Menu key: the context menu of the cursor row. Never while a text field
+    /// has focus.
+    ContextMenu,
 }
 
 /// The chord spec of ⌘1 … ⌘9 for the sidebar's host `n` (1-based), for hints.
@@ -156,6 +159,8 @@ pub fn shortcut(ev: &KeyEvent, platform: KeyPlatform) -> Option<Shortcut> {
         Key::Down if m.cmd => Shortcut::Open,
         Key::Enter if !m.cmd && !m.alt => Shortcut::Open,
         Key::Escape => Shortcut::Escape,
+        Key::ContextMenu if !m.cmd && !m.alt => Shortcut::ContextMenu,
+        Key::Function(10) if m.shift && !m.cmd && !m.alt => Shortcut::ContextMenu,
         Key::Up => Shortcut::Move { delta: -1, extend: m.shift },
         Key::Down => Shortcut::Move { delta: 1, extend: m.shift },
         Key::PageUp => Shortcut::Page { down: false, extend: m.shift },
@@ -309,6 +314,21 @@ mod tests {
         assert_eq!(on(Key::Command(','), ctrl, KeyPlatform::Linux), Some(Shortcut::Settings));
         assert_eq!(k(Key::Command(','), Mods { shift: true, ..CMD }), None);
         assert_eq!(k(Key::Text(",".into()), NONE), Some(Shortcut::Type(",".into())), "a plain comma still types");
+    }
+
+    #[test]
+    fn shift_f10_and_the_menu_key_open_the_context_menu_on_each_platform() {
+        let ctrl = Mods { ctrl: true, logo: false, ..CMD };
+        for p in [KeyPlatform::Mac, KeyPlatform::Windows, KeyPlatform::Linux] {
+            assert_eq!(on(Key::Function(10), SHIFT, p), Some(Shortcut::ContextMenu), "{p:?}");
+            assert_eq!(on(Key::ContextMenu, NONE, p), Some(Shortcut::ContextMenu), "{p:?}");
+            assert_eq!(on(Key::ContextMenu, SHIFT, p), Some(Shortcut::ContextMenu), "{p:?}");
+            assert_eq!(on(Key::Function(10), NONE, p), None, "plain F10 is the menu bar's");
+            assert_eq!(on(Key::Function(10), ALT, p), None);
+            assert_eq!(on(Key::Function(10), ctrl, p), None);
+            assert_eq!(on(Key::ContextMenu, ALT, p), None);
+            assert_eq!(on(Key::ContextMenu, ctrl, p), None);
+        }
     }
 
     #[test]

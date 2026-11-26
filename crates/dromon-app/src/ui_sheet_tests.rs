@@ -228,3 +228,50 @@ fn the_logs_verbose_switch_asks_for_ssh_with_dash_v_and_says_it_reconnects() {
     click(&mut rt, "log-verbose");
     assert_eq!(rec.sent().last(), Some(&Command::Verbose { host: prod(), on: true }));
 }
+
+/// prod was up and lost its connection, and reconnecting needs the user: the banner offers Sign in.
+fn needs_sign_in(rt: &mut Runtime<App>) {
+    apply(rt, ServiceEvent::Opened { host: prod(), start: dromon_core::RemotePath::new("/home/deploy") });
+    apply(rt, ServiceEvent::Status { host: prod(), status: ConnStatus::NeedsInput });
+}
+
+#[test]
+fn the_banners_sign_in_asks_the_service_for_the_prompt_and_shows_it_when_it_comes() {
+    let (mut rt, rec) = runtime();
+    needs_sign_in(&mut rt);
+    assert!(shown(&rt, "banner-sign-in"));
+    let button = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("banner-sign-in")).expect("the button");
+    assert!(button.focusable, "a Tab stop");
+    assert_eq!(button.role, "button");
+    assert!(!shown(&rt, "sheet"), "another window has the prompt");
+
+    click(&mut rt, "banner-sign-in");
+    assert_eq!(rec.sent().last(), Some(&Command::ShowPrompts { host: prod() }));
+    // The service sends it here: the sheet opens with its field focused.
+    apply(&mut rt, ServiceEvent::Prompt(prompt(3, "prod", PromptKind::Password, PW, None)));
+    assert!(shown(&rt, "sheet"));
+    assert_eq!(text_of(&rt, "sheet-title"), "Sign in to prod");
+    assert_eq!(rt.presented_focus_key(), Some("sheet-input"));
+    key(&mut rt, Key::Text("hunter2".into()));
+    key(&mut rt, Key::Enter);
+    assert_eq!(answers(&rec), [(3, text("hunter2"))]);
+}
+
+#[test]
+fn the_banners_sign_in_brings_this_windows_queued_prompt_forward() {
+    let (mut rt, rec) = runtime();
+    needs_sign_in(&mut rt);
+    // Another host's question is open; prod's waits behind it.
+    apply(&mut rt, ServiceEvent::Prompt(prompt(1, "other", PromptKind::Password, "other's password: ", None)));
+    apply(&mut rt, ServiceEvent::Prompt(prompt(2, "prod", PromptKind::Password, PW, None)));
+    assert!(shown(&rt, "sheet"));
+    assert_eq!(rt.state.ui.sheets.open().and_then(|s| s.prompt()).map(|p| p.id.0), Some(1));
+    // The sheet is modal over the banner, so the action runs as the banner's press would.
+    let sent = rec.sent().len();
+    rt.update(|s, _| drop(s.act(Action::SignIn(prod()))));
+    settle(&mut rt);
+    assert_eq!(rt.state.ui.sheets.open().and_then(|s| s.prompt()).map(|p| p.id.0), Some(2), "prod's prompt is in front");
+    assert_eq!(rt.state.ui.sheets.queued().map(|p| p.id.0).collect::<Vec<_>>(), [1], "the other waits its turn");
+    assert_eq!(rec.sent().len(), sent, "nothing was asked of the service");
+    assert_eq!(text_of(&rt, "sheet-title"), "Sign in to prod");
+}

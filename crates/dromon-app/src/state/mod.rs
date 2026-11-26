@@ -194,6 +194,8 @@ pub enum Action {
     DismissSheet,
     /// Show the connection log of the host on screen.
     OpenLog,
+    /// The reconnecting banner's Sign in: show `host`'s waiting prompt in this window (§3.9).
+    SignIn(HostId),
     /// Close a connection and forget its remembered secrets.
     Disconnect(HostId),
     /// The log's "Verbose logging" switch: ssh with `-v` or without, reconnecting a live host.
@@ -253,6 +255,9 @@ pub enum Effect {
     Copy(String),
     /// Read the OS clipboard, then paste the clip if it still holds it (`FileAction::Paste`).
     ReadClipboard { as_move: bool },
+    /// Open the context menu of `kind` anchored at its row (a row not on screen, and the empty
+    /// area: the list's top-left): the view knows where things are.
+    ContextMenu(MenuKind),
 }
 
 impl App {
@@ -577,6 +582,13 @@ impl App {
                     self.ui.sheets.open_log(host);
                 }
             }
+            Action::SignIn(host) => {
+                // A prompt this window already has comes to the front; else the service sends
+                // the host's open prompts here.
+                if !self.ui.sheets.bring_forward(&host) && self.conns.contains_key(&host) {
+                    self.send(Command::ShowPrompts { host });
+                }
+            }
             Action::Disconnect(host) => {
                 if self.conns.contains_key(&host) {
                     self.ui.sheets.forget_host(&host);
@@ -668,6 +680,8 @@ impl App {
             Shortcut::Page { down, extend } => Action::Move { delta: if down { keys::PAGE_ROWS } else { -keys::PAGE_ROWS }, extend },
             Shortcut::End { last, extend } => Action::End { last, extend },
             Shortcut::Type(text) => Action::Type { text, now },
+            // Shift+F10 and the Menu key: the cursor row's menu, else the empty list's.
+            Shortcut::ContextMenu => return self.context_menu_key(),
             // A focused text field keeps its keys (§7): these are the list's.
             Shortcut::File(_) | Shortcut::GoToPath | Shortcut::Host(_) | Shortcut::ShowTransfers if self.text_focused() => return Vec::new(),
             Shortcut::File(k) => Action::File(k.action()),

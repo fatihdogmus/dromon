@@ -68,6 +68,9 @@ pub enum Command {
     /// that isn't connected takes it at its next connect. Answered with `Verbose` to every
     /// window, then the reconnect's `Status` changes and log lines.
     Verbose { host: HostId, on: bool },
+    /// The reconnecting banner's Sign in (§3.9): the host's open, unanswered prompts again, to
+    /// the sending window only; the host's later prompts go to it too. Nothing if none are open.
+    ShowPrompts { host: HostId },
 }
 
 /// Identifies one file operation, chosen by the UI (unique per session).

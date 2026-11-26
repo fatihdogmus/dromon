@@ -193,9 +193,23 @@ pub fn banner(s: &App, p: Paint) -> Option<El> {
         .child(text(headline).font(type_::BODY_STRONG).color(t.text))
         .child(text(detail).font(type_::META).color(t.text_3).grow(1.0));
     if sign_in {
+        // Shows the host's waiting prompt in this window (`Action::SignIn`).
+        let host = c.host.clone();
         b = b.child(
-            // It does nothing yet (`progress.md`): readers hear it as unavailable.
-            row().key("banner-sign-in").role("button").label("Sign in").aria_disabled(true).h(22.0).px(space::S2).radius(radius::ROW).center_y().border(p.hair, t.border).hover(t.hover).child(text("Sign in").font(type_::META_STRONG).color(t.text)),
+            row()
+                .key("banner-sign-in")
+                .role("button")
+                .label("Sign in")
+                .h(22.0)
+                .px(space::S2)
+                .radius(radius::ROW)
+                .center_y()
+                .border(p.hair, t.border)
+                .hover(t.hover)
+                .press(t.press)
+                .on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, Action::SignIn(host.clone()), tx))
+                .tab_press()
+                .child(text("Sign in").font(type_::META_STRONG).color(t.text)),
         );
     } else {
         b = b.child(text("Changes are paused until it's back").font(type_::META).color(t.text_3));

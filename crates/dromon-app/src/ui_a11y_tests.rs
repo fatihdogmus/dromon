@@ -237,6 +237,8 @@ fn table(rows: &[(String, Offence)]) -> String {
 /// Every scene's tree, and the Settings window's.
 fn trees() -> Vec<(String, Vec<Node>)> {
     let mut out: Vec<(String, Vec<Node>)> = scenes::SCENES.iter().map(|(name, scene)| ((*name).to_owned(), tree(&scene_runtime(*scene)))).collect();
+    // The reconnecting banner's Sign in is a state of its own (not a golden scene).
+    out.push(("reconnect-sign-in".into(), tree(&scene_runtime(needs_sign_in))));
     out.push(("settings-window".into(), tree(&pane_runtime(false))));
     out.push(("settings-window-light".into(), tree(&pane_runtime(true))));
     out
@@ -322,6 +324,13 @@ fn a_virtualized_folder_reports_every_row_and_where_each_is() {
     assert!(mounted < 400, "only a window of rows is built ({mounted})");
 }
 
+/// prod was up and reconnecting needs the user (a rotated password, a 2FA code): the banner
+/// offers Sign in.
+pub(crate) fn needs_sign_in(s: &mut App) {
+    scenes::reconnecting(s);
+    s.apply(ServiceEvent::Status { host: dromon_core::HostId("prod".into()), status: dromon_core::ConnStatus::NeedsInput });
+}
+
 /// Status and errors in words or shape, not colour alone (§6.9).
 #[test]
 fn states_are_said_in_words_not_colour_alone() {
@@ -334,6 +343,13 @@ fn states_are_said_in_words_not_colour_alone() {
     assert!(node(&nodes, "status-conn").name.starts_with("Reconnecting"));
     assert!(node(&nodes, "host-prod").description.contains("Reconnecting"));
     assert_eq!(node(&nodes, "banner").role, "status");
+    assert!(!nodes.iter().any(|n| n.key == "banner-sign-in"), "Sign in is for a reconnect that needs the user");
+    // That one offers Sign in as a live button, pressed and focused like any.
+    let nodes = tree(&scene_runtime(needs_sign_in));
+    let sign_in = node(&nodes, "banner-sign-in");
+    assert_eq!((sign_in.role.as_str(), sign_in.name.as_str()), ("button", "Sign in"));
+    assert!(!sign_in.has_state("disabled"), "{sign_in:?}");
+    assert!(sign_in.acts("click") && sign_in.acts("focus"), "{sign_in:?}");
 
     // Kinds the icons show: a folder, a link.
     let nodes = tree(&scene_runtime(scenes::listing));

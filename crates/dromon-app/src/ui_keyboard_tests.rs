@@ -8,7 +8,7 @@ use rune::{ElementInfo, Key, KeyEvent, KeyPlatform, Mods, Runtime};
 use crate::scenes;
 use crate::state::{Action, App, FileAction, MenuKind};
 use crate::theme::{self, Access, Appearance};
-use crate::ui_a11y_tests::{ITEMS, Node, interactive, pane_runtime, scene_runtime, settle, tree};
+use crate::ui_a11y_tests::{ITEMS, Node, interactive, needs_sign_in, pane_runtime, scene_runtime, settle, tree};
 use crate::views::settings::Pane;
 
 const SHIFT: Mods = Mods { shift: true, cmd: false, alt: false, ctrl: false, logo: false };
@@ -192,6 +192,12 @@ fn every_main_state_is_reachable_by_tab() {
         let order = walk(name, *start, None);
         println!("{name}: {}", order.join(" → "));
     }
+    // A reconnect that needs the user: the banner's Sign in is a Tab stop, after the toolbar,
+    // before the status bar (the dimmed list between them is inert while it reconnects).
+    let order = walk("reconnect-sign-in", needs_sign_in, None);
+    assert_eq!(order, ["host-prod", "sb-quick-connect", "tb-filter", "tb-transfers", "tb-palette", "banner-sign-in", "status-conn"]);
+    let plain = walk("reconnecting", scenes::reconnecting, None);
+    assert!(!plain.iter().any(|k| k == "banner-sign-in"), "a plain reconnect has no Sign in: {plain:?}");
     // A failed delete's toast can be dismissed from the keyboard.
     let order = walk("delete-failed", scenes::delete_failed, None);
     assert!(order.iter().any(|k| k.starts_with("toast-op-") && k.ends_with("-dismiss")), "{order:?}");

@@ -108,6 +108,7 @@ struct Open {
     id: PromptId,
     kind: PromptKind,
     text: String,
+    error: Option<String>,
 }
 
 /// What a host's connection does next, in order.
@@ -379,7 +380,7 @@ impl Core {
                 AuthDecision::AskUser { error } => {
                     let id = self.next_id();
                     if let Some(a) = self.conns.get_mut(host).and_then(|c| c.attempt.as_mut()) {
-                        a.waiting = Some(Open { id, kind: kind.clone(), text: text.clone() });
+                        a.waiting = Some(Open { id, kind: kind.clone(), text: text.clone(), error: error.clone() });
                     }
                     Self::log(host, format!("ssh asks “{}”", first_line(&text)), out);
                     out.push(ServiceEvent::Prompt(Prompt { id, host: host.clone(), kind, text, error }));
@@ -558,6 +559,15 @@ impl Core {
         }
     }
 
+    /// The banner's Sign in: `host`'s open prompt again (the windows' routing is
+    /// `fixture/windows.rs`'s).
+    fn show_prompts(&self, host: &HostId, out: &mut Vec<ServiceEvent>) {
+        let open = self.conns.get(host).and_then(|c| c.attempt.as_ref()).and_then(|a| a.waiting.as_ref());
+        if let Some(o) = open {
+            out.push(ServiceEvent::Prompt(Prompt { id: o.id, host: host.clone(), kind: o.kind.clone(), text: o.text.clone(), error: o.error.clone() }));
+        }
+    }
+
     /// The host whose open prompt is `id`.
     fn owner(&self, id: PromptId) -> Option<HostId> {
         self.conns.iter().find(|(_, c)| c.attempt.as_ref().and_then(|a| a.waiting.as_ref()).is_some_and(|o| o.id == id)).map(|(h, _)| h.clone())
@@ -633,6 +643,7 @@ impl Core {
             }
             Command::Poll { host } => self.poll(&host, &mut out),
             Command::Verbose { host, on } => self.verbose(host, on, &mut out),
+            Command::ShowPrompts { host } => self.show_prompts(&host, &mut out),
             Command::HostBook(cmd) => self.book.command(cmd, &mut out),
             Command::WindowClosed => {
                 self.windows.remove(&self.from);

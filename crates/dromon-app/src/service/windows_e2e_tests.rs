@@ -116,3 +116,38 @@ async fn a_window_that_closes_hands_its_prompt_on() {
     fx.send_from(B, Command::AnswerPrompt { id: p.id, answer: PromptAnswer::Text("secret".into()) });
     assert_eq!(opened(&mut fx).await, None);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn show_prompts_sends_the_open_prompt_to_the_asking_window_and_answering_there_closes_it_in_both() {
+    let Some(mut fx) = Fixture::start() else { return };
+    fx.send_from(A, window(true, true));
+    fx.send_from(B, window(true, false));
+    fx.send_from(A, Command::Connect { host: host("pw") });
+    let (to, p) = fx.until_for("a prompt", |to, ev| if let ServiceEvent::Prompt(p) = ev { Some((to, p.clone())) } else { None }).await;
+    assert_eq!(to, Some(A), "the focused window's");
+    // B's Sign in: the same prompt, to B alone.
+    fx.send_from(B, Command::ShowPrompts { host: host("pw") });
+    let (to, again) = fx.until_for("the prompt in B", |to, ev| if let ServiceEvent::Prompt(p) = ev { Some((to, p.clone())) } else { None }).await;
+    assert_eq!((to, again.id), (Some(B), p.id));
+    // A wrong answer in B closes it in every window, and ssh asks again in B (the asking
+    // window is the host's target now), though A is focused.
+    fx.send_from(B, Command::AnswerPrompt { id: p.id, answer: PromptAnswer::Text("wrong".into()) });
+    let closed = fx.until_for("its PromptClosed", |to, ev| matches!(ev, ServiceEvent::PromptClosed(id) if *id == p.id).then_some(to)).await;
+    assert_eq!(closed, None, "closed in every window");
+    let (to, next) = fx.until_for("the prompt again", |to, ev| if let ServiceEvent::Prompt(p) = ev { Some((to, p.clone())) } else { None }).await;
+    assert_eq!(to, Some(B));
+    // Signing in from B: up for both.
+    fx.send_from(B, Command::AnswerPrompt { id: next.id, answer: PromptAnswer::Text("secret".into()) });
+    fx.status("pw", ConnStatus::Ready).await;
+    assert_eq!(opened(&mut fx).await, None);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn show_prompts_with_no_open_prompt_sends_nothing() {
+    let Some(mut fx) = Fixture::start() else { return };
+    fx.sign_in().await;
+    let mark = fx.seen.len();
+    fx.send_from(B, Command::ShowPrompts { host: host("pw") });
+    assert!(fx.none_for(Duration::from_secs(1), |ev| matches!(ev, ServiceEvent::Prompt(_))).await);
+    assert!(!fx.saw_since(mark, |ev| matches!(ev, ServiceEvent::Prompt(_))));
+}

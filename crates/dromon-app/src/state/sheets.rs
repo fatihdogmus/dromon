@@ -133,6 +133,27 @@ impl Sheets {
         }
     }
 
+    /// The reconnecting banner's Sign in: whether this window has a prompt of `host` to show
+    /// (open or waiting). A waiting one comes to the front, as `on_prompt` would show it: the
+    /// Ask sheet open for another host goes back to the front of the queue (its field wiped);
+    /// an answered sheet of another host stays until it settles.
+    pub fn bring_forward(&mut self, host: &HostId) -> bool {
+        match &self.open {
+            Some(Sheet::Ask { prompt, .. } | Sheet::Sent { prompt }) if &prompt.host == host => return true,
+            _ => {}
+        }
+        let Some(at) = self.queue.iter().position(|p| &p.host == host) else { return false };
+        if !matches!(self.open, Some(Sheet::Sent { .. })) {
+            let Some(p) = self.queue.remove(at) else { return false };
+            if let Some(Sheet::Ask { mut edit, prompt }) = self.open.take() {
+                edit.clear();
+                self.queue.push_front(prompt);
+            }
+            self.open = Some(ask(p));
+        }
+        true
+    }
+
     /// The prompt went away without an answer (ssh hung up, the notice ended).
     pub fn on_closed(&mut self, id: PromptId) {
         self.notices.retain(|n| n.id != id);

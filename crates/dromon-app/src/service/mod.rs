@@ -307,6 +307,11 @@ fn dispatch<S: Sink>(
                 let _ = c.cmds.send(ConnCmd::Verbose(on));
             }
         }
+        Command::ShowPrompts { host } => {
+            if let Some(c) = conns.get(&host) {
+                let _ = c.cmds.send(ConnCmd::ShowPrompts(from));
+            }
+        }
         Command::List { host, path } => {
             if let Some(c) = conns.get(&host) {
                 let _ = c.cmds.send(ConnCmd::List(from, path));

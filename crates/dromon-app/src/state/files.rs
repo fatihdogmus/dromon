@@ -146,6 +146,21 @@ impl App {
             || self.ui.palette.focused()
     }
 
+    /// Shift+F10 or the Menu key: the menu a right-click on the cursor row opens, or the empty
+    /// area's when there is no cursor row on screen. Not while a text field has the keyboard,
+    /// a sheet or another menu is open, or the folder isn't listed.
+    pub(super) fn context_menu_key(&self) -> Vec<Effect> {
+        if self.text_focused() || self.ui.sheets.is_open() || self.files.menu.is_some() {
+            return Vec::new();
+        }
+        let Some(c) = self.live() else { return Vec::new() };
+        let kind = match c.selection.cursor() {
+            Some(name) if c.row_names().contains(&name) => MenuKind::Row(name.to_owned()),
+            _ => MenuKind::Empty,
+        };
+        vec![Effect::ContextMenu(kind)]
+    }
+
     /// The toasts on screen, oldest first: running and failed deletes, then notes.
     pub fn toasts(&self) -> Vec<Toast> {
         let ops = self.ops.ops.iter().filter_map(|o| delete_toast(o, self.files.deletes.get(&o.id).map_or(&[][..], Vec::as_slice)));

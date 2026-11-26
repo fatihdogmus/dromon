@@ -116,6 +116,7 @@ pub fn effect(fx: Effect, tx: &mut Tx) {
         }
         Effect::CloseWindow => tx.close_window(),
         Effect::Copy(text) => tx.copy(text),
+        Effect::ContextMenu(kind) => menu::open_at_row(kind, tx),
         Effect::ReadClipboard { as_move } => {
             tx.read_clipboard(move |s: &mut App, content: &rune::ClipboardContent, tx: &mut Tx| pasted(s, content, as_move, tx))
         }

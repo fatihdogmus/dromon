@@ -5,8 +5,9 @@
 //! A command's events go to the window that sent it at once (the answer of `Backend::send`),
 //! and to every other window through its [`Backend::pending`] list (calling the wake, so it
 //! catches up): hosts, statuses, log lines, listings, operations, transfers. Two kinds go to
-//! one window only, as the service sends them: a prompt (to the focused window, else the
-//! sender), and `Opened` for a host that was up already for another window (to the sender).
+//! one window only, as the service sends them: a prompt (to the window that asked to sign in
+//! with `Command::ShowPrompts`, else the focused window, else the sender; a `ShowPrompts` sends
+//! the host's open prompt again to its sender alone), and `Opened` for a host that was up already for another window (to the sender).
 //! A window that closes hands its open prompts on.
 
 use std::cell::RefCell;
@@ -14,7 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use dromon_core::Prompt;
+use dromon_core::{ConnStatus, HostId, Prompt};
 use dromon_sftp::Visibility;
 
 use super::Fixture;
@@ -37,13 +38,15 @@ struct Shared {
     pending: BTreeMap<WindowId, Vec<ServiceEvent>>,
     /// The prompts on screen, and the window each is in.
     prompts: Vec<(Prompt, WindowId)>,
+    /// The window that asked to sign in to a host (`Command::ShowPrompts`), until it settles.
+    shown: BTreeMap<HostId, WindowId>,
     wake: Option<Rc<dyn Fn(WindowId)>>,
 }
 
 impl FixtureBackend {
     /// The first window's end of a fresh fixture.
     pub fn new(fixture: Arc<Fixture>) -> Self {
-        let shared = Shared { core: Core::new(fixture), pending: BTreeMap::new(), prompts: Vec::new(), wake: None };
+        let shared = Shared { core: Core::new(fixture), pending: BTreeMap::new(), prompts: Vec::new(), shown: BTreeMap::new(), wake: None };
         FixtureBackend { shared: Rc::new(RefCell::new(shared)), window: WindowId::FIRST }
     }
 }
@@ -82,7 +85,11 @@ impl Shared {
     fn send(&mut self, from: WindowId, cmd: Command) -> (Vec<ServiceEvent>, BTreeSet<WindowId>) {
         let joins = matches!(&cmd, Command::Connect { host } if self.core.up(host));
         let closing = cmd == Command::WindowClosed;
+        let shows = matches!(cmd, Command::ShowPrompts { .. });
+        // Answered in one window, closed in every other, as the service says (`PromptClosed`).
+        let mut answered = None;
         if let Command::AnswerPrompt { id, .. } = &cmd {
+            answered = self.prompts.iter().any(|(p, _)| p.id == *id).then_some(*id);
             self.prompts.retain(|(p, _)| p.id != *id);
         }
         self.core.from = from;
@@ -98,15 +105,29 @@ impl Shared {
                 woken.insert(w);
             }
         };
+        if let Some(id) = answered {
+            for w in windows.iter().copied().filter(|w| *w != from) {
+                to(self, w, ServiceEvent::PromptClosed(id));
+            }
+        }
         for ev in events {
             match &ev {
                 ServiceEvent::Prompt(p) => {
-                    let at = focused.unwrap_or(from);
+                    // The window that asked to sign in takes this host's prompts (as the
+                    // service's `Route` does), else the focused one, else the sender.
+                    let at = if shows { from } else { self.shown.get(&p.host).copied().or(focused).unwrap_or(from) };
+                    self.prompts.retain(|(q, _)| q.id != p.id);
                     self.prompts.push((p.clone(), at));
+                    if shows {
+                        self.shown.insert(p.host.clone(), from);
+                    }
                     to(self, at, ev);
                 }
                 ServiceEvent::Opened { .. } if joins => to(self, from, ev),
                 _ => {
+                    if let ServiceEvent::Status { host, status: ConnStatus::Ready | ConnStatus::Failed(_) | ConnStatus::Disconnected } = &ev {
+                        self.shown.remove(host);
+                    }
                     if let ServiceEvent::PromptClosed(id) = &ev {
                         self.prompts.retain(|(p, _)| p.id != *id);
                     }
@@ -118,6 +139,7 @@ impl Shared {
         }
         if closing {
             self.pending.remove(&from);
+            self.shown.retain(|_, w| *w != from);
             let next = focused.filter(|w| *w != from).or_else(|| windows.first().copied());
             if let Some(next) = next {
                 let moved: Vec<Prompt> = self.prompts.iter_mut().filter(|(_, at)| *at == from).map(|(p, at)| {

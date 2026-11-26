@@ -153,6 +153,68 @@ fn while_reconnecting_the_server_changing_items_are_off() {
     assert!(!shown(&rt, "ctx-menu"), "copy path still works");
 }
 
+const SHIFT: Mods = Mods { shift: true, cmd: false, alt: false, ctrl: false, logo: false };
+
+fn press(rt: &mut Runtime<App>, key: Key, mods: Mods) {
+    rt.key(KeyEvent { key, mods });
+    settle(rt);
+}
+
+fn rect_of(rt: &Runtime<App>, key: &str) -> [f32; 4] {
+    rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key) && !e.exiting).unwrap_or_else(|| panic!("no element {key:?}")).rect
+}
+
+#[test]
+fn shift_f10_opens_the_cursor_rows_menu_at_the_row_and_the_menu_key_too() {
+    let row_items = ["Open", "Download", "Copy", "Cut", "Paste", "Copy path", "Rename", "Delete"];
+    for (key, mods) in [(Key::Function(10), SHIFT), (Key::ContextMenu, Mods::default())] {
+        let mut rt = runtime();
+        click(&mut rt, "rows/index.html");
+        assert!(!shown(&rt, "ctx-menu"));
+        press(&mut rt, key, mods);
+        assert!(shown(&rt, "ctx-menu"), "the menu opens");
+        assert_eq!(items(&rt), row_items);
+        // Anchored below the cursor row's bottom-left, as a right-click's is at the pointer.
+        let (list, menu) = (rect_of(&rt, "list"), rect_of(&rt, "ctx-menu"));
+        let (_, centre) = at(&rt, "rows/index.html");
+        let bottom = centre + rt.state.settings.density.row() / 2.0;
+        assert!((menu[0] - list[0]).abs() < 1.5, "menu x {} at the row's left {}", menu[0], list[0]);
+        assert!((menu[1] - (bottom + 2.0)).abs() < 1.5, "menu y {} below the row's bottom {bottom}", menu[1]);
+        assert_eq!(rt.state.conn().unwrap().selection.cursor(), Some("index.html"));
+        press(&mut rt, Key::Escape, Mods::default());
+        assert!(!shown(&rt, "ctx-menu"));
+    }
+}
+
+#[test]
+fn shift_f10_without_a_cursor_row_opens_the_empty_areas_menu_and_never_over_a_field() {
+    let mut rt = runtime();
+    rt.update(|s, _| drop(s.act(Action::Escape)));
+    settle(&mut rt);
+    assert_eq!(rt.state.conn().unwrap().selection.cursor(), None);
+    press(&mut rt, Key::Function(10), SHIFT);
+    assert_eq!(items(&rt), ["New folder", "Paste", "Refresh", "Show hidden files"]);
+    let (list, menu) = (rect_of(&rt, "list"), rect_of(&rt, "ctx-menu"));
+    assert!((menu[0] - list[0]).abs() < 1.5 && (menu[1] - (list[1] + 2.0)).abs() < 1.5, "at the list's top-left: {menu:?} in {list:?}");
+    press(&mut rt, Key::Escape, Mods::default());
+    assert!(!shown(&rt, "ctx-menu"));
+
+    // The filter field has the keyboard: the list's menu stays shut.
+    rt.update(|s, _| drop(s.act(Action::OpenFilter)));
+    settle(&mut rt);
+    assert!(rt.state.text_focused());
+    press(&mut rt, Key::Function(10), SHIFT);
+    assert!(!shown(&rt, "ctx-menu") && rt.state.files.menu.is_none());
+    // Nor over a sheet.
+    rt.update(|s, _| drop(s.act(Action::CloseFilter)));
+    rt.update(|s, _| s.apply(ServiceEvent::Log { host: prod(), line: "x".into() }));
+    rt.update(|s, _| drop(s.act(Action::OpenLog)));
+    settle(&mut rt);
+    assert!(rt.state.ui.sheets.is_open());
+    press(&mut rt, Key::ContextMenu, Mods::default());
+    assert!(rt.state.files.menu.is_none());
+}
+
 #[test]
 fn the_native_menu_has_the_same_items_and_shortcut_hints() {
     let mut rt = runtime();

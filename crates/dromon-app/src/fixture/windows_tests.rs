@@ -99,3 +99,28 @@ fn prompts_go_to_the_focused_window_and_move_when_it_closes() {
     let evs = a.send(Command::AnswerPrompt { id: asked.id, answer: PromptAnswer::Text("pw".into()) });
     assert!(evs.iter().any(|e| matches!(e, ServiceEvent::Opened { .. })));
 }
+
+#[test]
+fn show_prompts_sends_the_open_prompt_to_the_asking_window_alone() {
+    let mut a = FixtureBackend::new(fixture());
+    let mut b = a.another(B).expect("a second window's end");
+    a.send(Command::Window { visible: true, focused: true });
+    // A connects while focused: the sheet is A's.
+    let asked = prompt_of(&a.send(Command::Connect { host: prod() })).expect("in A");
+    assert!(prompt_of(&b.pending()).is_none());
+    // B asks to sign in: the same prompt comes to B, A hears nothing.
+    let evs = b.send(Command::ShowPrompts { host: prod() });
+    assert_eq!(prompt_of(&evs).map(|p| p.id), Some(asked.id));
+    assert!(a.pending().is_empty());
+    // Answering in B closes it in A too (B's own sheet waits for ssh).
+    let evs = b.send(Command::AnswerPrompt { id: asked.id, answer: PromptAnswer::Text("wrong".into()) });
+    assert!(a.pending().contains(&ServiceEvent::PromptClosed(asked.id)));
+    // The host's next prompt (the wrong password asks again) goes to B, though A is focused.
+    let again = prompt_of(&evs).expect("asked again, in B");
+    assert_ne!(again.id, asked.id);
+    assert!(prompt_of(&a.pending()).is_none());
+    // A host with no open prompt: nothing.
+    let evs = b.send(Command::AnswerPrompt { id: again.id, answer: PromptAnswer::Text("pw".into()) });
+    assert!(evs.iter().any(|e| matches!(e, ServiceEvent::Opened { .. })));
+    assert!(prompt_of(&b.send(Command::ShowPrompts { host: prod() })).is_none());
+}

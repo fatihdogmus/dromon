@@ -91,7 +91,13 @@ fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         return false;
     }
     let now = tx.clock();
-    for fx in s.shortcut(sc, now) {
+    let fx = s.shortcut(sc.clone(), now);
+    // Shift+F10 and the Menu key the list has no menu for (a text field has the keyboard, the
+    // folder isn't listed) are left to Rune: a field's own Cut, Copy and Paste menu.
+    if sc == Shortcut::ContextMenu && fx.is_empty() {
+        return false;
+    }
+    for fx in fx {
         views::effect(fx, tx);
     }
     true

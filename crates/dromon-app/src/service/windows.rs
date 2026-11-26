@@ -214,6 +214,20 @@ impl Route {
         self.answered = None;
     }
 
+    /// `window` asked to see the host's open prompts (the banner's Sign in): they are shown
+    /// there now, and it takes the host's later prompts too, until the connection settles.
+    /// Returns the prompts to send it.
+    pub fn show_in(&mut self, window: WindowId) -> Vec<Prompt> {
+        self.answered = Some(window);
+        self.open
+            .iter_mut()
+            .map(|(p, at)| {
+                *at = Some(window);
+                p.clone()
+            })
+            .collect()
+    }
+
     /// `window` closed: the prompts it had, each with the window to show it in now.
     pub fn closed(&mut self, window: WindowId, watch: &Watch) -> Vec<(Prompt, Option<WindowId>)> {
         self.joining.remove(&window);

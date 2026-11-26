@@ -287,3 +287,68 @@ fn every_scene_builds() {
         }
     }
 }
+
+fn prompt_of(id: u64, host: &str) -> dromon_core::Prompt {
+    dromon_core::Prompt { id: dromon_core::PromptId(id), host: HostId(host.into()), kind: dromon_core::PromptKind::Password, text: "pw: ".into(), error: None }
+}
+
+fn open_prompt(s: &App) -> Option<u64> {
+    s.ui.sheets.open().and_then(Sheet::prompt).map(|p| p.id.0)
+}
+
+#[test]
+fn sign_in_brings_a_queued_prompt_forward() {
+    let rec = Recorder::default();
+    let mut s = app();
+    s.backend = Box::new(rec.clone());
+    s.act(Action::SelectHost(prod()));
+    let sent = rec.sent().len();
+    s.apply(ServiceEvent::Prompt(prompt_of(1, "other")));
+    s.apply(ServiceEvent::Prompt(prompt_of(2, "prod")));
+    assert_eq!(open_prompt(&s), Some(1));
+    s.act(Action::SignIn(prod()));
+    assert_eq!(open_prompt(&s), Some(2), "prod's prompt is the open sheet");
+    assert_eq!(s.ui.sheets.queued().map(|p| p.id.0).collect::<Vec<_>>(), [1], "the other host's goes back to the front of the queue");
+    assert!(s.ui.sheets.edit().is_some_and(|e| e.focused), "with its field focused");
+    // Again: it's open already, nothing moves, nothing is asked of the service.
+    s.act(Action::SignIn(prod()));
+    assert_eq!(open_prompt(&s), Some(2));
+    assert_eq!(rec.sent().len(), sent, "no command");
+}
+
+#[test]
+fn sign_in_without_a_prompt_here_asks_the_service_for_it() {
+    let rec = Recorder::default();
+    let mut s = app();
+    s.backend = Box::new(rec.clone());
+    s.act(Action::SelectHost(prod()));
+    s.act(Action::SignIn(prod()));
+    assert_eq!(rec.sent().last(), Some(&Command::ShowPrompts { host: prod() }));
+    // A host this window has no connection to: nothing to ask about.
+    let sent = rec.sent().len();
+    s.act(Action::SignIn(HostId("nowhere".into())));
+    assert_eq!(rec.sent().len(), sent);
+}
+
+#[test]
+fn the_context_menu_key_opens_the_cursor_rows_menu_else_the_empty_one() {
+    let mut s = app();
+    s.act(Action::SelectHost(prod()));
+    // No cursor row yet.
+    s.act(Action::Escape);
+    assert_eq!(s.shortcut(Shortcut::ContextMenu, 0.0), [Effect::ContextMenu(MenuKind::Empty)]);
+    let name = names(&s)[0].clone();
+    s.act(Action::Click { name: name.clone(), extend: false, toggle: false });
+    assert_eq!(s.shortcut(Shortcut::ContextMenu, 0.0), [Effect::ContextMenu(MenuKind::Row(name.clone()))]);
+    // Not while a text field has the keyboard.
+    s.act(Action::OpenFilter);
+    assert!(s.text_focused());
+    assert!(s.shortcut(Shortcut::ContextMenu, 0.0).is_empty());
+    s.act(Action::CloseFilter);
+    // Not while a sheet or a menu is open.
+    s.act(Action::File(FileAction::OpenMenu { kind: MenuKind::Empty, at: Some((1.0, 1.0)) }));
+    assert!(s.shortcut(Shortcut::ContextMenu, 0.0).is_empty(), "a menu is open");
+    s.act(Action::File(FileAction::CloseMenu));
+    s.apply(ServiceEvent::Prompt(prompt_of(5, "other")));
+    assert!(s.shortcut(Shortcut::ContextMenu, 0.0).is_empty(), "a sheet is open");
+}

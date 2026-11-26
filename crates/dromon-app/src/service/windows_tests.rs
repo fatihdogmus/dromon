@@ -156,3 +156,25 @@ fn a_window_joining_hears_the_connections_state() {
     assert_eq!(status_of(&Phase::Waiting { attempt: 3 }), Some(ConnStatus::Reconnecting { attempt: 3 }));
     assert_eq!(status_of(&Phase::Ready), Some(ConnStatus::Ready));
 }
+
+#[test]
+fn show_in_hands_the_open_prompts_to_the_asking_window_and_routes_later_ones_there() {
+    let t0 = Instant::now();
+    let mut watch = Watch::default();
+    let mut r = Route::default();
+    r.started_by(A);
+    watch.window(A, Visibility::Focused, t0);
+    watch.window(B, Visibility::VisibleUnfocused, t0);
+    assert!(r.show_in(B).is_empty(), "no prompt open: nothing to show");
+    r.settled();
+    r.asked(prompt(1), Some(A));
+    assert_eq!(r.show_in(B), [prompt(1)]);
+    // The host's later prompts are B's now, though A has the focus; until it settles.
+    assert_eq!(r.target(&watch), Some(B));
+    r.settled();
+    assert_eq!(r.target(&watch), Some(A));
+    // The prompt is B's now: when B closes it moves on.
+    r.show_in(B);
+    watch.closed(B, t0);
+    assert_eq!(r.closed(B, &watch), [(prompt(1), Some(A))]);
+}
