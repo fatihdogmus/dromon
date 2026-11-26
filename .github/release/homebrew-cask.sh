@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # homebrew-cask.sh <version> <dmg-sha256> <notarized:true|false> [repo]: prints Casks/dromon.rb
-# for the Homebrew tap (homebrew.yml writes it to fatihdogmus/homebrew-tap).
+# for the Homebrew tap (release.yml's homebrew job writes it to fatihdogmus/homebrew-tap).
 #
 # While the app is not notarized, the cask strips macOS's quarantine flag from Dromon.app after
 # install, so it opens without Gatekeeper's "Apple could not verify" block. Homebrew dropped

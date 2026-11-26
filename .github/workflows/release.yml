@@ -19,7 +19,7 @@ name: Release
 # - approve waits for the maintainer: the run's one approval (environment release-approval).
 #   The builds run meanwhile; nothing is signed before it.
 # - publish tags the commit <version> (plain semver), publishes the GitHub release, then main
-#   gets the version commit (land) and the Homebrew cask is updated (homebrew.yml).
+#   gets the version commit (land) and the Homebrew cask is updated (homebrew).
 # Dry run: the same builds, packages and signatures at the current version; nothing is bumped,
 # tagged, published or pushed, and the files stay as this run's artifacts.
 #
@@ -737,16 +737,66 @@ jobs:
           BRANCH: release/${{ needs.plan.outputs.version }}
           VERSION: ${{ needs.plan.outputs.version }}
 
-  # A release published with the workflow's token starts no other workflow, so the cask update
-  # is called from here. `secrets: inherit` is what lets a called workflow read its own
-  # environment's secrets (homebrew: the tap's deploy key); the repository has no others.
+  # The cask in the tap (fatihdogmus/homebrew-tap, Casks/dromon.rb), so `brew install --cask
+  # fatihdogmus/tap/dromon` and `brew upgrade` get the release. The DMG must match the release's
+  # SHA256SUMS and its build attestation, and Gatekeeper decides whether the cask needs to strip
+  # the quarantine flag (.github/release/homebrew-update.sh). The `homebrew` environment holds
+  # HOMEBREW_TAP_DEPLOY_KEY, a deploy key that can write to the tap and nothing else; without it
+  # the job writes the cask to its summary only. To redo a cask, re-run this job.
   homebrew:
     needs: [plan, publish]
     if: ${{ !cancelled() && needs.publish.result == 'success' }}
+    runs-on: macos-15
+    timeout-minutes: 20
+    environment: homebrew
     permissions:
       contents: read
       attestations: read
-    uses: ./.github/workflows/homebrew.yml
-    with:
-      tag: ${{ needs.plan.outputs.tag }}
-    secrets: inherit
+    env:
+      TAG: ${{ needs.plan.outputs.tag }}
+      TAP: fatihdogmus/homebrew-tap
+    steps:
+      - *checkout-release
+      - id: cask
+        name: Check the release and write the cask
+        run: bash .github/release/homebrew-update.sh "$RUNNER_TEMP/dromon.rb"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+      - id: key
+        if: steps.cask.outputs.skip == 'false'
+        name: Tap deploy key
+        env:
+          KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        run: |
+          if [ -n "$KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::No HOMEBREW_TAP_DEPLOY_KEY in the homebrew environment; the tap is not updated."
+            { echo '```ruby'; cat "$RUNNER_TEMP/dromon.rb"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Check out the tap
+        if: steps.key.outputs.present == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ env.TAP }}
+          ssh-key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          path: tap
+      - name: Push the cask
+        if: steps.key.outputs.present == 'true'
+        env:
+          VERSION: ${{ steps.cask.outputs.version }}
+        run: |
+          mkdir -p tap/Casks
+          cp "$RUNNER_TEMP/dromon.rb" tap/Casks/dromon.rb
+          cd tap
+          if git diff --quiet --exit-code -- Casks/dromon.rb && git ls-files --error-unmatch Casks/dromon.rb > /dev/null 2>&1; then
+            echo "The tap already has this cask."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/dromon.rb
+          git commit -q -m "dromon $VERSION"
+          git push -q origin HEAD
+          echo "Pushed dromon $VERSION to $TAP." >> "$GITHUB_STEP_SUMMARY"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # homebrew-update.sh <out-file>: writes the Homebrew cask for the published release TAG of REPO
-# to <out-file>, for homebrew.yml to push to the tap. Runs on macOS (hdiutil, spctl).
+# to <out-file>, for release.yml's homebrew job to push to the tap. Runs on macOS (hdiutil, spctl).
 #
 # Writes nothing, and sets the output `skip=true`, when TAG is not the repository's latest
 # release (an older release republished, or a prerelease): the tap follows the latest only.

@@ -61,7 +61,7 @@ plan ─┬─ approve (release-approval: you) ── credentials (release env) 
                                     ── sign-windows-msi (release env)* ─────────────┤
          assemble ◄─────────────────────────────────────────────────────────────────┘
             └── sign-linux (release env)* ── publish (release env) ─┬─ land
-                                                                    └─ homebrew (homebrew.yml)
+                                                                    └─ homebrew (homebrew env)
          * runs only when its credentials exist; publish, land and homebrew: releases only
 ```
 
@@ -405,14 +405,14 @@ All are in the `release` environment unless marked *repository*.
 | `APPLE_DEVELOPER_ID_P12_PASSWORD` | secret | sign-macos |
 | `APPLE_TEAM_ID`, `APPLE_NOTARY_KEY_ID`, `APPLE_NOTARY_ISSUER_ID` | variables | credentials, sign-macos |
 | `DROMON_REQUIRE_SIGNED_WINDOWS`, `DROMON_REQUIRE_SIGNED_MACOS` | *repository* variables | credentials |
-| `HOMEBREW_TAP_DEPLOY_KEY` | secret, *`homebrew` environment* | homebrew.yml (pushes the cask) |
+| `HOMEBREW_TAP_DEPLOY_KEY` | secret, *`homebrew` environment* | release.yml's `homebrew` job (pushes the cask) |
 
 ## Homebrew
 
 `brew install --cask fatihdogmus/tap/dromon` installs from the tap
 [fatihdogmus/homebrew-tap](https://github.com/fatihdogmus/homebrew-tap). Its `Casks/dromon.rb`
-is written by `.github/workflows/homebrew.yml`, which `release.yml` calls after publishing (and
-by hand: Actions → Homebrew → *Run workflow* with the tag). On a macOS runner it:
+is written by `release.yml`'s `homebrew` job after publishing (to redo it, re-run that job).
+On a macOS runner it:
 
 1. skips the release unless it is GitHub's latest one and not a prerelease;
 2. downloads `Dromon-<v>-macos-arm64.dmg` and `SHA256SUMS`, and checks the DMG's SHA-256 against
@@ -429,8 +429,8 @@ approval) holds `HOMEBREW_TAP_DEPLOY_KEY`, the private half of a deploy key with
 write access to the tap only. To replace it:
 
 ```sh
-ssh-keygen -t ed25519 -N "" -C "dromon homebrew.yml" -f tapkey
-gh repo deploy-key add tapkey.pub --repo fatihdogmus/homebrew-tap --allow-write --title "dromon homebrew.yml"
+ssh-keygen -t ed25519 -N "" -C "dromon release homebrew" -f tapkey
+gh repo deploy-key add tapkey.pub --repo fatihdogmus/homebrew-tap --allow-write --title "dromon release homebrew"
 gh secret set HOMEBREW_TAP_DEPLOY_KEY --env homebrew --repo fatihdogmus/dromon < tapkey
 shred -u tapkey tapkey.pub   # then delete the old key in the tap's Settings → Deploy keys
 ```
