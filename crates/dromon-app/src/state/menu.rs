@@ -1,4 +1,5 @@
-//! Context menus (§5 M3): a row's, and the list's empty area's. One model for both ways of
+//! Context menus (§5 M3): a row's, and the list's empty area's (both offer New folder: a full
+//! folder may leave no empty area to right-click). One model for both ways of
 //! showing them: a native menu where Rune has one (macOS, Windows), a drawn one elsewhere
 //! (`views/menu.rs`). Items that would change the server are disabled while the host isn't
 //! connected; Paste also needs a clip.
@@ -90,6 +91,8 @@ impl App {
                     item("paste", "Paste", paste, Some("mod+v")),
                     item("copy-path", "Copy path", true, Some("mod+alt+c")),
                     MenuEntry::Separator,
+                    // In the folder on screen: a full folder may have no empty area to right-click.
+                    item("new-folder", "New folder", live, Some("mod+shift+n")),
                     item("rename", "Rename", live && one, Some("f2")),
                     MenuEntry::Item(MenuItem { id: "delete", title: "Delete", enabled: live, checked: None, danger: true, shortcut: Some(delete_chord()) }),
                     MenuEntry::Separator,
