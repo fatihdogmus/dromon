@@ -166,7 +166,7 @@ jobs:
           key: release-linux-x64
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Build the binary and the .deb
-        run: bash scripts/package-linux.sh --arch x64 --build host --no-arch --out "$RUNNER_TEMP/linux"
+        run: cargo package-linux --arch x64 --build host --no-arch --out "$RUNNER_TEMP/linux"
       - id: upload
         uses: ./.github/release/upload
         with:

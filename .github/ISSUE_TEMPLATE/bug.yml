@@ -15,7 +15,7 @@ body:
 
         ```sh
         # save the body of this form as issue.md, then
-        bash scripts/repro.sh issue.md          # writes target/repro/issue/{summary.md,end.png,strip.png,tree.json}
+        cargo repro issue.md                    # writes target/repro/issue/{summary.md,end.png,strip.png,tree.json}
         ```
 
         If you use an agent, give it this form and `docs/fixtures.md`, and ask it to write a fixture and script that reproduce the bug and to check them with `scripts/repro.sh`.

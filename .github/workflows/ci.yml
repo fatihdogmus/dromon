@@ -62,7 +62,7 @@ jobs:
           key: linux
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        run: cargo lint --locked
       - name: Tests (with the Docker sshd fixture)
         run: cargo test --workspace --locked
       # The server matrix (tests/docker/README.md): the SFTP and transfer checks again against
@@ -76,7 +76,7 @@ jobs:
         run: cargo test --locked --no-fail-fast -p dromon-sftp -p dromon-transfer --test matrix
       # Within GOLDEN_TOLERANCE per channel: other Mesa versions round a few pixels differently.
       - name: Goldens unchanged
-        run: bash scripts/goldens.sh --check
+        run: cargo goldens --check
       - name: Upload changed goldens
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -88,12 +88,12 @@ jobs:
       - name: Smoke (headless, window under Xvfb, real connect)
         timeout-minutes: 20
         run: |
-          bash scripts/smoke-app.sh
-          bash scripts/smoke-app.sh --window
-          bash scripts/smoke-app.sh --connect
+          cargo smoke
+          cargo smoke --window
+          cargo smoke --connect
       - name: Flows
         if: always()
-        run: bash scripts/flows.sh target/flows
+        run: cargo flows target/flows
       - name: Upload flows
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -151,7 +151,7 @@ jobs:
       - name: Smoke (headless)
         continue-on-error: true
         timeout-minutes: 5
-        run: bash scripts/smoke-app.sh
+        run: cargo smoke
 
   windows:
     runs-on: windows-2025
@@ -227,7 +227,7 @@ jobs:
       - name: Smoke (headless)
         continue-on-error: true
         timeout-minutes: 5
-        run: bash scripts/smoke-app.sh
+        run: cargo smoke
       # Windows' own OpenSSH server as the SFTP server (crates/dromon-transfer/tests/windows_sshd.rs):
       # /C:/ paths through RemotePath, a transfer round trip, renames, a copy and a delete. Windows
       # Server 2025 ships the OpenSSH.Server capability with its sshd service disabled (added here
