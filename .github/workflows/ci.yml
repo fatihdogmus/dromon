@@ -273,3 +273,38 @@ jobs:
           $status = $LASTEXITCODE
           if ($status -ne 0) { Show-SshdLog }
           exit $status
+
+  # The Windows installer, unsigned, on every push: release.yml builds it only after the
+  # release environment's approval, which once hid a WiX error (WIX0367) until a release
+  # check. The same scripts as release.yml, then a silent install, check and uninstall.
+  windows-package:
+    runs-on: windows-2025
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: release-windows-x64
+          save-if: false
+      - name: Build dromon.exe (release, version resource)
+        shell: pwsh
+        run: packaging/windows/build-exe.ps1 -Arch x64 -Out "$env:RUNNER_TEMP/windows"
+      - name: WiX Toolset v5
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version "5.*"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not install WiX.' }
+          Join-Path $env:USERPROFILE '.dotnet\tools' | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Build the MSI
+        shell: pwsh
+        run: packaging/windows/build-msi.ps1 -Exe "$env:RUNNER_TEMP/windows/dromon.exe" -Arch x64 -Out "$env:RUNNER_TEMP/msi"
+      - name: Install, check and uninstall it
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+          $msi = Get-ChildItem "$env:RUNNER_TEMP/msi/*.msi" | Select-Object -First 1
+          packaging/windows/verify-msi.ps1 -Msi $msi.FullName -Version $version

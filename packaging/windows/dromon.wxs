@@ -45,11 +45,17 @@
         <Component Id="DromonExe">
           <File Id="DromonExe" Name="dromon.exe" Source="$(var.Exe)" KeyPath="yes" />
         </Component>
+        <!-- One component per file: an automatic GUID needs a single-file component when the
+             key file is unversioned (text files never have a version; WIX0367). -->
         <Directory Id="LicensesFolder" Name="licenses">
-          <Component Id="Licenses">
+          <Component Id="License">
             <File Id="License" Name="LICENSE.txt" Source="$(var.License)" KeyPath="yes" />
-            <File Id="InterLicense" Name="Inter-LICENSE.txt" Source="$(var.InterLicense)" />
-            <File Id="GeistMonoLicense" Name="GeistMono-OFL.txt" Source="$(var.GeistMonoLicense)" />
+          </Component>
+          <Component Id="InterLicense">
+            <File Id="InterLicense" Name="Inter-LICENSE.txt" Source="$(var.InterLicense)" KeyPath="yes" />
+          </Component>
+          <Component Id="GeistMonoLicense">
+            <File Id="GeistMonoLicense" Name="GeistMono-OFL.txt" Source="$(var.GeistMonoLicense)" KeyPath="yes" />
           </Component>
         </Directory>
       </Directory>
@@ -76,7 +82,9 @@
 
     <Feature Id="Dromon" Title="Dromon">
       <ComponentRef Id="DromonExe" />
-      <ComponentRef Id="Licenses" />
+      <ComponentRef Id="License" />
+      <ComponentRef Id="InterLicense" />
+      <ComponentRef Id="GeistMonoLicense" />
       <ComponentRef Id="StartMenuShortcut" />
     </Feature>
   </Package>
