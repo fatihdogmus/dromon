@@ -212,6 +212,34 @@ fn the_big_folder_mounts_only_a_window_of_rows() {
     assert!(rt.find("rows/IMG_00001.jpg").is_none());
 }
 
+/// The cursor row moved by the keyboard is scrolled into the list's viewport (the viewport
+/// `list` holds the `rows` stack: a reveal scoped to `rows` alone scrolls nothing).
+#[test]
+fn keys_that_move_the_cursor_scroll_its_row_into_view() {
+    let mut rt = runtime();
+    rt.update(|s, _| scenes::big_folder(s));
+    rt.frame(0.0);
+    rt.frame(1.0 / 60.0);
+    let on_screen = |rt: &Runtime<App>| {
+        let c = rt.state.conn().unwrap();
+        let cursor = c.selection.cursor().unwrap().to_owned();
+        let at = rt.find(&format!("rows/{cursor}"));
+        assert!(at.is_some_and(|(_, y)| y > 0.0 && y < SIZE.1), "{cursor} is at {at:?}, outside 0..{}", SIZE.1);
+    };
+    key(&mut rt, Key::Home, Mods::default());
+    rt.frame(0.5);
+    on_screen(&rt);
+    key(&mut rt, Key::End, Mods::default());
+    rt.frame(0.5);
+    on_screen(&rt);
+    key(&mut rt, Key::Home, Mods::default());
+    for _ in 0..40 {
+        key(&mut rt, Key::Down, Mods::default());
+    }
+    rt.frame(0.5);
+    on_screen(&rt);
+}
+
 #[test]
 fn sidebar_resizes_within_its_bounds() {
     let mut rt = runtime();

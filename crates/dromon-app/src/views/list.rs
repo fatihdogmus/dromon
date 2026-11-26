@@ -113,7 +113,7 @@ fn rows(s: &App, c: &ConnView, p: Paint) -> El {
     if let Some((n, name)) = s.files.scroll.clone() {
         // The folder just made or the item just renamed: brought into view once it lists.
         content = content.child(el().key(format!("scroll-req-{n}")).absolute(0.0, 0.0).size(0.0, 0.0).on_mount(move |s: &mut App, tx: &mut Tx| {
-            tx.scroll_into_view_in(ROWS, name.clone());
+            tx.scroll_into_view_in(LIST, format!("{ROWS}/{name}"));
             run(s, Action::File(FileAction::Scrolled(n)), tx);
         }));
     }

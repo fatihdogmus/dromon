@@ -201,6 +201,17 @@ impl ConnView {
         self.rows.len()
     }
 
+    /// Runs `f` on the selection with the names of the rows on screen, borrowed (a 100k-row
+    /// folder's names aren't copied for every key press).
+    pub fn with_row_names<R>(&mut self, f: impl FnOnce(&mut Selection, &[&str]) -> R) -> R {
+        let entries: &[Entry] = match &self.listing {
+            Listing::Ready(e) => e,
+            _ => &[],
+        };
+        let names: Vec<&str> = self.rows.iter().map(|&i| entries[i as usize].name.as_str()).collect();
+        f(&mut self.selection, &names)
+    }
+
     /// Row `i` on screen.
     pub fn row(&self, i: usize) -> &Entry {
         &self.entries()[self.rows[i] as usize]

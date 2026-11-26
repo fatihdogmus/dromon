@@ -761,9 +761,7 @@ impl App {
     /// Runs a selection change over the rows on screen; a returned name is revealed.
     fn with_rows(&mut self, fx: &mut Vec<Effect>, f: impl FnOnce(&mut Selection, &[&str]) -> Option<String>) {
         let Some(c) = self.conn_mut() else { return };
-        let names: Vec<String> = c.row_names().into_iter().map(str::to_owned).collect();
-        let rows: Vec<&str> = names.iter().map(String::as_str).collect();
-        if let Some(name) = f(&mut c.selection, &rows) {
+        if let Some(name) = c.with_row_names(f) {
             fx.push(Effect::Reveal(name));
         }
     }

@@ -102,7 +102,10 @@ pub fn window_visibility(s: &mut App, visible: bool, tx: &mut Tx) {
 
 pub fn effect(fx: Effect, tx: &mut Tx) {
     match fx {
-        Effect::Reveal(name) => tx.scroll_into_view_in(ROWS, name),
+        // Scoped to the list's viewport (`rows` sits inside it; a reveal scoped to `rows` would
+        // scroll only viewports inside `rows`: none), naming the row by its path so a file
+        // called like another keyed element can't be taken for it.
+        Effect::Reveal(name) => tx.scroll_into_view_in(LIST, format!("{ROWS}/{name}")),
         Effect::ScrollTop => tx.scroll_to_y(LIST, 0.0),
         Effect::Blur => tx.blur(),
         // Never from tests or headless runs (`--snap`, `--script`): no file manager there.
