@@ -129,7 +129,14 @@ const GENERIC: &[&str] = &["group", "generic-container", "unknown", "label", ""]
 const PLAIN: &[&str] = &["group", "generic-container", "scroll-view"];
 
 pub fn interactive(n: &Node) -> bool {
-    ["click", "focus", "set-value", "expand", "collapse"].iter().any(|a| n.acts(a)) || CONTROLS.contains(&n.role.as_str())
+    !window_chrome(n) && (["click", "focus", "set-value", "expand", "collapse"].iter().any(|a| n.acts(a)) || CONTROLS.contains(&n.role.as_str()))
+}
+
+/// Rune's own window chrome: the caption buttons it draws for the custom title bar on Windows
+/// (`rune-caption-minimize`, `-maximize`, `-close`). Not the app's controls: named by Rune, and,
+/// as native caption buttons, not Tab stops (keyboard users have Alt+Space and Alt+F4).
+fn window_chrome(n: &Node) -> bool {
+    n.key.starts_with("rune-caption-")
 }
 
 fn container(nodes: &[Node], i: usize) -> Option<usize> {
