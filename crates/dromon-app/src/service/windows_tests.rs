@@ -11,7 +11,7 @@ fn p(s: &str) -> RemotePath {
 
 fn few() -> Collector {
     let mut got = Collector::default();
-    let entries: Vec<Entry> = (0..3).map(|i| Entry { name: format!("f{i}"), kind: EntryKind::File, size: 1, mtime: None, mode: None }).collect();
+    let entries: Vec<Entry> = (0..3).map(|i| Entry { name: format!("f{i}"), kind: EntryKind::File, size: 1, mtime: None, mode: None, owner: None, group: None }).collect();
     got.copy(&entries);
     got
 }

@@ -107,7 +107,7 @@ impl Generator {
                         Some(end - back - jitter)
                     }
                 };
-                Entry { name: self.pattern.name(self.start + i), kind: self.kind, size, mtime, mode }
+                Entry { name: self.pattern.name(self.start + i), kind: self.kind, size, mtime, mode, owner: None, group: None }
             })
             .collect()
     }

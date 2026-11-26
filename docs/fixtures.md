@@ -179,6 +179,28 @@ Listing a path:
 
 Listings arrive as the real service streams them: pages of 512 entries, then a last empty page.
 
+### Folder sizes (Properties)
+
+The Properties sheet's **Calculate** walks a folder of the tree as listed now (with what
+transfers and file operations changed), at once: one progress event, then the total. Nothing
+else needs to be written down for it. It counts as the real service does, Finder-style rather
+than like `du`:
+
+- Bytes are the `size`s of the files, symlinks and `other` entries inside, at any depth; folders
+  add no bytes. Symlinks count as entries of their own and are never followed, whatever their
+  `target`.
+- "N files, M folders": the non-folders, and the folders inside it (the folder itself isn't one
+  of them).
+- A folder inside whose listing is `{"error": "permission-denied"}` or `"not-found"` is counted
+  as a folder and noted as unreadable ("1 folder couldn't be read"); what it holds isn't
+  counted, and the walk goes on. `"connection-lost"` stops the walk with "The connection was
+  lost" and drops the connection, as a listing does.
+- While the host isn't connected Calculate is dimmed (a walk asked for then fails at once with
+  the connection lost).
+
+In the demo, `/var/www/site/releases` totals 303 KB (303,365 bytes), 3 files, 4 folders, and
+`/var/lib` has one folder that can't be read (`mysql`).
+
 ### Entries
 
 `{"name": "index.html", "kind": "file", "size": 14812, "mtime": "2026-11-24T18:00:00Z", "mode": "0644"}`
@@ -191,6 +213,7 @@ Listings arrive as the real service streams them: pages of 512 entries, then a l
 | `size` | optional | Bytes. Default 4096 for folders, else 0. |
 | `mtime` | optional | RFC 3339 or epoch seconds. None: no date shown. |
 | `mode` | optional | A number (`33188`) or an octal string (`"0644"`, `"100644"`). Bare permissions get the kind's type bits. Default: 0755 folders, 0644 files, 0777 links. |
+| `owner`, `group` | optional | Who owns it, as the Properties sheet shows it (`deploy:www-data`): the names a server's `ls -l` line gives, or its numeric ids as text (`"1001"`) for a server that sends no names. Non-empty strings. None: unknown (the sheet shows a dash); generated entries have none. |
 
 ### Generators
 
@@ -244,7 +267,7 @@ A step is one change or a list of changes made together (`[]`: nothing changes):
 
 | Change | |
 |---|---|
-| `{"add": PATH, "kind": …, …}` | An entry appears at `PATH`, replacing what was there. The other fields are an entry's (`kind` required; `target`, `size`, `mtime`, `mode`), its name is `PATH`'s last part. An added folder is empty. |
+| `{"add": PATH, "kind": …, …}` | An entry appears at `PATH`, replacing what was there. The other fields are an entry's (`kind` required; `target`, `size`, `mtime`, `mode`, `owner`, `group`), its name is `PATH`'s last part. An added folder is empty. |
 | `{"remove": PATH}` | `PATH` and everything below it go. Removing the folder on screen (or one above it) makes the next poll find it gone: the app goes up to the nearest folder that still exists and says "PATH was removed". |
 | `{"modify": PATH, "size"?: …, "mtime"?: …}` | The entry at `PATH` gets a new size, date or both (a folder keeps what it holds). |
 

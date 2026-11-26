@@ -45,7 +45,7 @@ use super::{Fixture, Step};
 use crate::service::lifecycle::{self, Event, Lifecycle, Phase};
 use crate::service::poll::{Collector, Outcome};
 use crate::service::windows::Watch;
-use crate::state::{Command, FileOp, OpId, ServiceEvent, TransferCommand, WindowId};
+use crate::state::{Command, FileOp, OpId, ServiceEvent, SizeId, SizeTotal, TransferCommand, WindowId};
 
 /// Entries per listing page, as the service pages them (§4.4).
 pub const PAGE: usize = 512;
@@ -175,6 +175,30 @@ impl Core {
         let folders = self.conns.get(&host).map(|c| c.watch.folders()).unwrap_or_default();
         for path in folders.into_iter().filter(|p| op.relists(p, ok)) {
             self.list_now(&host, path, out);
+        }
+    }
+
+    /// The Properties sheet's Calculate, walked at once over the trees: one progress event,
+    /// then Done, or Failed when the walk can't go on (a folder whose listing loses the
+    /// connection drops it, as a file operation's does). Not connected: `ConnectionLost` at
+    /// once. A walk is over by the time its sheet could cancel it, so cancelling does nothing.
+    fn folder_size(&mut self, id: SizeId, host: HostId, path: RemotePath, out: &mut Vec<ServiceEvent>) {
+        if !self.up(&host) {
+            out.push(ServiceEvent::FolderSizeFailed { id, host, total: SizeTotal::default(), error: Error::ConnectionLost });
+            return;
+        }
+        match self.transfers.tree.folder_size(&host, &path) {
+            Ok(total) => {
+                out.push(ServiceEvent::FolderSizeProgress { id, host: host.clone(), total });
+                out.push(ServiceEvent::FolderSizeDone { id, host, total });
+            }
+            Err((total, error)) => {
+                let lost = error == Error::ConnectionLost;
+                out.push(ServiceEvent::FolderSizeFailed { id, host: host.clone(), total, error });
+                if lost {
+                    self.drive(&host, Work::Life(Event::Lost), out);
+                }
+            }
         }
     }
 
@@ -642,6 +666,8 @@ impl Core {
                 self.windows.insert(self.from, vis);
             }
             Command::Poll { host } => self.poll(&host, &mut out),
+            Command::FolderSize { id, host, path } => self.folder_size(id, host, path, &mut out),
+            Command::CancelFolderSize { .. } => {}
             Command::Verbose { host, on } => self.verbose(host, on, &mut out),
             Command::ShowPrompts { host } => self.show_prompts(&host, &mut out),
             Command::HostBook(cmd) => self.book.command(cmd, &mut out),

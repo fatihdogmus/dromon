@@ -497,7 +497,9 @@ const S_IFLNK: u32 = 0o120_000;
 
 /// Builds an [`Entry`] from SFTP attributes. The kind comes from the `st_mode` type bits, or,
 /// when the server sends no permissions, from the first letter of `longname` (`ls -l` style).
-/// A symlink's target is left `None` for the caller to resolve.
+/// A symlink's target is left `None` for the caller to resolve. The owner and group are the
+/// names in `longname` when it reads as an `ls -l` line ([`longname_owner`]), else the numeric
+/// uid and gid of the attributes.
 pub(crate) fn entry_from_attrs(name: String, attrs: &FileAttributes, longname: &str) -> Entry {
     let kind = match attrs.permissions {
         Some(mode) => match mode & S_IFMT {
@@ -513,13 +515,35 @@ pub(crate) fn entry_from_attrs(name: String, attrs: &FileAttributes, longname: &
             _ => EntryKind::Other,
         },
     };
+    let (owner, group) = match longname_owner(longname) {
+        Some((owner, group)) => (Some(owner.to_owned()), Some(group.to_owned())),
+        None => (attrs.uid.map(|u| u.to_string()), attrs.gid.map(|g| g.to_string())),
+    };
     Entry {
         name,
         kind,
         size: attrs.size.unwrap_or(0),
         mtime: attrs.mtime.map(i64::from),
         mode: attrs.permissions,
+        owner,
+        group,
     }
+}
+
+/// The owner and group of an `ls -l` style `longname`, as OpenSSH sends it in a `readdir`
+/// reply: `-rw-r--r--    1 alice    staff        4321 Jan  1 12:00 name`. Only a line whose
+/// first field reads as a mode string, followed by a link count, the two names and a size, is
+/// taken; anything else (empty, another server's own format) is `None`. SFTP v3 leaves the
+/// longname's format unspecified, so this is a best effort the caller falls back from.
+pub(crate) fn longname_owner(longname: &str) -> Option<(&str, &str)> {
+    let mut fields = longname.split_whitespace();
+    let mode = fields.next()?;
+    let links = fields.next()?;
+    let (owner, group, size) = (fields.next()?, fields.next()?, fields.next()?);
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let mode = mode.as_bytes();
+    let mode_like = mode.len() >= 10 && b"-dlcbpsD".contains(&mode[0]) && mode[1..10].iter().all(|b| b"rwxsStTl-".contains(b));
+    (mode_like && digits(links) && digits(size)).then_some((owner, group))
 }
 
 fn link_target(attrs: &FileAttributes) -> LinkTarget {
@@ -570,6 +594,41 @@ mod tests {
         assert_eq!(entry_from_attrs("x".into(), &a, "-rw-r--r-- 1 u g 0 x").kind, EntryKind::File);
         assert!(entry_from_attrs("x".into(), &a, "lrwxrwxrwx 1 u g 0 x").kind.is_symlink());
         assert_eq!(entry_from_attrs("x".into(), &a, "").kind, EntryKind::Other);
+    }
+
+    #[test]
+    fn owner_and_group_from_an_openssh_longname() {
+        let line = "-rw-r--r--    1 alice    staff        4321 Jan  1 12:00 notes.txt";
+        assert_eq!(longname_owner(line), Some(("alice", "staff")));
+        let dir = "drwxr-xr-x    2 root     wheel        4096 Nov 20  2025 with spaces in name";
+        assert_eq!(longname_owner(dir), Some(("root", "wheel")));
+        // Setuid, sticky and ACL marks; numeric names when the server has none for the ids.
+        assert_eq!(longname_owner("-rwsr-xr-t+ 3 1001 1002 0 Jan 1 12:00 x"), Some(("1001", "1002")));
+        assert_eq!(longname_owner("lrwxrwxrwx 1 bob users 7 Jan 1 12:00 l -> target"), Some(("bob", "users")));
+        let e = entry_from_attrs("notes.txt".into(), &FileAttributes { uid: Some(501), gid: Some(20), ..attrs(Some(0o100_644), 4321, 1) }, line);
+        assert_eq!((e.owner.as_deref(), e.group.as_deref()), (Some("alice"), Some("staff")));
+    }
+
+    #[test]
+    fn odd_or_missing_longnames_fall_back_to_the_numeric_ids() {
+        for odd in [
+            "",
+            "notes.txt",
+            "-rw-r--r-- 1 alice",
+            "-rw-r--r-- one alice staff 4321 Jan 1 12:00 x",
+            "-rw-r--r-- 1 alice 4321 Jan 1 12:00 x",
+            "rw-r--r-- 1 alice staff 4321 Jan 1 12:00 x",
+            "-rw-r--r-é 1 alice staff 4321 Jan 1 12:00 x",
+            "-rwxrwxrwx",
+            "Jan 1 12:00 notes.txt 4321 bytes",
+        ] {
+            assert_eq!(longname_owner(odd), None, "{odd:?}");
+        }
+        let with_ids = FileAttributes { uid: Some(501), gid: Some(20), ..attrs(Some(0o100_644), 1, 1) };
+        let e = entry_from_attrs("x".into(), &with_ids, "-rw-r--r-- 1 alice");
+        assert_eq!((e.owner.as_deref(), e.group.as_deref()), (Some("501"), Some("20")));
+        let e = entry_from_attrs("x".into(), &attrs(Some(0o100_644), 1, 1), "");
+        assert_eq!((e.owner, e.group), (None, None), "neither names nor ids");
     }
 
     #[test]

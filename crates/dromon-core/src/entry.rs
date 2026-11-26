@@ -43,6 +43,13 @@ pub struct Entry {
     pub mtime: Option<i64>,
     /// Permission bits as reported by the server (`st_mode`), if any.
     pub mode: Option<u32>,
+    /// The owning user: its name from the server's `ls -l` line, else the numeric uid; `None`
+    /// when the server sent neither. Not part of [`Entry::fingerprint`].
+    #[serde(default)]
+    pub owner: Option<String>,
+    /// The owning group, as [`Entry::owner`] (name, else numeric gid).
+    #[serde(default)]
+    pub group: Option<String>,
 }
 
 impl Entry {
@@ -130,7 +137,7 @@ mod tests {
     use super::*;
 
     fn e(name: &str, kind: EntryKind, size: u64, mtime: i64) -> Entry {
-        Entry { name: name.into(), kind, size, mtime: Some(mtime), mode: None }
+        Entry { name: name.into(), kind, size, mtime: Some(mtime), mode: None, owner: None, group: None }
     }
 
     fn names(v: &[Entry]) -> Vec<&str> {
@@ -208,6 +215,13 @@ mod tests {
                 assert_eq!(names(&got), names(&want));
             }
         }
+    }
+
+    #[test]
+    fn owner_and_group_are_not_part_of_the_fingerprint() {
+        let a = e("f", EntryKind::File, 1, 1);
+        let b = Entry { owner: Some("alice".into()), group: Some("staff".into()), ..a.clone() };
+        assert_eq!(a.fingerprint(), b.fingerprint());
     }
 
     #[test]

@@ -71,6 +71,40 @@ pub enum Command {
     /// The reconnecting banner's Sign in (§3.9): the host's open, unanswered prompts again, to
     /// the sending window only; the host's later prompts go to it too. Nothing if none are open.
     ShowPrompts { host: HostId },
+    /// The Properties sheet's Calculate: walk the folder `path` on the host's session and add up
+    /// what's in it ([`SizeTotal`]). Nothing on the server changes and nothing is listed again.
+    /// Answered to the sending window only with `FolderSizeProgress` (at most about ten times a
+    /// second), then `FolderSizeDone`, or `FolderSizeFailed` when the walk can't go on; a host
+    /// that isn't connected answers `FolderSizeFailed` with [`Error::ConnectionLost`] at once.
+    FolderSize { id: SizeId, host: HostId, path: RemotePath },
+    /// Stop the walk `id` (its sheet closed). Nothing answers; a walk that already ended, or an
+    /// unknown id, is ignored.
+    CancelFolderSize { id: SizeId, host: HostId },
+}
+
+/// Identifies one folder size walk, chosen by the UI (unique per session: each window numbers
+/// its own, as it does its [`OpId`]s).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct SizeId(pub u64);
+
+/// What a folder holds, as far as a walk got. Counted as Finder counts a folder's size, not as
+/// `du` does: `bytes` adds up the sizes of the files, symlinks (the links themselves, never
+/// followed) and other non-folders; folders add no bytes. `folders` are those inside it (the
+/// walked folder itself isn't counted); `unreadable` the folders whose listing failed (no
+/// access, or gone meanwhile), the walked one included: what's in them isn't counted.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SizeTotal {
+    pub bytes: u64,
+    pub files: u64,
+    pub folders: u64,
+    pub unreadable: u64,
+}
+
+impl SizeTotal {
+    /// Everything found so far: files and folders.
+    pub fn items(&self) -> u64 {
+        self.files + self.folders
+    }
 }
 
 /// Identifies one file operation, chosen by the UI (unique per session).
@@ -204,6 +238,13 @@ pub enum ServiceEvent {
     /// Whether ssh for `host` runs with `-v` (the log's "Verbose logging"): after a
     /// `Command::Verbose` from any window, and to a window that connects while it's on.
     Verbose { host: HostId, on: bool },
+    /// How far the walk `id` got (`Command::FolderSize`).
+    FolderSizeProgress { id: SizeId, host: HostId, total: SizeTotal },
+    /// The walk `id` went through the whole folder; folders it couldn't read are counted in
+    /// `total.unreadable` and left out of the rest.
+    FolderSizeDone { id: SizeId, host: HostId, total: SizeTotal },
+    /// The walk `id` stopped (the connection was lost): `total` is what it had counted.
+    FolderSizeFailed { id: SizeId, host: HostId, total: SizeTotal, error: Error },
 }
 
 /// Set to `1` to have [`super::App::apply`] write one [`trace_line`] per event to stderr.
@@ -251,6 +292,9 @@ pub fn trace_line(ev: &ServiceEvent) -> String {
         ServiceEvent::FileOpFailed { id, host, .. } => format!("FileOpFailed host={host} id={}", id.0),
         ServiceEvent::HostBook(ev) => super::hostbook::trace_line(ev),
         ServiceEvent::Verbose { host, on } => format!("Verbose host={host} on={on}"),
+        ServiceEvent::FolderSizeProgress { id, host, .. } => format!("FolderSizeProgress host={host} id={}", id.0),
+        ServiceEvent::FolderSizeDone { id, host, .. } => format!("FolderSizeDone host={host} id={}", id.0),
+        ServiceEvent::FolderSizeFailed { id, host, .. } => format!("FolderSizeFailed host={host} id={}", id.0),
     }
 }
 
@@ -370,8 +414,22 @@ mod tests {
     }
 
     #[test]
+    fn folder_size_trace_lines_name_the_host_and_id_only() {
+        let host = HostId("prod".into());
+        let total = SizeTotal { bytes: 9, files: 2, folders: 1, unreadable: 1 };
+        let events = [
+            ServiceEvent::FolderSizeProgress { id: SizeId(5), host: host.clone(), total },
+            ServiceEvent::FolderSizeDone { id: SizeId(5), host: host.clone(), total },
+            ServiceEvent::FolderSizeFailed { id: SizeId(6), host, total, error: Error::PermissionDenied(RemotePath::new("/secret")) },
+        ];
+        let lines: Vec<String> = events.iter().map(trace_line).collect();
+        assert_eq!(lines, ["FolderSizeProgress host=prod id=5", "FolderSizeDone host=prod id=5", "FolderSizeFailed host=prod id=6"]);
+        assert_eq!(total.items(), 3);
+    }
+
+    #[test]
     fn a_refresh_trace_line_counts_entries_and_names_none() {
-        let entry = Entry { name: "secret.txt".into(), kind: dromon_core::EntryKind::File, size: 1, mtime: None, mode: None };
+        let entry = Entry { name: "secret.txt".into(), kind: dromon_core::EntryKind::File, size: 1, mtime: None, mode: None, owner: None, group: None };
         let ev = ServiceEvent::Refreshed { host: HostId("prod".into()), path: RemotePath::new("/secret"), entries: vec![entry] };
         assert_eq!(trace_line(&ev), "Refreshed host=prod entries=1");
     }
