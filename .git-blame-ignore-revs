@@ -1,0 +1,6 @@
+# Commits that only reformat code; `git blame` skips them (docs/clean-code.md).
+# GitHub reads this file itself; locally, run once:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# rustfmt and complexity limits: one format, smaller functions and files (#8)
+2cd5a20fe1c0a41d2c3614a07c737066c8b5d9bd
