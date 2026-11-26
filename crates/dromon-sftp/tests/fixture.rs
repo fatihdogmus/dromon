@@ -49,6 +49,9 @@ async fn connect(test: &str) -> Option<Conn> {
     let stdout = ssh.stdout.take().unwrap();
     let stdin = ssh.stdin.take().unwrap();
     let sftp = Sftp::new(tokio::io::join(stdout, stdin)).await.expect("SFTP session");
+    // The SFTP calls, not the reply timeout, are under test: a loaded Windows CI (WSL port
+    // forwarding) can take longer than the default 10 s for one reply.
+    sftp.set_timeout(60);
     Some(Conn { sftp, fixture, _ssh: ssh })
 }
 
