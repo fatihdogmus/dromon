@@ -565,26 +565,7 @@ fn every_job_ends_when_the_connections_drop_at_any_moment() {
         std::thread::sleep(Duration::from_millis(round * 53 % 700));
         h.fx.kill_sessions(Role::Key).unwrap();
 
-        let deadline = Instant::now() + WAIT;
-        loop {
-            let ours: Vec<&JobView> = h.jobs.iter().filter(|j| ids.contains(&j.id)).collect();
-            if ours.len() == ids.len() && ours.iter().all(|j| j.state.is_finished()) {
-                break;
-            }
-            let clashes: Vec<JobId> = ours.iter().filter(|j| j.conflict.is_some()).map(|j| j.id).collect();
-            for job in clashes {
-                h.transfer(TransferCommand::Resolve { job, choice: ConflictChoice::KeepBoth, apply_all: true });
-            }
-            assert!(
-                Instant::now() < deadline,
-                "round {round}: jobs {ids:?} didn't end; jobs: {:#?}\nconnection log:\n{}",
-                h.jobs,
-                h.log.join("\n")
-            );
-            h.wait_for(&format!("round {round}: jobs {ids:?} to end"), |ev, _| {
-                matches!(ev, ServiceEvent::Transfers(_))
-            });
-        }
+        end_keeping_both(&mut h, &ids, round);
         for id in &ids {
             let job = h.job(*id);
             assert_eq!(job.state, TaskState::Done, "round {round}: {job:#?}\nconnection log:\n{}", h.log.join("\n"));
@@ -621,6 +602,28 @@ fn every_job_ends_when_the_connections_drop_at_any_moment() {
         assert_eq!(tree.lines().collect::<Vec<_>>(), want, "round {round}");
         let downloaded: Vec<PathBuf> = walk(&h.downloads().join(&r)).into_iter().collect();
         assert_eq!(downloaded.len(), 4, "round {round}: {downloaded:?}");
+    }
+}
+
+/// Waits until every job of `ids` has ended, answering each name clash Keep both.
+fn end_keeping_both(h: &mut Harness, ids: &[JobId], round: u64) {
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let ours: Vec<&JobView> = h.jobs.iter().filter(|j| ids.contains(&j.id)).collect();
+        if ours.len() == ids.len() && ours.iter().all(|j| j.state.is_finished()) {
+            break;
+        }
+        let clashes: Vec<JobId> = ours.iter().filter(|j| j.conflict.is_some()).map(|j| j.id).collect();
+        for job in clashes {
+            h.transfer(TransferCommand::Resolve { job, choice: ConflictChoice::KeepBoth, apply_all: true });
+        }
+        assert!(
+            Instant::now() < deadline,
+            "round {round}: jobs {ids:?} didn't end; jobs: {:#?}\nconnection log:\n{}",
+            h.jobs,
+            h.log.join("\n")
+        );
+        h.wait_for(&format!("round {round}: jobs {ids:?} to end"), |ev, _| matches!(ev, ServiceEvent::Transfers(_)));
     }
 }
 

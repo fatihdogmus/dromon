@@ -62,6 +62,12 @@ unsafe_code = "deny"
 [workspace.lints.clippy]
 dbg_macro = "warn"
 todo = "warn"
+# Complexity and size limits; the thresholds are in clippy.toml.
+cognitive_complexity = "warn"
+too_many_lines = "warn"
+excessive_nesting = "warn"
+struct_excessive_bools = "warn"
+fn_params_excessive_bools = "warn"
 
 [patch.crates-io]
 winit = { git = "https://github.com/anomalyco/rune", rev = "241d08d1d8dca18250c44f96fb3a99683d1351ea" }

@@ -51,14 +51,17 @@ One mechanical format, so diffs show only real changes and nobody argues about l
   every commit.
 - Never hand-format against rustfmt: no manual alignment it would undo, no `#[rustfmt::skip]`
   to keep a layout you prefer. Change `rustfmt.toml` only in its own pull request.
-- A pure reformat (after a rustfmt or config change) is its own commit with nothing else in it,
-  and its hash goes into `.git-blame-ignore-revs`, so `git blame` skips it.
+- A pure reformat (after a rustfmt or config change) is its own pull request with nothing else
+  in it. Once it is squash merged, its commit on `main` goes into `.git-blame-ignore-revs`, so
+  blame skips it (GitHub reads the file itself; locally run
+  `git config blame.ignoreRevsFile .git-blame-ignore-revs` once). Only the squash commit's hash
+  works: the branch's commits never reach `main`.
 
 ### Agent checklist
 
 - Did `cargo fmt --all --check` pass before committing?
 - Does the diff contain formatting changes outside the lines you meant to touch? Then they belong
-  in a separate reformat commit.
+  in a separate reformat pull request.
 
 ## Standard: Files and Their Tests
 
@@ -70,8 +73,11 @@ Files short enough to read whole, with their tests next to them.
 
 ### Rules
 
-- Keep a file under about 800 lines. Before it grows past that, split it along a real seam (a
-  sub-machine, a group of actions, one platform's transport), not into arbitrary halves.
+- No `.rs` file in the workspace has more than 800 lines. `cargo lint` checks every one under
+  `crates/` and `xtask/` and fails naming each file over it, with no list of exceptions: a file
+  that size is no longer read whole. Before a file grows past it, split it along a real seam (a
+  sub-machine, a group of actions, one platform's transport, production code from its tests),
+  not into arbitrary halves, keeping the paths callers use (re-export from the parent).
 - Tests go in a sibling file, wired from the module:
   ```rust
   #[cfg(test)]
@@ -85,7 +91,7 @@ Files short enough to read whole, with their tests next to them.
 
 ### Agent checklist
 
-- Is any touched file over ~800 lines after the change?
+- Is any touched file near 800 lines after the change? Split it now, along a seam.
 - Are new tests in the sibling test file?
 
 ## Pattern: Phases Are Enums With a Pure Step
@@ -220,21 +226,36 @@ The window answers on the frame the user presses, always.
 
 ### Purpose
 
-Warnings are errors, everywhere, the same way CI checks them.
+Warnings are errors, everywhere, the same way CI checks them; functions and files stay small
+enough to read.
 
 ### Rules
 
-- `cargo lint` runs `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --
-  -D warnings`. It must pass before every push.
+- `cargo lint [--locked]` runs, in order and stopping at the first failure:
+  `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings` (given
+  `--locked` and any other arguments), and the 800-line file limit
+  ([Files and Their Tests](#standard-files-and-their-tests)). CI runs it; it must pass before
+  every push.
 - `unsafe_code` is denied workspace-wide; `dbg!` and `todo!` are clippy warnings, so errors
   under `-D warnings`.
-- Fix the code rather than silencing a lint. An `#[allow(...)]` is narrow (one item) and says
-  why in a comment.
+- Complexity lints, in `Cargo.toml`'s `[workspace.lints.clippy]` with their thresholds in the
+  root `clippy.toml`: `cognitive_complexity` (25), `too_many_lines` (100 lines of a function
+  body), `excessive_nesting` (6 levels), `struct_excessive_bools` and
+  `fn_params_excessive_bools` (Clippy's defaults; several flags are usually one enum). Lints
+  are enabled one by one, never as whole groups such as `pedantic` or `nursery`.
+- A hit is refactored when that makes the code clearer: a well-named function, early returns, a
+  helper per group of match arms, a test that checks several things split into one test each.
+- Where the long or complex shape is the clearest form (a flat `match` dispatching actions, a
+  shortcut table, a table-driven test), that one item gets
+  `#[expect(clippy::<lint>, reason = "…")]` with a concrete reason. `#[expect]` fails once the
+  lint no longer fires, so no stale suppression stays behind.
+- Never `#[allow(...)]`, never a module- or crate-level suppression, and never a higher
+  threshold to get past a hit.
 
 ### Agent checklist
 
 - Does `cargo lint` pass?
-- Does every new `#[allow]` carry its reason?
+- Was each complexity hit refactored, or does its one `#[expect]` give a reason that holds?
 
 ## Standard: Review Checklist
 

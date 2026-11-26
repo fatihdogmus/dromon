@@ -3,7 +3,7 @@
 use dromon_core::EntryKind;
 
 use super::*;
-use crate::RemoteItem;
+use crate::{ConflictView, JobKind, RemoteItem, Reveal};
 
 const T0: Duration = Duration::ZERO;
 

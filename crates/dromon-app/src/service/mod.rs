@@ -354,22 +354,7 @@ fn dispatch<S: Sink>(
                 sink.emit(ServiceEvent::FileOpFailed { id, host, error: dromon_core::Error::ConnectionLost });
             }
         }
-        Command::Window { visible, focused } => {
-            let vis = match (visible, focused) {
-                (false, _) => Visibility::Hidden,
-                (true, true) => Visibility::Focused,
-                (true, false) => Visibility::VisibleUnfocused,
-            };
-            // A window gaining focus checks every live connection (`wake.rs`).
-            let gained = vis == Visibility::Focused && windows.get(&from) != Some(&Visibility::Focused);
-            windows.insert(from, vis);
-            for c in conns.values() {
-                let _ = c.cmds.send(ConnCmd::Window(from, vis));
-                if gained {
-                    let _ = c.cmds.send(ConnCmd::Focus);
-                }
-            }
-        }
+        Command::Window { visible, focused } => window_shows(from, visible, focused, conns, windows),
         Command::Poll { host } => {
             if let Some(c) = conns.get(&host) {
                 let _ = c.cmds.send(ConnCmd::PollNow(from));
@@ -396,6 +381,30 @@ fn dispatch<S: Sink>(
         }
         // The manager's loop takes these first.
         Command::HostBook(_) => {}
+    }
+}
+
+/// Window `from` shows as `visible` and `focused` now: every host's task hears it.
+fn window_shows(
+    from: WindowId,
+    visible: bool,
+    focused: bool,
+    conns: &HashMap<HostId, ConnHandle>,
+    windows: &mut BTreeMap<WindowId, Visibility>,
+) {
+    let vis = match (visible, focused) {
+        (false, _) => Visibility::Hidden,
+        (true, true) => Visibility::Focused,
+        (true, false) => Visibility::VisibleUnfocused,
+    };
+    // A window gaining focus checks every live connection (`wake.rs`).
+    let gained = vis == Visibility::Focused && windows.get(&from) != Some(&Visibility::Focused);
+    windows.insert(from, vis);
+    for c in conns.values() {
+        let _ = c.cmds.send(ConnCmd::Window(from, vis));
+        if gained {
+            let _ = c.cmds.send(ConnCmd::Focus);
+        }
     }
 }
 

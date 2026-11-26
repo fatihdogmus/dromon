@@ -79,7 +79,7 @@ fn entry(kind: EntryKind, mode: Option<u32>) -> Entry {
 }
 
 #[test]
-fn kinds_permissions_and_owners_read_as_words() {
+fn kinds_read_as_words() {
     assert_eq!(kind_text(&entry(EntryKind::Dir, None)), "Folder");
     assert_eq!(kind_text(&entry(EntryKind::File, None)), "File");
     assert_eq!(kind_text(&entry(EntryKind::Symlink { target: Some(LinkTarget::Dir) }, None)), "Symbolic link to a folder");
@@ -87,7 +87,10 @@ fn kinds_permissions_and_owners_read_as_words() {
     assert_eq!(kind_text(&entry(EntryKind::Other, Some(0o140_755))), "Socket");
     assert_eq!(kind_text(&entry(EntryKind::Other, Some(0o010_644))), "Named pipe");
     assert_eq!(kind_text(&entry(EntryKind::Other, None)), "Special file");
+}
 
+#[test]
+fn permissions_read_as_letters_and_octal() {
     assert_eq!(permissions_text(Some(0o040_755)), "rwxr-xr-x (755)");
     assert_eq!(permissions_text(Some(0o100_644)), "rw-r--r-- (644)");
     assert_eq!(permissions_text(Some(0o100_600)), "rw------- (600)");
@@ -95,7 +98,10 @@ fn kinds_permissions_and_owners_read_as_words() {
     assert_eq!(permissions_text(Some(0o041_777)), "rwxrwxrwt (1777)");
     assert_eq!(permissions_text(Some(0o102_640)), "rw-r-S--- (2640)");
     assert_eq!(permissions_text(None), "—");
+}
 
+#[test]
+fn owners_read_as_owner_and_group() {
     let mut e = entry(EntryKind::File, None);
     assert_eq!(owner_text(&e), "—");
     e.owner = Some("alice".into());
@@ -106,7 +112,10 @@ fn kinds_permissions_and_owners_read_as_words() {
     assert_eq!(owner_text(&e), ":staff");
     let ids = Entry { owner: Some("1001".into()), group: Some("1002".into()), ..e };
     assert_eq!(owner_text(&ids), "1001:1002", "numeric ids when the server gave no names");
+}
 
+#[test]
+fn counts_read_as_words() {
     assert_eq!(counts_text(&total(0, 1, 1, 0)), "1 file, 1 folder");
     assert_eq!(counts_text(&total(0, 12_000, 3, 0)), "12,000 files, 3 folders");
     assert_eq!(unreadable_text(&total(0, 0, 0, 0)), None);

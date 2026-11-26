@@ -69,7 +69,7 @@ fn entries_may_name_their_owner_and_group() {
 }
 
 #[test]
-fn errors_name_their_json_path() {
+fn entry_errors_name_their_json_path() {
     let entry = |e: &str| error(&with_server(&format!(r#"{{"home": "/", "tree": {{"/var": [{{"name": "a", "kind": "dir"}}, {{"name": "b", "kind": "file"}}, {e}]}}}}"#)));
     assert_eq!(entry(r#"{"name": "c", "kind": "folder"}"#), r#"servers.h.tree./var: entry 3: unknown kind "folder" (expected file, dir, symlink or other)"#);
     assert_eq!(entry(r#"{"name": "c", "kind": "file", "mtime": "yesterday"}"#), r#"servers.h.tree./var: entry 3: mtime: "yesterday" is not an RFC 3339 date (2026-11-25T14:00:00Z) or epoch seconds"#);
@@ -84,7 +84,10 @@ fn errors_name_their_json_path() {
     assert_eq!(entry(r#"{"generate": {"pattern": "IMG.jpg", "count": 3}}"#), r#"servers.h.tree./var: entry 3: generate.pattern: "IMG.jpg" needs exactly one {} or {0N} (N digits, zero-padded) for the number"#);
     assert_eq!(entry(r#"{"generate": {"pattern": "a{}", "count": 3, "size": [5, 1]}}"#), "servers.h.tree./var: entry 3: generate.size: [5, 1]: min is above max");
     assert_eq!(entry(r#"{"generate": {"pattern": "a{}"}}"#), "servers.h.tree./var: entry 3: generate.count: missing");
+}
 
+#[test]
+fn errors_name_their_json_path() {
     assert_eq!(error("[]"), "a fixture is a JSON object, found a list");
     assert!(error("{").starts_with("not valid JSON: "));
     assert_eq!(error("{}"), "version: missing (this Dromon reads version 1)");

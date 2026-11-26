@@ -67,7 +67,7 @@ dromon/
 
 ```sh
 cargo fmt --all                            # format (rustfmt.toml); CI checks it
-cargo lint                                 # cargo fmt --all --check + clippy --workspace --all-targets -D warnings
+cargo lint                                 # cargo fmt --all --check, clippy -D warnings, the 800-line file limit
 cargo test --workspace                     # every test; the sshd tests run when Docker answers
 DROMON_REQUIRE_DOCKER=1 cargo test --workspace   # fail instead of skipping without Docker (CI)
 cargo app [ARGS]                           # the app (debug) on your ssh config
@@ -130,9 +130,13 @@ building again ([docs/testing.md](docs/testing.md#standard-build-once)).
 
 - Format with `cargo fmt --all` before committing (`rustfmt.toml`: `max_width = 120`,
   `use_small_heuristics = "Max"`); never hand-format against rustfmt. A pure reformat is its own
-  commit, listed in `.git-blame-ignore-revs`.
-- `cargo lint` passes: the format check and clippy with `-D warnings`.
-- Files stay under ~800 lines, with tests in a sibling `*_tests.rs` / `tests.rs`.
+  pull request; its squash commit on `main` is listed in `.git-blame-ignore-revs`.
+- `cargo lint` passes: the format check, clippy with `-D warnings` (with the complexity lints
+  and `clippy.toml`'s thresholds) and the file-size limit. Refactor a hit, or put
+  `#[expect(clippy::…, reason = "…")]` on the one item; never `#[allow]`
+  ([docs/clean-code.md](docs/clean-code.md#standard-lints)).
+- No `.rs` file has more than 800 lines (a hard limit, checked by `cargo lint`); split along a
+  real seam, with tests in a sibling `*_tests.rs` / `tests.rs`.
 - Nothing a server, a file or the user sends may panic the app; failures are `dromon_core::Error`.
 
 ## Triaging an Issue

@@ -106,6 +106,10 @@ fn command(key: &Key, c: char) -> bool {
     matches!(key, Key::Command(k) if *k == c || *k == alt_form)
 }
 
+#[expect(
+    clippy::cognitive_complexity,
+    reason = "the shortcut table (§7): one guarded check per chord, in the order they win; split up, the order is lost"
+)]
 pub fn shortcut(ev: &KeyEvent, platform: KeyPlatform) -> Option<Shortcut> {
     let m = ev.mods;
     let mac = matches!(platform, KeyPlatform::Mac);

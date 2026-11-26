@@ -246,39 +246,7 @@ fn transfers(v: &Value, at: &At, hosts: &[HostSpec]) -> R<Vec<JobView>> {
             return at.key("host").err(format!("{host:?} is not a host (add it to hosts)"));
         }
         let title = text(required(m, "title", &at)?, &at.key("title"))?;
-        let only = |k: &str, state: &str| -> R<()> {
-            match m.get(k) {
-                Some(_) => at.key(k).err(format!("only a {state} job has {k}")),
-                None => Ok(()),
-            }
-        };
-        let state = match string(required(m, "state", &at)?, &at.key("state"))?.as_str() {
-            "preparing" => {
-                only("error", "failed")?;
-                let found = optional(m, "found").map(|v| uint(v, &at.key("found"))).transpose()?.unwrap_or(0);
-                TaskState::Preparing { files_found: found }
-            }
-            "failed" => {
-                only("found", "preparing")?;
-                TaskState::Failed { error: text(required(m, "error", &at)?, &at.key("error"))? }
-            }
-            other => {
-                only("found", "preparing")?;
-                only("error", "failed")?;
-                match other {
-                    "queued" => TaskState::Queued,
-                    "running" => TaskState::Running,
-                    "paused" => TaskState::Paused,
-                    "done" => TaskState::Done,
-                    "cancelled" => TaskState::Cancelled,
-                    _ => {
-                        return at.key("state").err(format!(
-                            "unknown state {other:?} (expected queued, preparing, running, paused, done, failed or cancelled)"
-                        ));
-                    }
-                }
-            }
-        };
+        let state = job_state(m, &at)?;
         let bytes = |k: &str| optional(m, k).map(|v| uint(v, &at.key(k))).transpose().map(Option::unwrap_or_default);
         let (done, total) = (bytes("done")?, bytes("total")?);
         if total > 0 && done > total {
@@ -286,17 +254,7 @@ fn transfers(v: &Value, at: &At, hosts: &[HostSpec]) -> R<Vec<JobView>> {
         }
         let (files_done, files_total) = match optional(m, "files") {
             None => (0, 0),
-            Some(v) => {
-                let at = at.key("files");
-                let r = list(v, &at)?;
-                let (Some(d), Some(t), 2) = (r.first().and_then(Value::as_u64), r.get(1).and_then(Value::as_u64), r.len()) else {
-                    return at.err("files is [done, total], whole numbers");
-                };
-                if d > t {
-                    return at.err(format!("[{d}, {t}]: done is above total"));
-                }
-                (d, t)
-            }
+            Some(v) => file_counts(v, &at.key("files"))?,
         };
         let seconds = |k: &str| -> R<Option<f64>> {
             match optional(m, k) {
@@ -356,6 +314,56 @@ fn transfers(v: &Value, at: &At, hosts: &[HostSpec]) -> R<Vec<JobView>> {
         });
     }
     Ok(out)
+}
+
+/// A job's `state`, with the fields only some states have (`found`, `error`).
+fn job_state(m: &Map<String, Value>, at: &At) -> R<TaskState> {
+    let only = |k: &str, state: &str| -> R<()> {
+        match m.get(k) {
+            Some(_) => at.key(k).err(format!("only a {state} job has {k}")),
+            None => Ok(()),
+        }
+    };
+    let state = match string(required(m, "state", at)?, &at.key("state"))?.as_str() {
+        "preparing" => {
+            only("error", "failed")?;
+            let found = optional(m, "found").map(|v| uint(v, &at.key("found"))).transpose()?.unwrap_or(0);
+            TaskState::Preparing { files_found: found }
+        }
+        "failed" => {
+            only("found", "preparing")?;
+            TaskState::Failed { error: text(required(m, "error", at)?, &at.key("error"))? }
+        }
+        other => {
+            only("found", "preparing")?;
+            only("error", "failed")?;
+            match other {
+                "queued" => TaskState::Queued,
+                "running" => TaskState::Running,
+                "paused" => TaskState::Paused,
+                "done" => TaskState::Done,
+                "cancelled" => TaskState::Cancelled,
+                _ => {
+                    return at.key("state").err(format!(
+                        "unknown state {other:?} (expected queued, preparing, running, paused, done, failed or cancelled)"
+                    ));
+                }
+            }
+        }
+    };
+    Ok(state)
+}
+
+/// A job's `files`: `[done, total]`.
+fn file_counts(v: &Value, at: &At) -> R<(u64, u64)> {
+    let r = list(v, at)?;
+    let (Some(d), Some(t), 2) = (r.first().and_then(Value::as_u64), r.get(1).and_then(Value::as_u64), r.len()) else {
+        return at.err("files is [done, total], whole numbers");
+    };
+    if d > t {
+        return at.err(format!("[{d}, {t}]: done is above total"));
+    }
+    Ok((d, t))
 }
 
 fn conflict(v: &Value, at: &At) -> R<ConflictView> {

@@ -354,9 +354,9 @@ pub(crate) fn needs_sign_in(s: &mut App) {
     s.apply(ServiceEvent::Status { host: dromon_core::HostId("prod".into()), status: dromon_core::ConnStatus::NeedsInput });
 }
 
-/// Status and errors in words or shape, not colour alone (§6.9).
+/// Status and errors in words or shape, not colour alone (§6.9): the connection's status.
 #[test]
-fn states_are_said_in_words_not_colour_alone() {
+fn connection_states_are_said_in_words_not_colour_alone() {
     // The connection dot: the status bar says it, and the sidebar's rows too.
     let nodes = tree(&scene_runtime(scenes::listing));
     assert!(node(&nodes, "status-conn").name.starts_with("Connected"));
@@ -373,7 +373,11 @@ fn states_are_said_in_words_not_colour_alone() {
     assert_eq!((sign_in.role.as_str(), sign_in.name.as_str()), ("button", "Sign in"));
     assert!(!sign_in.has_state("disabled"), "{sign_in:?}");
     assert!(sign_in.acts("click") && sign_in.acts("focus"), "{sign_in:?}");
+}
 
+/// What the icons and dimming show, in words too (§6.9).
+#[test]
+fn kinds_and_cut_rows_are_said_in_words() {
     // Kinds the icons show: a folder, a link.
     let nodes = tree(&scene_runtime(scenes::listing));
     assert!(node(&nodes, "assets").description.contains("Folder"), "{:?}", node(&nodes, "assets"));
@@ -384,7 +388,11 @@ fn states_are_said_in_words_not_colour_alone() {
     let nodes = tree(&scene_runtime(scenes::cut_rows));
     assert!(node(&nodes, "robots.txt").name.ends_with("(cut)"), "{:?}", node(&nodes, "robots.txt"));
     assert!(!node(&nodes, "assets").name.contains("cut"));
+}
 
+/// Errors in words, not a red outline alone (§6.9).
+#[test]
+fn errors_are_said_in_words_as_alerts() {
     // Errors: in words, as alerts.
     let nodes = tree(&scene_runtime(scenes::auth_password_error));
     assert_eq!(node(&nodes, "sheet-error").role, "alert");
@@ -397,7 +405,11 @@ fn states_are_said_in_words_not_colour_alone() {
     assert!(node(&nodes, "edit-input").has_state("invalid"));
     let nodes = tree(&scene_runtime(scenes::delete_failed));
     assert!(nodes.iter().any(|n| n.role == "alert" && n.name.starts_with("Couldn't delete")));
+}
 
+/// A transfer's state in words, not its bar's colour alone (§6.9).
+#[test]
+fn transfer_states_are_said_in_words() {
     // Transfers: failed and done in words; the newer date says "newer".
     let nodes = tree(&scene_runtime(scenes::transfers));
     assert!(node(&nodes, "tr-3").name.contains("Failed"));

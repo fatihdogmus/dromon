@@ -1,7 +1,10 @@
 //! Dromon's developer commands, run as `cargo <command>` through the aliases in
 //! `.cargo/config.toml` (`cargo xtask <command>` works too). Each one runs a script under
-//! `scripts/` or a cargo command, passing the remaining arguments on; CI runs the same commands.
+//! `scripts/` or a cargo command, passing the remaining arguments on (`lint` runs several
+//! checks, the file-size limit in `file_size.rs`); CI runs the same commands.
 //! Relative paths in the arguments are relative to where you run it, as with the scripts.
+
+mod file_size;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -12,6 +15,8 @@ enum Run {
     Script(&'static str),
     /// `cargo <before…> <arguments…> <after…>`; `mock` also sets `DROMON_MOCK=1`.
     Cargo { before: &'static [&'static str], after: &'static [&'static str], mock: bool },
+    /// The format check, clippy with the arguments, then the file-size limit ([`lint`]).
+    Lint,
 }
 
 /// (name, what it runs, usage, what it does).
@@ -34,16 +39,7 @@ const COMMANDS: &[(&str, Run, &str, &str)] = &[
         "[APP ARGS]",
         "the app on the built-in demo: fake hosts and folders, no servers",
     ),
-    (
-        "lint",
-        Run::Cargo {
-            before: &["clippy", "--workspace", "--all-targets"],
-            after: &["--", "-D", "warnings"],
-            mock: false,
-        },
-        "[--locked]",
-        "clippy, as CI runs it",
-    ),
+    ("lint", Run::Lint, "[--locked]", "cargo fmt --check, clippy -D warnings and the 800-line file limit, as CI"),
     (
         "goldens",
         Run::Script("goldens.sh"),
@@ -109,6 +105,7 @@ fn main() -> ExitCode {
     };
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().expect("xtask sits in the repository root");
     let mut command = match run {
+        Run::Lint => return lint(root, args.collect()),
         Run::Script(file) => {
             // Forward slashes: the scripts find the repository with `dirname "${BASH_SOURCE[0]}"`,
             // which doesn't split Windows' backslashes (Git Bash reads `D:/a/b` fine).
@@ -118,7 +115,7 @@ fn main() -> ExitCode {
             c
         }
         Run::Cargo { before, after, mock } => {
-            let mut c = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
+            let mut c = cargo();
             c.args(*before).args(args).args(*after);
             if *mock {
                 c.env("DROMON_MOCK", "1");
@@ -126,11 +123,39 @@ fn main() -> ExitCode {
             c
         }
     };
+    ExitCode::from(status(&name, &mut command))
+}
+
+/// The cargo that runs xtask.
+fn cargo() -> Command {
+    Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
+}
+
+/// Runs `command` (for `what`) and returns its exit code; 1 if it couldn't run or a signal
+/// ended it.
+fn status(what: &str, command: &mut Command) -> u8 {
     match command.status() {
-        Ok(status) => ExitCode::from(status.code().map_or(1, |c| u8::try_from(c).unwrap_or(1))),
+        Ok(status) => status.code().map_or(1, |c| u8::try_from(c).unwrap_or(1)),
         Err(e) => {
-            eprintln!("xtask: couldn't run {name}: {e}");
-            ExitCode::FAILURE
+            eprintln!("xtask: couldn't run {what}: {e}");
+            1
         }
     }
+}
+
+/// `cargo lint [ARGS]`: `cargo fmt --all --check`, then `cargo clippy --workspace --all-targets
+/// ARGS -- -D warnings` (ARGS such as `--locked`), then the file-size limit (`file_size.rs`),
+/// stopping at the first that fails.
+fn lint(root: &Path, args: Vec<String>) -> ExitCode {
+    let mut fmt = cargo();
+    fmt.args(["fmt", "--all", "--check"]);
+    let mut clippy = cargo();
+    clippy.args(["clippy", "--workspace", "--all-targets"]).args(args).args(["--", "-D", "warnings"]);
+    for (what, mut command) in [("cargo fmt", fmt), ("clippy", clippy)] {
+        let code = status(what, &mut command);
+        if code != 0 {
+            return ExitCode::from(code);
+        }
+    }
+    if file_size::check(root) { ExitCode::SUCCESS } else { ExitCode::FAILURE }
 }

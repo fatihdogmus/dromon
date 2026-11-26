@@ -402,35 +402,7 @@ fn job_row(p: Paint, j: &JobView, flourish: Option<Flourish>) -> El {
         .child(text(j.title.clone()).key(format!("tr-title-{}", id.0)).font(type_::BODY).color(t.text).truncate().grow(1.0).min_w(0.0))
         .children(resolve)
         .child(row().gap(2.0).group_opacity(0.0, 1.0).children(buttons));
-
-    let (fraction, bar) = match &j.state {
-        TaskState::Done => (if let Some(Flourish::Finished { from }) = flourish { from } else { 1.0 }, t.accent),
-        TaskState::Failed { .. } => (j.progress.fraction().max(0.02), t.danger),
-        TaskState::Paused | TaskState::Cancelled => (j.progress.fraction(), t.text_3),
-        _ if j.waiting_for_connection || j.conflict.is_some() => (j.progress.fraction(), t.text_3),
-        _ => (j.progress.fraction(), t.accent),
-    };
-    // Collapsed, the bar keeps its room (the row doesn't change height), drawn shrunk into its
-    // left end, by the tile, and clear.
-    let mut progress = el()
-        .key(format!("tr-bar-{}", id.0))
-        .w_full()
-        .h(3.0)
-        .mt(3.0)
-        .radius(1.5)
-        .fill(t.border)
-        .origin(0.0, 0.5)
-        .scale(if collapsed { 0.0 } else { 1.0 })
-        .opacity(if collapsed { 0.0 } else { 1.0 })
-        .scale_motion(motion::MOVE)
-        .opacity_motion(motion::MOVE)
-        .child(el().w_frac(fraction).h_full().radius(1.5).fill(bar).motion(motion::MOVE));
-    if !collapsed {
-        progress = progress.role("progressbar").label(format!("{:.0}%", fraction * 100.0));
-    } else if p.reduced {
-        // Reduce motion: no collapse, the bar is just gone.
-        progress = progress.instant_changes();
-    }
+    let progress = progress_bar(p, j, flourish, collapsed);
     let line = text(status_line(j))
         .key(format!("tr-line-{}", id.0))
         .font(type_::META)
@@ -471,6 +443,41 @@ fn job_row(p: Paint, j: &JobView, flourish: Option<Flourish>) -> El {
         r = r.help(d);
     }
     r
+}
+
+/// A job's progress bar, in the state's colour; `collapsed` (a done job at rest, or as its
+/// flourish ends) shrinks it into the tile.
+fn progress_bar(p: Paint, j: &JobView, flourish: Option<Flourish>, collapsed: bool) -> El {
+    let t = p.t;
+    let (fraction, bar) = match &j.state {
+        TaskState::Done => (if let Some(Flourish::Finished { from }) = flourish { from } else { 1.0 }, t.accent),
+        TaskState::Failed { .. } => (j.progress.fraction().max(0.02), t.danger),
+        TaskState::Paused | TaskState::Cancelled => (j.progress.fraction(), t.text_3),
+        _ if j.waiting_for_connection || j.conflict.is_some() => (j.progress.fraction(), t.text_3),
+        _ => (j.progress.fraction(), t.accent),
+    };
+    // Collapsed, the bar keeps its room (the row doesn't change height), drawn shrunk into its
+    // left end, by the tile, and clear.
+    let mut progress = el()
+        .key(format!("tr-bar-{}", j.id.0))
+        .w_full()
+        .h(3.0)
+        .mt(3.0)
+        .radius(1.5)
+        .fill(t.border)
+        .origin(0.0, 0.5)
+        .scale(if collapsed { 0.0 } else { 1.0 })
+        .opacity(if collapsed { 0.0 } else { 1.0 })
+        .scale_motion(motion::MOVE)
+        .opacity_motion(motion::MOVE)
+        .child(el().w_frac(fraction).h_full().radius(1.5).fill(bar).motion(motion::MOVE));
+    if !collapsed {
+        progress = progress.role("progressbar").label(format!("{:.0}%", fraction * 100.0));
+    } else if p.reduced {
+        // Reduce motion: no collapse, the bar is just gone.
+        progress = progress.instant_changes();
+    }
+    progress
 }
 
 /// "3 active" and Clear finished.

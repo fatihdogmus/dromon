@@ -244,34 +244,37 @@ impl<S: Sink> Engine<S> {
                     self.queue.file_progress(job, file, done, now);
                 }
             }
-            Outcome::Finished { job, file, run, result } => {
-                if !self.running.get(&(job, file)).is_some_and(|r| r.run == run) {
-                    // Aborted (paused, cancelled, host down) after it finished: the queue
-                    // already moved the file on. If it started the file again, that run would
-                    // copy it a second time: it stops, and its part file goes.
-                    if result.is_ok() {
-                        if let Some(again) = self.running.remove(&(job, file)) {
-                            again.handle.abort();
-                            if let Some(plan) = self.queue.plan(job, file).cloned() {
-                                self.carry_out_one(Action::Cleanup { job, plans: vec![plan] });
-                            }
-                        }
-                        self.queue.file_done(job, file, now);
-                    }
-                    return;
-                }
-                self.running.remove(&(job, file));
-                match result {
-                    Ok(()) => self.queue.file_done(job, file, now),
-                    Err(Error::ConnectionLost) => self.queue.file_interrupted(job, file),
-                    Err(e) => self.queue.file_failed(job, file, e.to_string(), now),
-                }
-            }
+            Outcome::Finished { job, file, run, result } => self.file_finished(job, file, run, result, now),
             Outcome::Tidied { job, item, result, used } => match result {
                 Err(Error::ConnectionLost) if self.queue.is_live(job) => self.again(Action::Tidy { job, item }, &used),
                 // Best effort: folders that couldn't go stay.
                 _ => self.queue.tidied(job, item),
             },
+        }
+    }
+
+    /// Run `run` of the file ended with `result`.
+    fn file_finished(&mut self, job: JobId, file: FileId, run: u64, result: Result<(), Error>, now: Duration) {
+        if !self.running.get(&(job, file)).is_some_and(|r| r.run == run) {
+            // Aborted (paused, cancelled, host down) after it finished: the queue
+            // already moved the file on. If it started the file again, that run would
+            // copy it a second time: it stops, and its part file goes.
+            if result.is_ok() {
+                if let Some(again) = self.running.remove(&(job, file)) {
+                    again.handle.abort();
+                    if let Some(plan) = self.queue.plan(job, file).cloned() {
+                        self.carry_out_one(Action::Cleanup { job, plans: vec![plan] });
+                    }
+                }
+                self.queue.file_done(job, file, now);
+            }
+            return;
+        }
+        self.running.remove(&(job, file));
+        match result {
+            Ok(()) => self.queue.file_done(job, file, now),
+            Err(Error::ConnectionLost) => self.queue.file_interrupted(job, file),
+            Err(e) => self.queue.file_failed(job, file, e.to_string(), now),
         }
     }
 
@@ -351,49 +354,54 @@ impl<S: Sink> Engine<S> {
         }
     }
 
+    /// [`Action::Name`]: a download's free local name, or what is at the item's name on the
+    /// destination of an upload, copy or move.
+    fn name(&mut self, job: JobId, item: usize) {
+        let tx = self.outcomes.0.clone();
+        let Some(req) = self.requests.get(&job).cloned() else { return };
+        match &req {
+            JobRequest::Download { items, into, .. } => {
+                let name = items.get(item).and_then(|i| i.path.file_name()).unwrap_or("download").to_owned();
+                let dst = self.free_local_name(into, &name);
+                let _ = tx.send(Outcome::Named { job, item, dst });
+            }
+            _ => {
+                // Upload, copy, move: is the name taken at the destination?
+                let (Some(name), Some(into)) = (item_name(&req, item), req.remote_into()) else {
+                    self.queue.item_failed(job, item, "This item has no name".into());
+                    return;
+                };
+                // The destination's session, and the source's for what is being
+                // transferred (one session but between hosts).
+                let Some((from, to)) = self.sessions_for(&req, Action::Name { job, item }) else { return };
+                let path = into.join(&name);
+                let used = vec![(req.source_host().clone(), from.clone()), (req.host().clone(), to.clone())];
+                // What is being transferred, read in the task: a local file's metadata,
+                // or the source's mtime on the source's session.
+                let source = match &req {
+                    JobRequest::Upload { items, .. } => items.get(item).cloned().map(Incoming::Local),
+                    req => req.remote_items().and_then(|i| i.get(item)).cloned().map(Incoming::Remote),
+                };
+                tokio::spawn(async move {
+                    let (existing, incoming) = match (io::remote_existing(&to, &path).await, source) {
+                        // Only a clash needs the incoming side; a lost connection while
+                        // reading it checks the name again.
+                        (Ok(Some(existing)), Some(source)) => match source.side(&from).await {
+                            Ok(incoming) => (Ok(Some(existing)), incoming),
+                            Err(e) => (Err(e), Side::default()),
+                        },
+                        (existing, _) => (existing, Side::default()),
+                    };
+                    let _ = tx.send(Outcome::Exists { job, item, existing, incoming, used });
+                });
+            }
+        }
+    }
+
     fn carry_out_one(&mut self, action: Action) {
         let tx = self.outcomes.0.clone();
         match action {
-            Action::Name { job, item } => {
-                let Some(req) = self.requests.get(&job).cloned() else { return };
-                match &req {
-                    JobRequest::Download { items, into, .. } => {
-                        let name = items.get(item).and_then(|i| i.path.file_name()).unwrap_or("download").to_owned();
-                        let dst = self.free_local_name(into, &name);
-                        let _ = tx.send(Outcome::Named { job, item, dst });
-                    }
-                    _ => {
-                        // Upload, copy, move: is the name taken at the destination?
-                        let (Some(name), Some(into)) = (item_name(&req, item), req.remote_into()) else {
-                            self.queue.item_failed(job, item, "This item has no name".into());
-                            return;
-                        };
-                        // The destination's session, and the source's for what is being
-                        // transferred (one session but between hosts).
-                        let Some((from, to)) = self.sessions_for(&req, Action::Name { job, item }) else { return };
-                        let path = into.join(&name);
-                        let used = vec![(req.source_host().clone(), from.clone()), (req.host().clone(), to.clone())];
-                        // What is being transferred, read in the task: a local file's metadata,
-                        // or the source's mtime on the source's session.
-                        let source = match &req {
-                            JobRequest::Upload { items, .. } => items.get(item).cloned().map(Incoming::Local),
-                            req => req.remote_items().and_then(|i| i.get(item)).cloned().map(Incoming::Remote),
-                        };
-                        tokio::spawn(async move {
-                            let (existing, incoming) = match (io::remote_existing(&to, &path).await, source) {
-                                // Only a clash needs the incoming side; a lost connection while
-                                // reading it checks the name again.
-                                (Ok(Some(existing)), Some(source)) => match source.side(&from).await {
-                                    Ok(incoming) => (Ok(Some(existing)), incoming),
-                                    Err(e) => (Err(e), Side::default()),
-                                },
-                                (existing, _) => (existing, Side::default()),
-                            };
-                            let _ = tx.send(Outcome::Exists { job, item, existing, incoming, used });
-                        });
-                    }
-                }
-            }
+            Action::Name { job, item } => self.name(job, item),
             Action::FreeRemoteName { job, item } => {
                 let Some(req) = self.requests.get(&job).cloned() else { return };
                 let (Some(name), Some(into)) = (item_name(&req, item), req.remote_into().cloned()) else { return };

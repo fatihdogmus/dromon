@@ -13,6 +13,7 @@ fn passphrase(path: &str) -> PromptKind {
 const FP: &str = "SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU";
 
 #[test]
+#[expect(clippy::too_many_lines, reason = "one table of real ssh prompt texts, a case per entry, checked by one loop")]
 fn table() {
     let fp_dot = format!("ED25519 key fingerprint is {FP}.");
     let cases: Vec<(String, Option<&str>, PromptKind)> = vec![
