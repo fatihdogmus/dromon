@@ -87,7 +87,7 @@ Tracks where implementation stands against `dromon-plan.md`. Newest first.
 - M5 accessibility (§6.9): an audit test over every scene and the Settings window (AccessKit tree via `Runtime::accessibility_json`: role, name, action, keyboard reach, duplicates, images: 1079 offences → 0); the list is a grid with sortable column headers and an active-descendant rowgroup; Tab order per state with focus traps and focus return, a ring at every stop (`ui_keyboard_tests`); polite announcements for transfers, connections, deletes and the vanished folder. Needs real screen readers (VoiceOver, Narrator, Orca); no keyboard way to open the context menu yet (Shift+F10 / Menu key); macOS Tab follows the system keyboard-navigation setting.
 
 **Next**
-1. Release packaging dry run (`release.yml` check mode) result; a flaky 20 s timeout in two service tests seen only in whole-workspace runs (being investigated).
+1. Release packaging dry run (`release.yml` check mode, run 45736076808): builds green on Linux, macOS, Windows and Arch; the signing and packaging jobs wait for the `release` environment's approval (the maintainer). (Fixed: the service tests' occasional 20 s timeout was ETXTBSY when starting a just-written fake ssh while another thread forked; `dromon_ssh::spawn` now retries a busy executable.)
 2. The accent pick (user).
 3. A first run in a real window on macOS, Windows and a Linux desktop (real GPU, input, Wayland, screen readers, sleep/wake, notifications, the 120 Hz scroll gate).
 

@@ -46,7 +46,7 @@ pub async fn spawn(cmd: &SshCommand) -> io::Result<SshChild> {
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
 
-    let mut child = command.spawn()?;
+    let mut child = spawn_retrying_busy(&mut command).await?;
     let stdin = child.stdin.take().ok_or_else(|| io::Error::other("ssh stdin not piped"))?;
     let stdout = child.stdout.take().ok_or_else(|| io::Error::other("ssh stdout not piped"))?;
     let stderr = child.stderr.take().ok_or_else(|| io::Error::other("ssh stderr not piped"))?;
@@ -54,6 +54,28 @@ pub async fn spawn(cmd: &SshCommand) -> io::Result<SshChild> {
     let (tx, rx) = mpsc::channel(STDERR_BUFFER_LINES);
     tokio::spawn(forward_stderr(stderr, tx));
     Ok(SshChild { child, stream: Some(tokio::io::join(stdout, stdin)), stderr: Some(rx) })
+}
+
+/// How often a spawn that finds the program "busy" is tried again, and the first wait (doubling).
+const BUSY_TRIES: u32 = 5;
+const BUSY_WAIT: std::time::Duration = std::time::Duration::from_millis(10);
+
+/// `command.spawn()`, tried again a few times when the program is briefly "busy" (ETXTBSY): its
+/// file was just written (a package update replacing ssh; the test suite's fake ssh) and a child
+/// another thread forked meanwhile still holds the write descriptor until it execs. Any other
+/// error, or the last busy one, is returned as is.
+async fn spawn_retrying_busy(command: &mut tokio::process::Command) -> io::Result<Child> {
+    let mut wait = BUSY_WAIT;
+    for _ in 1..BUSY_TRIES {
+        match command.spawn() {
+            Err(e) if e.kind() == io::ErrorKind::ExecutableFileBusy => {
+                tokio::time::sleep(wait).await;
+                wait *= 2;
+            }
+            other => return other,
+        }
+    }
+    command.spawn()
 }
 
 async fn forward_stderr(stderr: ChildStderr, tx: mpsc::Sender<String>) {
