@@ -84,11 +84,12 @@ Tracks where implementation stands against `dromon-plan.md`. Newest first.
   - Fixed on the way: natural sort allocations, re-sorting per streamed page (merge), per-rebuild hashing, name copies per key press (Down-key frame 20.6 → 7.2 ms in 100k), the diff's maps; and a real bug: ↓/End/Page Down didn't scroll the list (the reveal was scoped inside the viewport).
   - Remaining hotspot (Rune): re-keying 100k virtual rows when the rows change (filter keystroke ~36 ms, refresh ~220 ms in 100k).
 
+- M5 accessibility (§6.9): an audit test over every scene and the Settings window (AccessKit tree via `Runtime::accessibility_json`: role, name, action, keyboard reach, duplicates, images: 1079 offences → 0); the list is a grid with sortable column headers and an active-descendant rowgroup; Tab order per state with focus traps and focus return, a ring at every stop (`ui_keyboard_tests`); polite announcements for transfers, connections, deletes and the vanished folder. Needs real screen readers (VoiceOver, Narrator, Orca); no keyboard way to open the context menu yet (Shift+F10 / Menu key); macOS Tab follows the system keyboard-navigation setting.
+
 **Next**
-1. M5 accessibility pass (in progress). (Done: S6 fallback; per-host "Verbose logging"; M5 performance gates and soak.)
+1. Release packaging dry run (`release.yml` check mode) result; a flaky 20 s timeout in two service tests seen only in whole-workspace runs (being investigated).
 2. The accent pick (user).
-3. M5: accessibility pass (AccessKit tree, full keyboard reachability), packaging dry run.
-4. A first run in a real window on a macOS and a Linux desktop (real GPU, real input, Wayland), and on Windows.
+3. A first run in a real window on macOS, Windows and a Linux desktop (real GPU, input, Wayland, screen readers, sleep/wake, notifications, the 120 Hz scroll gate).
 
 **Service-thread caveats**
 - Verified end to end (`crates/dromon-app/tests/e2e.rs`, Docker fixture): the real `App` in a headless `Runtime` + the real service thread + system `ssh` + the `dromon` binary as askpass helper + SFTP, driven by clicks, typing and Return: host-key sheet with the server's real fingerprint, listings incl. dir symlinks, dangling links, dotfiles and permission denied; wrong then right password; keyboard-interactive password + TOTP (code not rememberable); key passphrase; a server-side session kill reconnects silently (password from memory, no sheet, folder relisted); Disconnect forgets the password. No typed secret reaches any event or log line. `dromon-app` is now lib + bin for this (`app()`, `run()`, `pub mod state`, `pub mod service`).
