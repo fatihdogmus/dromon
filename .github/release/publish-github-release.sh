@@ -2,7 +2,7 @@
 # publish-github-release.sh <notes file> <dir>...: publishes the GitHub release TAG at commit SHA
 # with every file in each <dir>. It writes a draft first, uploads the files byte for byte and
 # checks each by downloading it again, then publishes the draft, which creates the tag at SHA.
-# The notes start with the commits since the previous release. Never touches a published
+# The notes start with the pull requests since the previous release (changelog.sh). Never touches a published
 # release.
 #
 # Environment: TAG, VERSION, SHA, GITHUB_REPOSITORY, GH_TOKEN.
@@ -19,22 +19,15 @@ if gh api "repos/$repo/git/ref/tags/$TAG" > /dev/null 2>&1; then
   die "Tag $TAG exists already."
 fi
 
-# What changed: the commits since the previous release (its tag), oldest first, without the
-# version commits themselves.
+# What changed since the previous release: one line per pull request (changelog.sh).
 previous=$(gh release view -R "$repo" --json tagName --jq .tagName 2> /dev/null || true)
 body=$(mktemp)
 trap 'rm -f "$body"' EXIT
 {
-  echo "## Changes"
-  echo
   if [ -n "$previous" ]; then
-    gh api "repos/$repo/compare/$previous...$SHA" --paginate \
-      --jq '.commits[] | "- " + (.commit.message | split("\n")[0]) + " (" + .sha[0:7] + ")"' |
-      grep -vE '^- Dromon [0-9]+\.[0-9]+\.[0-9]+ \(' || echo "- No changes besides the version."
-    echo
-    echo "All changes: $GITHUB_SERVER_URL/$repo/compare/$previous...$TAG"
+    bash "$(dirname "$0")/changelog.sh" "$previous" "$SHA" "$TAG"
   else
-    echo "The first release."
+    printf '## Changes\n\nThe first release.\n'
   fi
   echo
   cat "$notes"

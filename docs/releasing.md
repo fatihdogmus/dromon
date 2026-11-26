@@ -30,8 +30,15 @@ runs and the files ship unsigned (Windows), ad-hoc signed (macOS) or without GPG
    (Review deployments → `release-approval`). The builds run meanwhile; nothing is signed before
    you approve. With `WINDOWS_SIGNING=signpath`, SignPath also asks for its own approval.
 3. **That's it** (roughly 40-60 minutes). At the end `publish` attests every file, tags the
-   version commit `<version>`, and publishes the release; its notes list the commits since the
-   previous release, then every file with its SHA-256 and how it is signed. `land` brings the
+   version commit `<version>`, and publishes the release; its notes list what changed since the
+   previous release, then every file with its SHA-256 and how it is signed.
+
+**Release notes.** Pull requests are squash merged, so each is one commit on `main`, and
+`.github/release/changelog.sh` makes one line of it: the pull request's title, number and author,
+under *New* (labels `feature`, `enhancement`), *Fixes* (`bug`, `fix`), *Faster* (`performance`) or
+*Other changes*. Label a pull request `skip-changelog` to leave it out; a commit pushed without
+one is listed by its subject. Contributors other than the owner are thanked. To preview the notes
+of the next release: `bash .github/release/changelog.sh <last version> main`. `land` brings the
    version commit to `main` (a fast-forward, or a merge commit if `main` moved during the run)
    and deletes `release/<version>`; `homebrew` updates the cask in the tap.
 
