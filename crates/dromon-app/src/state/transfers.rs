@@ -278,6 +278,15 @@ impl App {
                 self.transfers.drop = None;
                 self.upload(paths, folder);
             }
+            Action::PickUpload => {
+                if let Some(c) = self.conn().filter(|c| c.interactive()) {
+                    let folder = match c.cwd.file_name() {
+                        Some(name) => name.to_owned(),
+                        None => self.hosts.get(&c.host).map_or(c.host.as_str(), |h| h.display_name()).to_owned(),
+                    };
+                    fx.push(Effect::PickUpload { folder });
+                }
+            }
             Action::DropHover { target, over, count } => self.drop_hover(target, over, count),
             Action::Transfer(cmd) => self.send(Command::Transfer(cmd)),
             Action::ResolveConflict(choice) => {

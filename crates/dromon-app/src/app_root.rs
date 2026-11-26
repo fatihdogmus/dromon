@@ -29,6 +29,8 @@ mod ui_keyboard_tests;
 #[cfg(test)]
 mod ui_menu_tests;
 #[cfg(test)]
+mod ui_mouse_tests;
+#[cfg(test)]
 mod ui_palette_tests;
 #[cfg(test)]
 mod ui_poll_tests;
@@ -44,6 +46,8 @@ mod ui_sheet_tests;
 mod ui_tests;
 #[cfg(test)]
 mod ui_transfer_tests;
+#[cfg(test)]
+mod ui_upload_tests;
 #[cfg(test)]
 mod ui_window_tests;
 

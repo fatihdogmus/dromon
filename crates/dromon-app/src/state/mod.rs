@@ -206,6 +206,9 @@ pub enum Action {
     /// Files dropped or pasted from Finder/Explorer: upload them into the folder on screen, or
     /// into its subfolder `folder` (dropped on a folder row).
     Upload { paths: Vec<PathBuf>, folder: Option<String> },
+    /// The toolbar's Upload button, ⌘U, the palette: ask for the native file picker
+    /// ([`Effect::PickUpload`]); what it picks goes to [`Action::Upload`].
+    PickUpload,
     /// A transfer row's buttons: pause, resume, cancel, retry, clear finished.
     Transfer(TransferCommand),
     /// The conflict sheet's buttons, for the clash on screen.
@@ -259,6 +262,9 @@ pub enum Effect {
     /// Open the context menu of `kind` anchored at its row (a row not on screen, and the empty
     /// area: the list's top-left): the view knows where things are.
     ContextMenu(MenuKind),
+    /// Open the native multi-file picker, titled for `folder` (the folder on screen); the files
+    /// picked upload into it (`Action::Upload` with no folder).
+    PickUpload { folder: String },
 }
 
 impl App {
@@ -605,6 +611,7 @@ impl App {
             }
             Action::Download
             | Action::Upload { .. }
+            | Action::PickUpload
             | Action::Transfer(_)
             | Action::ResolveConflict(_)
             | Action::ToggleApplyAll
@@ -670,6 +677,7 @@ impl App {
             Shortcut::QuickConnect => Action::QuickConnect,
             Shortcut::Settings | Shortcut::NewWindow | Shortcut::CloseWindow => return Vec::new(),
             Shortcut::Download => Action::Download,
+            Shortcut::Upload => Action::PickUpload,
             Shortcut::Back => Action::Back,
             Shortcut::Forward => Action::Forward,
             Shortcut::Up => Action::GoUp,

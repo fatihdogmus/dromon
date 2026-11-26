@@ -94,6 +94,18 @@ fn window_focus(s: &mut App, focused: bool, tx: &mut Tx) {
     animate_refresh(s, tx);
 }
 
+/// An extra mouse button nothing else took (the root's `on_button`): Back and Forward walk the
+/// folder history (a no-op at either end, still taken); the rest bubble on.
+fn mouse_button(s: &mut App, button: rune::PointerButton, tx: &mut Tx) -> bool {
+    let action = match button {
+        rune::PointerButton::Back => Action::Back,
+        rune::PointerButton::Forward => Action::Forward,
+        _ => return false,
+    };
+    run(s, action, tx);
+    true
+}
+
 /// The window went off screen or came back (`App::on_visibility`): nothing polls while it's
 /// away.
 pub fn window_visibility(s: &mut App, visible: bool, tx: &mut Tx) {
@@ -118,6 +130,15 @@ pub fn effect(fx: Effect, tx: &mut Tx) {
         Effect::CloseWindow => tx.close_window(),
         Effect::Copy(text) => tx.copy(text),
         Effect::ContextMenu(kind) => menu::open_at_row(kind, tx),
+        Effect::PickUpload { folder } => {
+            let options = rune::FileDialogOptions { title: format!("Upload to {folder}"), ..rune::FileDialogOptions::default() };
+            // A cancelled dialog or an error from it does nothing.
+            tx.open_files(options, |s: &mut App, picked, tx| {
+                if let Ok(Some(paths)) = picked {
+                    run(s, Action::Upload { paths, folder: None }, tx);
+                }
+            });
+        }
         Effect::ReadClipboard { as_move } => {
             tx.read_clipboard(move |s: &mut App, content: &rune::ClipboardContent, tx: &mut Tx| pasted(s, content, as_move, tx))
         }
@@ -171,6 +192,9 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         // still the clip's pastes the clip (a focused field takes its own pastes).
         .on_paste_content(|s: &mut App, content: &rune::ClipboardContent, tx: &mut Tx| pasted(s, content, false, tx))
         .on_window_focus(window_focus)
+        // The mouse's thumb buttons go back and forward in the folder history, as in a browser
+        // or Finder; every other extra button (middle-click autoscroll) is left alone.
+        .on_button(mouse_button)
         .child(sidebar::view(s, p))
         .child(main)
         .children(transfers::popover(s, p))

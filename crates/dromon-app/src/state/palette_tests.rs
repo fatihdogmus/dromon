@@ -114,13 +114,13 @@ fn actions_that_cant_run_now_are_hidden() {
             "pal-filter",
             "pal-refresh",
             "pal-new-folder",
+            "pal-upload",
             "pal-copy-path",
             "pal-show-transfers",
             "pal-hidden",
-            "pal-log",
-            "pal-disconnect"
+            "pal-log"
         ],
-        "nothing selected: no Download, Rename or Delete"
+        "nothing selected: no Download, Rename or Delete (and the cap of {MAX_ACTIONS} trims Disconnect, listed last)"
     );
     s.act(Action::Click { name: "index.html".into(), extend: false, toggle: false });
     let a = actions(&s);
