@@ -127,7 +127,11 @@ async fn read_remote(sftp: &Sftp, path: &RemotePath) -> Vec<u8> {
 
 async fn write_remote(sftp: &Sftp, path: &RemotePath, data: &[u8]) {
     let file = sftp.open_write(path, WriteMode::Truncate).await.unwrap();
-    file.write_at(0, data).await.unwrap();
+    // In pieces the server takes: one write over its limit is refused ("write limit reached").
+    let chunk = sftp.chunk_size() as usize;
+    for (i, piece) in data.chunks(chunk).enumerate() {
+        file.write_at((i * chunk) as u64, piece).await.unwrap();
+    }
     file.close().await.unwrap();
 }
 
@@ -265,6 +269,23 @@ async fn round_trip_rename_copy_delete() {
     copy_remote(s, &plan, CopyOptions::default(), |n| progress.push(n)).await.unwrap();
     println!("same-host copy: {} progress reports ({})", progress.len(), if s.capabilities().copy_data { "copy-data" } else { "streamed" });
     assert!(read_remote(s, &copy).await == data);
+
+    // A copy streamed through one session (servers without copy-data): reads and writes in
+    // flight both ways on one ssh.exe, with the app's own 10 s reply timeout. Without WSL in
+    // between, unlike the Docker fixture on Windows CI.
+    let big = dir.join("big.bin");
+    let big_data = pattern(16 << 20, 9);
+    write_remote(s, &big, &big_data).await;
+    let streamed = CopyOptions { server_copy: false, ..CopyOptions::default() };
+    for round in 0..5 {
+        let dst = dir.join(&format!("streamed-{round}.bin"));
+        let plan = the_plan(scan_remote_copy(s, &big, &dst, false, |_| {}).await.unwrap());
+        let started = std::time::Instant::now();
+        copy_remote(s, &plan, streamed, |_| {}).await.unwrap_or_else(|e| panic!("streamed copy {round}: {e:?}"));
+        println!("streamed same-session copy {round}: 16 MiB in {:.2?}", started.elapsed());
+        assert_eq!(s.stat(&dst).await.unwrap().size, 16 << 20);
+    }
+    assert!(read_remote(s, &dir.join("streamed-4.bin")).await == big_data);
 
     // Delete it all.
     let removed = s.remove_all(&dir, |_, _| {}).await.unwrap();
