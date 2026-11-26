@@ -156,6 +156,7 @@ fn tab_walks_the_window_in_reading_order() {
         "crumb-1",
         "crumb-2",
         "tb-filter",
+        "tb-upload",
         "tb-transfers",
         "tb-palette",
         "col-Name",

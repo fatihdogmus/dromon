@@ -323,6 +323,7 @@ impl App {
         add(listed, "refresh", "Refresh", Some("mod+r"), Action::File(FileAction::Refresh));
         add(listed, "new-folder", "New folder", Some("mod+shift+n"), Action::File(FileAction::NewFolder));
         add(interactive && picked, "download", "Download", Some("mod+d"), Action::Download);
+        add(interactive, "upload", "Upload files…", Some("mod+u"), Action::PickUpload);
         add(listed && selected == 1, "rename", "Rename", Some("f2"), Action::File(FileAction::Rename));
         add(listed && selected > 0, "delete", "Delete", Some(delete_chord()), Action::File(FileAction::Delete));
         add(opened, "copy-path", "Copy path", Some("mod+alt+c"), Action::File(FileAction::CopyPath));
