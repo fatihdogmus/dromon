@@ -64,7 +64,12 @@
             Description="Fast SFTP file browser"
             Target="[INSTALLFOLDER]dromon.exe"
             WorkingDirectory="INSTALLFOLDER"
-            Icon="DromonIcon" />
+            Icon="DromonIcon">
+          <!-- The AppUserModelID the app registers for its notifications (rune-notify,
+               views/transfers.rs NOTIFY_ID): a pinned shortcut and the running window are one
+               taskbar button, and toasts carry the app's name. -->
+          <ShortcutProperty Key="System.AppUserModel.ID" Value="dev.dromon.Dromon" />
+        </Shortcut>
         <RegistryValue Root="HKLM" Key="Software\Dromon" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
       </Component>
     </StandardDirectory>
