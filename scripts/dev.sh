@@ -13,7 +13,7 @@
 # a new item), the launcher prints "restart needed" and stops applying edits: Ctrl+C and rerun.
 #
 # Runs Rune's own launcher (scripts/rune-dev --local in the Rune checkout Cargo pinned) on
-# dromon-app's `dromon-hot` binary. Needs python3; downloads Dioxus CLI 0.7.10 (`dx`, which does
+# dromon-app's `dromon-hot` binary. Needs Python 3.11+; downloads Dioxus CLI 0.7.10 (`dx`, which does
 # the patching) to target/tools on the first run, or uses RUNE_DX.
 # Env: DROMON_DEV_PORT (18745) for the devserver, if that port is taken.
 set -euo pipefail
@@ -31,7 +31,16 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-command -v python3 > /dev/null || { echo "dev: needs python3" >&2; exit 1; }
+# Rune's launcher needs Python 3.11+ (tomllib); macOS's /usr/bin/python3 is 3.9, often first on PATH.
+python=
+for candidate in python3 python3.15 python3.14 python3.13 python3.12 python3.11 \
+  /opt/homebrew/bin/python3 /usr/local/bin/python3; do
+  if command -v "$candidate" > /dev/null &&
+    "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2> /dev/null; then
+    python=$(command -v "$candidate"); break
+  fi
+done
+[[ -n $python ]] || { echo "dev: needs Python 3.11 or newer (brew install python)" >&2; exit 1; }
 
 # Dioxus CLI 0.7.10 (Rune's launcher drives `dx serve --hot-patch`): RUNE_DX if set, else
 # Dioxus's prebuilt release, checked against its pinned SHA-256, in target/tools.
@@ -56,11 +65,21 @@ if [[ -z ${RUNE_DX:-} ]]; then
     rm -f "$dir/dx.tar.gz"
   fi
 fi
-"$RUNE_DX" --version 2>/dev/null | grep -q '0\.7\.10' || { echo "dev: $RUNE_DX isn't Dioxus CLI 0.7.10" >&2; exit 1; }
+dx_ok=1
+dx_version=$("$RUNE_DX" --version 2>&1) || dx_ok=0
+[[ $dx_ok == 1 ]] && grep -Eq '(^| )0\.7\.10( |$)' <<< "$dx_version" || {
+  echo "dev: $RUNE_DX isn't Dioxus CLI 0.7.10; \`dx --version\` said:" >&2
+  sed 's/^/  /' <<< "$dx_version" >&2
+  if grep -q 'openssl@3' <<< "$dx_version"; then
+    echo "dev: the prebuilt dx links Homebrew's OpenSSL 3: brew install openssl@3, or" >&2
+    echo "     cargo install dioxus-cli@0.7.10 --locked and set RUNE_DX" >&2
+  fi
+  exit 1
+}
 
 # The pinned Rune's checkout: cargo fetches it on the first build, and it holds the launcher.
 rune_manifest=$(cargo metadata --format-version 1 --locked --filter-platform "$host" |
-  python3 -c 'import json, sys
+  "$python" -c 'import json, sys
 d = json.load(sys.stdin)
 print(next(p["manifest_path"] for p in d["packages"] if p["name"] == "rune" and (p.get("source") or "").startswith("git+")))')
 launcher="$(dirname "$rune_manifest")/../../scripts/rune-dev"
@@ -68,6 +87,6 @@ launcher="$(dirname "$rune_manifest")/../../scripts/rune-dev"
 
 # `dromon-hot` is the app compiled as one crate (crates/dromon-app/src/hot.rs): hot patching
 # reaches only the executable's own crate, and `dromon` links the views as a library.
-exec python3 "$launcher" --local --manifest-path crates/dromon-app/Cargo.toml --bin dromon-hot \
+exec "$python" "$launcher" --local --manifest-path crates/dromon-app/Cargo.toml --bin dromon-hot \
   --patch 'src/views/**/*.rs' --patch 'src/theme/**/*.rs' --patch 'src/settings_window.rs' \
   --port "${DROMON_DEV_PORT:-18745}" -- ${app_args[@]+"${app_args[@]}"}
