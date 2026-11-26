@@ -28,6 +28,7 @@ packaging/
 ├─ macos/
 │  ├─ Info.plist                 the bundle's Info.plist; the one place the bundle id lives
 │  ├─ build-app.sh               universal Dromon.app (Apple silicon + Intel, ad-hoc signed), its zip, the unsigned DMG
+│  ├─ dmg/                       the DMG's installer window: background (make-background.py), dmgbuild settings
 │  └─ verify-dmg.sh              opens a DMG and checks the app as a user's Mac would
 ├─ windows/
 │  ├─ build-exe.ps1              dromon.exe for x64/arm64, version resource + icon stamped (rcedit)

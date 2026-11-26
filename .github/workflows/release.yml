@@ -551,7 +551,7 @@ jobs:
           APPLE_NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
       - name: Sign, notarize and staple the app and the DMG
-        run: bash .github/release/sign-macos.sh "$RUNNER_TEMP/in/build-macos/Dromon.app.zip" "$RUNNER_TEMP/out" "$VERSION" packaging/macos/Info.plist
+        run: bash .github/release/sign-macos.sh "$RUNNER_TEMP/in/build-macos/Dromon.app.zip" "$RUNNER_TEMP/out" "$VERSION" packaging/macos/Info.plist "$RUNNER_TEMP/in/build-macos/Dromon-$VERSION-macos-universal.dmg"
         env:
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
           APPLE_NOTARY_KEY_ID: ${{ vars.APPLE_NOTARY_KEY_ID }}

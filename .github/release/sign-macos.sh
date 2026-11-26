@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# sign-macos.sh <Dromon.app.zip> <out dir> <version> <Info.plist>: signs Dromon.app with the
-# Developer ID identity (hardened runtime, secure timestamp, no entitlements), notarizes and
-# staples it, then builds Dromon-<version>-macos-universal.dmg around it (with an /Applications
-# link) and signs, notarizes and staples the DMG too.
+# sign-macos.sh <Dromon.app.zip> <out dir> <version> <Info.plist> <unsigned DMG>: signs
+# Dromon.app with the Developer ID identity (hardened runtime, secure timestamp, no
+# entitlements), notarizes and staples it, then puts it into Dromon-<version>-macos-universal.dmg
+# in place of the unsigned DMG's ad-hoc app (keeping that DMG's installer window: build-app.sh),
+# and signs, notarizes and staples the DMG too.
 #
 # No entitlements: the hardened runtime limits JIT and unsigned executable memory, DYLD_*
 # variables, loading libraries not signed by Apple or the team, debugging, and the camera,
@@ -17,10 +18,11 @@
 # shellcheck source-path=SCRIPTDIR source=lib.sh
 . "$(dirname "$0")/lib.sh"
 
-input=${1:?usage: sign-macos.sh <Dromon.app.zip> <out dir> <version> <Info.plist>}
+input=${1:?usage: sign-macos.sh <Dromon.app.zip> <out dir> <version> <Info.plist> <unsigned DMG>}
 out=${2:?}
 version=${3:?}
 plist=${4:?}
+layout=${5:?usage: sign-macos.sh <Dromon.app.zip> <out dir> <version> <Info.plist> <unsigned DMG>}
 bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")
 dmg="$out/Dromon-$version-macos-universal.dmg"
 
@@ -65,11 +67,21 @@ xcrun stapler staple "$app"
 xcrun stapler validate "$app"
 spctl --assess --type execute --verbose=2 "$app"
 
-mkdir "$work/staging"
-/usr/bin/ditto "$app" "$work/staging/Dromon.app"
-ln -s /Applications "$work/staging/Applications"
+# The DMG: build-macos's installer window (background, icon positions: build-app.sh) with the
+# signed app in place of its ad-hoc one. Apple's hdiutil only: a writable copy, grown for the
+# signature and the ticket, the app swapped, compressed again. The layout stays byte for byte.
+hdiutil convert -quiet "$layout" -format UDRW -o "$work/rw.dmg"
+# -limits: minimum, current and maximum size in 512-byte sectors; 64 MB more than now.
+current=$(hdiutil resize -limits "$work/rw.dmg" | awk 'NR == 1 { print $2 }')
+hdiutil resize -quiet -sectors "$((current + 131072))" "$work/rw.dmg"
+hdiutil attach -quiet -nobrowse -noautoopen -readwrite -mountpoint "$work/volume" "$work/rw.dmg"
+[ -d "$work/volume/Dromon.app" ] && [ -f "$work/volume/.DS_Store" ] ||
+  { hdiutil detach -quiet "$work/volume"; die "$(basename "$layout") has no Dromon.app or window layout."; }
+rm -rf "$work/volume/Dromon.app"
+/usr/bin/ditto "$app" "$work/volume/Dromon.app"
+hdiutil detach -quiet "$work/volume" || hdiutil detach -quiet -force "$work/volume"
 rm -f "$dmg"
-hdiutil create -quiet -volname Dromon -fs HFS+ -format UDZO -srcfolder "$work/staging" "$dmg"
+hdiutil convert -quiet "$work/rw.dmg" -format UDZO -imagekey zlib-level=9 -o "$dmg"
 codesign --force --timestamp --keychain "$DROMON_KEYCHAIN" --sign "$DROMON_SIGNING_IDENTITY" "$dmg"
 notarize "$dmg"
 xcrun stapler staple "$dmg"

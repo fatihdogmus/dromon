@@ -388,6 +388,14 @@ jobs:
         run: |
           version=$(awk '/^\[/ { s = $0 } s == "[workspace.package]" && $1 == "version" { gsub(/"/, "", $3); print $3; exit }' Cargo.toml)
           bash packaging/macos/verify-dmg.sh "$RUNNER_TEMP/build/Dromon-$version-macos-universal.dmg" "$version" false
+      # To look at the installer window (and try the app) on a Mac: ad-hoc signed, so macOS asks
+      # once (System Settings → Privacy & Security → Open Anyway).
+      - name: Upload the DMG
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: dmg-macos
+          path: ${{ runner.temp }}/build/*.dmg
+          retention-days: 7
 
   # The Windows installer: silent install, check and uninstall.
   windows-package:

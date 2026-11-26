@@ -6,8 +6,14 @@
 #                                                 unsigned)
 #   <out>/Dromon.app.zip                          the app for the release signing job (ditto keeps
 #                                                 permissions and signatures)
-#   <out>/Dromon-<version>-macos-universal.dmg    unsigned DMG with an /Applications link (what
-#                                                 ships when the release has no Apple credentials)
+#   <out>/Dromon-<version>-macos-universal.dmg    the installer window: the app, an Applications
+#                                                 link and the background's arrow between them
+#                                                 (dmgbuild, packaging/macos/dmg/). The release
+#                                                 signs the app inside it (sign-macos.sh); without
+#                                                 Apple credentials it ships as is.
+#
+# The DMG's layout needs dmgbuild (packaging/macos/dmg/requirements.txt, pinned by hash), which
+# needs Python 3.11+: the first new enough python3 on PATH (macOS's /usr/bin/python3 is 3.9).
 #
 # One app for every Mac: each runs its own half natively. On an Apple silicon Mac with Rosetta
 # the Intel half's `--version` is checked too.
@@ -67,9 +73,22 @@ done
 
 /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$app" "$out/Dromon.app.zip"
 
-staging=$(mktemp -d)
-trap 'rm -rf "$staging"' EXIT
-/usr/bin/ditto "$app" "$staging/Dromon.app"
-ln -s /Applications "$staging/Applications"
-hdiutil create -quiet -volname Dromon -fs HFS+ -format UDZO -srcfolder "$staging" "$dmg"
+# The installer window (packaging/macos/dmg/): dmgbuild in a throwaway virtualenv.
+python=""
+for candidate in python3.13 python3.12 python3.11 python3; do
+  if command -v "$candidate" > /dev/null &&
+    "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2> /dev/null; then
+    python=$candidate
+    break
+  fi
+done
+[ -n "$python" ] || { echo "the DMG's layout needs Python 3.11+ for dmgbuild (brew install python)" >&2; exit 1; }
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+dmgdir="$root/packaging/macos/dmg"
+"$python" -m venv "$work/venv"
+"$work/venv/bin/pip" install --quiet --disable-pip-version-check --no-deps --require-hashes -r "$dmgdir/requirements.txt"
+# One TIFF with both resolutions, so Retina displays get the 2x background.
+tiffutil -cathidpicheck "$dmgdir/background.png" "$dmgdir/background@2x.png" -out "$work/background.tiff" 2> /dev/null
+"$work/venv/bin/dmgbuild" -s "$dmgdir/settings.py" -D app="$app" -D background="$work/background.tiff" Dromon "$dmg"
 ls -l "$out"

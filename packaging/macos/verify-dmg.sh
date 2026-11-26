@@ -2,7 +2,8 @@
 # verify-dmg.sh <dmg> <version> <signed: true|false> [<team id>] [--copy-to <dir>]: opens the
 # DMG as a user would (hdiutil attach) and checks Dromon.app:
 #
-#   - the DMG holds Dromon.app and an /Applications link
+#   - the DMG holds Dromon.app, an /Applications link and its installer window (the layout's
+#     .DS_Store and the background image)
 #   - Info.plist: the bundle id of packaging/macos/Info.plist, the version, macOS 14 minimum
 #   - the executable is universal (arm64 and x86_64) and prints "dromon <version>" for --version
 #     (this Mac's half, and the Intel half too on Apple silicon with Rosetta)
@@ -43,6 +44,9 @@ trap 'hdiutil detach -quiet "$mount" || hdiutil detach -force -quiet "$mount"' E
 app="$mount/Dromon.app"
 [ -d "$app" ] || fail "$(basename "$dmg") has no Dromon.app"
 [ "$(readlink "$mount/Applications")" = /Applications ] || fail "$(basename "$dmg") has no /Applications link"
+# The installer window: Finder's layout (.DS_Store) and the background it points at.
+[ -s "$mount/.DS_Store" ] || fail "$(basename "$dmg") has no window layout (.DS_Store)"
+compgen -G "$mount/.background/*" > /dev/null || fail "$(basename "$dmg") has no background image"
 
 plist() { /usr/libexec/PlistBuddy -c "Print :$1" "$2"; }
 [ "$(plist CFBundleIdentifier "$app/Contents/Info.plist")" = "$(plist CFBundleIdentifier "$template")" ] || fail "wrong bundle identifier"
