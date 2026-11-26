@@ -29,33 +29,51 @@ Dromon is not Cyberduck. It does one thing: **SFTP over the SSH you already have
 
 - **Your SSH setup, as is.** Hosts come straight from `~/.ssh/config` (with `Include`s), and connections run through your system `ssh`: keys, agent, `ProxyJump`, `Match` blocks, all of it.
 - **Sign in once.** Passwords, key passphrases and 2FA codes are asked in a native sheet, kept **in memory only**, and reused for silent reconnects. Never written to disk, never logged.
-- **Survives your Wi-Fi.** Drop the connection, close the lid: Dromon reconnects in the background with backoff and puts you back where you were.
-- **Fast with big folders.** Listings stream in pages and rows are virtualized: a 10,000-entry folder paints its first rows immediately.
+- **Transfers that finish.** Drag files in from Finder or Explorer, ⌘D to download. Part files resume after a dropped connection, copies on the same server run server-side, and moves between servers delete the source only once the copy checks out.
+- **Survives your Wi-Fi.** Drop the connection, close the lid: Dromon reconnects in the background, checks connections when the computer wakes, and puts you back where you were.
+- **Live.** The folder on screen refreshes on its own: new files fade in, removed ones fold away, and your selection stays put.
+- **Fast with big folders.** Listings stream in pages and rows are virtualized: a 10,000-entry folder paints its first rows in about 15 ms.
+- **Keyboard first.** ⌘K for hosts, folders and actions; type-to-select, ⌘L, F2, ⌘C/⌘X/⌘V between hosts and windows: [the full list](.plans/dromon-plan.md#7-keyboard-shortcuts). Every control is reachable by keyboard and screen reader.
 - **Crisp.** Inter and Geist Mono, tabular figures, and an icon set drawn twice: once per pixel density, pixel-exact at 1× and 2×.
-- **Keyboard first.** Type-to-select, ⌘↑ / ⌘[ / ⌘], ⌘F filter, ⌘⇧. hidden files: [the full list](.plans/dromon-plan.md#7-keyboard-shortcuts).
 
 <table>
   <tr>
+    <td width="50%"><img src="tests/goldens/transfers-dark@2x.png" alt="The transfers popover: downloads with progress bars, speed and time left, a paused and a failed job"></td>
+    <td width="50%"><img src="tests/goldens/drop-list-dark@2x.png" alt="Files dragged over the list: a mint outline and an 'Upload 3 items to /var/www/site' pill"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Every transfer in one place: progress, speed, time left, resume.</sub></td>
+    <td align="center"><sub>Drop files from Finder or Explorer to upload them.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="tests/goldens/poll-added-dark@2x.png" alt="Two new files fading in with a mint highlight while the selection stays"></td>
+    <td width="50%"><img src="tests/goldens/palette-filtered-dark@2x.png" alt="The ⌘K palette filtered by 'st': a host and actions, each with its shortcut"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>What changes on the server shows up by itself.</sub></td>
+    <td align="center"><sub>⌘K: hosts, folders and every action, by a few letters.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="tests/goldens/transfer-conflict-dark@2x.png" alt="Name clash sheet: the existing and incoming file's sizes and dates side by side, Replace, Skip, Keep both"></td>
     <td width="50%"><img src="tests/goldens/host-key-dark@2x.png" alt="First connection: the server's key fingerprint, with Trust and connect"></td>
-    <td width="50%"><img src="tests/goldens/auth-password-error-dark@2x.png" alt="Sign-in sheet with an inline error after a wrong password"></td>
   </tr>
   <tr>
+    <td align="center"><sub>Name clashes show both files before you choose.</sub></td>
     <td align="center"><sub>First connection: check the fingerprint, trust it once.</sub></td>
-    <td align="center"><sub>Passwords stay in memory, and only until you quit.</sub></td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="tests/goldens/reconnecting-dark@2x.png" alt="Reconnecting banner over a dimmed listing"></td>
-    <td width="50%"><img src="tests/goldens/connection-log-dark@2x.png" alt="Per-host connection log"></td>
-  </tr>
-  <tr>
-    <td align="center"><sub>Lost the network? It reconnects on its own.</sub></td>
-    <td align="center"><sub>A per-host log when you need to know why.</sub></td>
   </tr>
 </table>
 
 ## 🚧 Status
 
-Early development. What works today: SSH-config hosts, the full sign-in flow (host keys, passwords, passphrases, keyboard-interactive 2FA), browsing, sorting, filtering, silent reconnects. **Next up:** downloads and uploads (drag and drop, conflict handling, resumable transfers), then file operations, quick connect and the ⌘K palette. The roadmap is in [`.plans/dromon-plan.md`](.plans/dromon-plan.md), progress in [`.plans/progress.md`](.plans/progress.md).
+Pre-release: everything in the plan is built and tested in CI on macOS, Windows and Linux, against real OpenSSH servers (from 8.4 to 10, Debian and Alpine, a lossy link, and Windows' own sshd):
+
+- **Hosts:** your SSH config (watched for changes), quick connect (paste `user@host:port`), saved and recent hosts, *Add to SSH config* with a backup.
+- **Sign-in:** host keys, passwords, key passphrases, keyboard-interactive 2FA, `ProxyJump`; silent reconnects, and a *Verbose logging* switch in each host's connection log.
+- **Files:** browse, sort, filter, new folder, rename, delete, copy path, copy / cut / paste and drag to move, also between hosts; context menus.
+- **Transfers:** downloads and uploads with resume, server-side copies, name-clash handling, a Dock badge and taskbar progress, notifications for long jobs.
+- **App:** several windows (⌘N), a ⌘K palette, Settings (theme, density, download folder, transfers at once), light and dark themes, reduce motion and increased contrast.
+
+Not yet: the first tagged release (signing and notarization are being set up) and hands-on testing on real desktops. The roadmap is in [`.plans/dromon-plan.md`](.plans/dromon-plan.md), progress in [`.plans/progress.md`](.plans/progress.md).
 
 ## 📦 Install
 
