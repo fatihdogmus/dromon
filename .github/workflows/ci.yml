@@ -108,7 +108,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
-  # The server matrix (tests/docker/README.md), beside the linux job: the SFTP and transfer
+  # The server matrix (docs/test-servers.md), beside the linux job: the SFTP and transfer
   # checks against every Docker server: Debian trixie (OpenSSH 10), bullseye (OpenSSH 8.4p1: no
   # copy-data, no limits), Alpine (musl) and trixie behind toxiproxy (latency, bandwidth caps, a
   # reset mid-transfer), the 100k-entry folder included. One `matrix:` line per check and server.
@@ -160,7 +160,7 @@ jobs:
         with:
           key: ${{ matrix.name }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      # The native sshd's TOTP second factor for dromon_kbd (tests/docker/README.md): a bottle,
+      # The native sshd's TOTP second factor for dromon_kbd (docs/test-servers.md): a bottle,
       # so seconds. Without it the TOTP tests would skip.
       - name: TOTP PAM module (Homebrew)
         env:
@@ -174,7 +174,7 @@ jobs:
           codesign -dv "$module" 2>&1 || true
       # The whole suite once. No Docker on macOS runners (no nested virtualisation): the sshd
       # fixture tests use dromon-testkit's native backend (Apple's /usr/sbin/sshd as root through
-      # the runner's passwordless sudo, users dromon_*; tests/docker/README.md). The TOTP tests
+      # the runner's passwordless sudo, users dromon_*; docs/test-servers.md). The TOTP tests
       # run there too: dromon_kbd's PAM service adds the module above to Apple's sshd policy.
       # One `--workspace` run: a `-p` subset resolves other dependency features and recompiles
       # about a hundred crates. --no-fail-fast: every failing test binary, not just the first.
@@ -185,7 +185,7 @@ jobs:
           DROMON_REQUIRE_DOCKER: "1"
         run: cargo test --workspace --locked --no-fail-fast
       # Headless rendering through Metal on GitHub's runners (Apple silicon and Intel), with the
-      # dromon the tests built (DROMON_BIN): proven in run 45867645664.
+      # dromon the tests built (DROMON_BIN).
       - name: Smoke (headless)
         timeout-minutes: 5
         run: cargo smoke
@@ -213,7 +213,7 @@ jobs:
           distribution: Ubuntu-24.04
           wsl-version: 2
       # Docker in WSL from cached .deb files, as .github/actions/apt-install does on Linux:
-      # Ubuntu's mirror can be slow (setup-wsl's own apt-get install once took 20+ minutes).
+      # Ubuntu's mirror can be slow from GitHub's runners.
       # The key is the exact files apt resolves; apt checks each cached file against the signed
       # package lists. Single-line `bash -c` commands: multi-line scripts reach WSL with CRLFs.
       - id: wsl-apt
@@ -282,9 +282,9 @@ jobs:
       # `--workspace` run: a `-p` subset resolves other dependency features and recompiles about
       # a hundred crates. --no-fail-fast: every failing test binary, not just the first.
       # --skip: WSL's localhost relay into Docker now and then drops a connection busy both
-      # ways, which a streamed same-session copy is (ConnectionLost even with a 60 s timeout:
-      # runs 45752298056, 45753756067, 45778453075). The native sshd step below streams the same
-      # copy five times against Windows' own sshd (windows_sshd.rs), so Windows keeps that coverage.
+      # ways, which a streamed same-session copy is (ConnectionLost even with a 60 s timeout).
+      # The native sshd step below streams the same copy five times against Windows' own sshd
+      # (windows_sshd.rs), so Windows keeps that coverage.
       - name: Tests (Docker sshd fixture in WSL2, Windows' OpenSSH)
         env:
           DOCKER_HOST: tcp://127.0.0.1:2375
@@ -298,8 +298,7 @@ jobs:
           docker ps -a
           docker image ls
       # Headless rendering on the runner's software adapter (WARP), with the dromon the tests
-      # built (DROMON_BIN): proven in run 45867645664. It once "hung": that was a rebuild of ~100
-      # crates running out the step's time.
+      # built (DROMON_BIN). A rebuild here (~100 crates) would run out the step's time.
       - name: Smoke (headless)
         timeout-minutes: 5
         run: cargo smoke
@@ -351,8 +350,7 @@ jobs:
 
   # ---- Packages: each platform's installer, unsigned, on every push --------------------------
   # The same scripts as release.yml, then each package checked the way a user would get it, so
-  # a broken package shows on the push that broke it, not in the next release (a WiX error,
-  # WIX0367, once hid until a release run).
+  # a broken package shows on the push that broke it, not in the next release.
 
   # The .deb and the Arch package, built on ubuntu-22.04 like the release (glibc 2.35), then
   # installed in clean debian:12, ubuntu:24.04 and archlinux containers (`dromon --version`).

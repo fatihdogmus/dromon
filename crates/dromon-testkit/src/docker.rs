@@ -58,7 +58,7 @@ struct ImageSpec {
     files: &'static [(&'static str, &'static str)],
 }
 
-/// The files of `tests/docker/` the Debian images copy (README.md is not part of an image).
+/// The files of `tests/docker/` the Debian images copy.
 const DEBIAN_FILES: &[(&str, &str)] = &[
     ("sshd_config", "sshd_config"),
     ("pam-sshd", "pam-sshd"),

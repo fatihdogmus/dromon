@@ -9,7 +9,7 @@
 //! credentials: `tests/docker/Dockerfile`, names through `Fixture::user`). Runs whenever the
 //! backend can; otherwise each test prints a skip line and passes (fails with
 //! `DROMON_REQUIRE_DOCKER=1`). On Windows that is a Linux Docker named by `DOCKER_HOST` (CI:
-//! Docker in WSL2, `tests/docker/README.md`). The TOTP tests need the Docker backend.
+//! Docker in WSL2, `docs/test-servers.md`). The TOTP tests need the Docker backend.
 //!
 //! Isolation from the developer's own ssh setup, test-only: a per-test ssh config passed with
 //! `-F` (so `~/.ssh/config` and `/etc/ssh/ssh_config` are not read) pointing at a per-test
