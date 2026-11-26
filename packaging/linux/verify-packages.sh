@@ -43,8 +43,15 @@ hub=${DROMON_IMAGE_MIRROR-mirror.gcr.io/library/}
 for image in debian:12 ubuntu:24.04; do
   reported=$(docker run --rm -v "$dir:/pkg:ro" -e DEB="$deb" "$hub$image" bash -euo pipefail -c '
     export DEBIAN_FRONTEND=noninteractive
-    apt-get update -qq > /dev/null
-    apt-get install -y -qq --no-install-recommends "/pkg/$DEB" > /dev/null
+    # A mirror mid-sync serves index files of the wrong size for a moment ("Mirror sync in
+    # progress?"): try again rather than fail the check.
+    for try in 1 2 3 4; do
+      apt-get update -qq -o Acquire::Retries=3 > /dev/null && break
+      [ "$try" -lt 4 ] || exit 1
+      echo "apt-get update failed (try $try); again in $((try * 15)) s" >&2
+      sleep $((try * 15))
+    done
+    apt-get install -y -qq --no-install-recommends -o Acquire::Retries=3 "/pkg/$DEB" > /dev/null
     command -v ssh > /dev/null || { echo "openssh-client was not installed" >&2; exit 1; }
     test -f /usr/share/applications/dromon.desktop
     test -f /usr/share/icons/hicolor/256x256/apps/dromon.png
@@ -65,7 +72,12 @@ if [ "$arch" = x64 ]; then
     fingerprint=$(gpg --batch --with-colons --list-keys | awk -F: '$1 == "fpr" { print $10; exit }')
   fi
   reported=$(docker run --rm -v "$dir:/pkg:ro" "${key_mount[@]}" -e PKG="$pkg" -e FINGERPRINT="$fingerprint" "${hub}archlinux:latest" bash -euo pipefail -c '
-    pacman -Syu --noconfirm --noprogressbar > /dev/null
+    for try in 1 2 3 4; do
+      pacman -Syu --noconfirm --noprogressbar > /dev/null && break
+      [ "$try" -lt 4 ] || exit 1
+      echo "pacman -Syu failed (try $try); again in $((try * 15)) s" >&2
+      sleep $((try * 15))
+    done
     if [ -n "$FINGERPRINT" ]; then
       pacman-key --init > /dev/null 2>&1
       pacman-key --add /release-key.asc > /dev/null 2>&1
