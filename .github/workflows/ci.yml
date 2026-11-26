@@ -211,9 +211,13 @@ jobs:
           # Fail, don't skip, when the sshd fixture can't start.
           DROMON_REQUIRE_DOCKER: "1"
         # --no-fail-fast: one run shows every failing test binary, not just the first.
+        # --skip: WSL's localhost relay into Docker now and then drops a connection busy both
+        # ways, which a streamed same-session copy is (ConnectionLost even with a 60 s timeout:
+        # runs 45752298056, 45753756067, 45778453075). The native sshd step below streams the same
+        # copy five times against Windows' own sshd (windows_sshd.rs), so Windows keeps that coverage.
         run: |
           status=0
-          cargo test --locked --no-fail-fast -p dromon-testkit -p dromon-ssh -p dromon-sftp -p dromon-transfer || status=1
+          cargo test --locked --no-fail-fast -p dromon-testkit -p dromon-ssh -p dromon-sftp -p dromon-transfer -- --skip same_host_copy_streams_when_told_and_resumes_from_the_part || status=1
           cargo test --locked --no-fail-fast -p dromon-app --test e2e --test transfers_e2e --test fileops_e2e --test poll_e2e --test quick_e2e --test windows_e2e --test wake_e2e || status=1
           exit "$status"
       - name: Docker state
