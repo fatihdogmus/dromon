@@ -12,8 +12,8 @@ Tracks where implementation stands against `dromon-plan.md`. Newest first.
 | S2 `ssh -s host sftp` + russh-sftp over child stdio | ✅ Linux, macOS (Apple's sshd), Windows (inbox `ssh.exe`) in CI | `crates/dromon-sftp/tests/fixture.rs`, `crates/dromon-transfer/tests/io.rs` |
 | S3 Askpass round trip | ✅ Linux, macOS, Windows in CI with each OS's own ssh: host key, password, wrong password, passphrase, keyboard-interactive + TOTP (not macOS: no TOTP PAM there), ProxyJump, publickey,password; confirm prompts Linux/macOS only. Windows: named pipe `\\.\pipe\dromon-askpass-<pid>-<random>`, user-only DACL, client-user check | `crates/dromon-ssh/tests/askpass_e2e.rs`, `askpass_transport.rs`; helper start ≈ 2–6 ms |
 | S4 `copy-data` via russh-sftp | ✅ `RawSftpSession::extended`; 1 GiB in ~1.7 s vs ~15 s streaming | `fixture.rs` |
-| S5 Rune features (menus, clipboard files, drop, fonts, badge, notify) | ◐ fonts + tnum + titlebar done; rest pending | |
-| S6 wake / network-change signal | ⏳ | |
+| S5 Rune features (menus, clipboard files, drop, fonts, badge, notify) | ✅ fonts, tnum, titlebar; native popup menus (drawn on Linux); clipboard files; file drop; Dock badge / taskbar (`WindowHandle::set_taskbar`; Windows' bar is indeterminate: Rune's `TaskbarProgress` has no fraction); notifications (`rune-notify`) — headless-tested, real OS pending | `state/notify.rs`, `views/transfers.rs` |
+| S6 wake / network-change signal | ◐ Rune has no wake/network events; fallback (clock-jump sleep detection + connection probes on wake and focus) in progress | |
 
 **Done**
 - `dromon-core`: `RemotePath`, `Entry`/`EntryKind`, natural sort, `sort_entries`, `HostSpec`, `PromptKind` (incl. `Confirm`, `Notice`), errors.
@@ -64,10 +64,23 @@ Tracks where implementation stands against `dromon-plan.md`. Newest first.
 
 - M3 UI: inline new folder (⌘⇧N) and rename (F2), delete sheet (Enter doesn't delete) and progress toast, copy path (⌥⌘C), clipboard (⌘C/⌘X/⌘V while the OS clipboard still holds the clip's paths; Finder files still upload) and ⌥⌘V, drag rows onto folders/breadcrumbs (move, ⌥/Ctrl copies) and hosts (copy), context menus (native via Rune where available, drawn otherwise). A job's end lists its folders on screen again (`JobView.folders`); ⌘R / F5 refresh. Needs a real window: native menu placement, ⌥⌘C/⌥⌘V reporting, Ctrl+Alt on Windows (AltGr).
 
+- M4 (all items built; headless and CI-verified, real desktops pending):
+  - Adaptive polling (§4.5) with diff animations and the vanished-folder climb; a job's end relists its folders.
+  - Quick connect (paste `user@host:port`, More, file picker), Saved (`hosts.conf`), Recent, host menu, Add to SSH config with backup; ssh config files watched (2 s mtime poll).
+  - ⌘K palette (fuzzy, Hosts / Go to folder… / Actions), ⌘L, ⌘1–9, ⌘⇧J.
+  - Settings window (⌘,): theme, density, download folder, transfers at once (runtime), hidden files by default.
+  - Several windows (⌘N / ⌘W): one service, per-window folders polled, prompts routed, shared clip and settings; frames restored.
+  - Theme: contrast audit test (all pairs, states, both themes, three accents), reduce motion, increased contrast, reduce transparency (forced only: Rune can't read the OS setting), light goldens. Accent: Spearmint until the user picks (`scripts/accents.sh`).
+  - Icons complete (audio, video, PDF, log).
+  - Conflict sheet sizes and dates; Dock badge, taskbar, notifications, done flourish.
+- Transfer engine robustness: work cut off by drops is replayed as itself and at once on a replaced session; runs tagged so a stale Finished can't start a second copy; stress test kills sessions at varying moments (`transfers_e2e`, ignored by default).
+- M5 server matrix (`DROMON_SERVER_MATRIX=1`, CI linux): Debian trixie (OpenSSH 10), bullseye (8.4, no copy-data: streamed copies), Alpine 3.24, toxiproxy (latency, caps, reset mid-transfer → resume); 100 / 10k / 100k folders, symlink loops, unreadable folders. CI windows: the runner's own OpenSSH Server, `/C:/` paths, round trip, rename, copy, delete.
+
 **Next**
-1. M4: adaptive polling with diff animations, quick connect / saved / recent hosts / Add to SSH config (in progress); then ⌘K palette, ⌘1–9, ⌘⇧J, ⌘N windows, settings window, theme and accessibility.
-2. A first run in a real window on a macOS and a Linux desktop (real GPU, real input, Wayland), and on Windows.
-3. Window frames across launches.
+1. S6 fallback and per-host verbose logging (in progress); M5 performance gates and soak (in progress).
+2. The accent pick (user).
+3. M5: accessibility pass (AccessKit tree, full keyboard reachability), packaging dry run.
+4. A first run in a real window on a macOS and a Linux desktop (real GPU, real input, Wayland), and on Windows.
 
 **Service-thread caveats**
 - Verified end to end (`crates/dromon-app/tests/e2e.rs`, Docker fixture): the real `App` in a headless `Runtime` + the real service thread + system `ssh` + the `dromon` binary as askpass helper + SFTP, driven by clicks, typing and Return: host-key sheet with the server's real fingerprint, listings incl. dir symlinks, dangling links, dotfiles and permission denied; wrong then right password; keyboard-interactive password + TOTP (code not rememberable); key passphrase; a server-side session kill reconnects silently (password from memory, no sheet, folder relisted); Disconnect forgets the password. No typed secret reaches any event or log line. `dromon-app` is now lib + bin for this (`app()`, `run()`, `pub mod state`, `pub mod service`).
