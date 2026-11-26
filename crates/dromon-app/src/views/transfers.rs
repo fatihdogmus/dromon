@@ -4,15 +4,28 @@
 //!
 //! The ring is two half rings, each turned into view behind a clip as the fraction grows, so
 //! it sweeps on the `move` spring and retargets from wherever it is.
+//!
+//! The done flourish (§6.6): a job that finishes while the app watches fills its bar, which
+//! then collapses into a mint check (on `settle`) while the ring sends out one pulse. Its
+//! phases are `state::transfers::Flourish`, stepped by [`poll`]. Under reduce motion the check
+//! is there at once and nothing pulses.
+//!
+//! Outside the window ([`connect_os`]): the taskbar button's bar and badge (Windows), the Dock
+//! badge (macOS), and system notifications, from the effects of `state::transfers::Watch`.
 
 use std::f32::consts::PI;
+use std::sync::mpsc;
 
-use dromon_transfer::{JobKind, JobView, Reveal, TaskState, format_bytes, progress_line};
-use rune::{Align, Color, El, LineCap, ScrollSpec, Shape, Side, Transition, Tx, canvas, col, el, icon, row, text};
+use dromon_transfer::{JobId, JobKind, JobView, Reveal, TaskState, format_bytes, progress_line};
+use rune::{
+    Align, AppHandle, Beat, Color, Easing, El, LineCap, MotionIntent, ScrollSpec, Sequence, Shape, Side, Taskbar, TaskbarProgress,
+    Transition, Tx, WindowHandle, canvas, col, el, icon, row, text,
+};
 
 use super::{Paint, run};
 use crate::fmt;
 use crate::icons::{self, IconPair};
+use crate::state::transfers::{Bar, Dock, Flourish, Notice, OsEffect, PULSE};
 use crate::state::{Action, App, Tab, TransferCommand};
 use crate::theme::{motion, radius, size, space, type_};
 
@@ -57,8 +70,14 @@ pub fn button(s: &App, p: Paint) -> El {
     if tr.open {
         b = b.fill(t.press);
     }
-    if let Some(progress) = tr.ring() {
-        b = b.child(ring(p, progress.fraction()));
+    // A job that just finished keeps the ring (full, once nothing else runs) while its bar
+    // fills and the ring pulses; under reduce motion the ring goes with the last active job.
+    let fraction = if p.reduced { tr.ring().map(|r| r.fraction()) } else { tr.ring_fraction() };
+    if let Some(f) = fraction {
+        b = b.child(ring(p, f));
+    }
+    if let Some(n) = tr.flourish.pulse().filter(|_| !p.reduced) {
+        b = b.child(pulse(p, n));
     }
     b = b.child(icon(icons::DOWNLOAD.at(p.scale), size::ICON).color(glyph_color));
     if active > 0 {
@@ -96,6 +115,23 @@ fn ring(p: Paint, fraction: f32) -> El {
         .child(canvas(Shape::new().stroke_svg(&track, RING_STROKE, LineCap::Round, track_color)).absolute(0.0, 0.0).size(RING, RING))
         .child(el().absolute(c, 0.0).size(c, RING).clip_soft(0.0).child(first))
         .child(el().absolute(0.0, 0.0).size(c, RING).clip_soft(0.0).child(second))
+}
+
+/// The ring's pulse: a copy of it in the accent that grows out of it and fades, once.
+const PULSE_BEATS: &[Beat] = &[Beat::new(0.0).opacity(0.8), Beat::new(PULSE).opacity(0.0).scale(1.4).easing(Easing::EASE_OUT)];
+
+/// Pulse `n` of the ring (each one a new element, so each plays), over the ring.
+fn pulse(p: Paint, n: u32) -> El {
+    let r = (RING - RING_STROKE) / 2.0;
+    let c = RING / 2.0;
+    let (top, bottom) = (c - r, c + r);
+    let circle = format!("M{c} {top} A{r} {r} 0 0 1 {c} {bottom} A{r} {r} 0 0 1 {c} {top}Z");
+    canvas(Shape::new().stroke_svg(&circle, RING_STROKE, LineCap::Round, p.t.accent))
+        .key(format!("tb-pulse-{n}"))
+        .absolute((28.0 - RING) / 2.0, (28.0 - RING) / 2.0)
+        .size(RING, RING)
+        .sequence(Sequence::new(PULSE_BEATS))
+        .motion_intent(MotionIntent::PULSE)
 }
 
 /// `top` drawn over `bottom` as the screen blends them (in sRGB), as one opaque colour.
@@ -198,7 +234,7 @@ fn tabs(s: &App, p: Paint) -> El {
 fn jobs(s: &App, p: Paint) -> El {
     let t = p.t;
     let tab = s.transfers.tab;
-    let rows: Vec<El> = s.transfers.in_tab(tab).map(|j| job_row(p, j)).collect();
+    let rows: Vec<El> = s.transfers.in_tab(tab).map(|j| job_row(p, j, s.transfers.flourish.get(j.id))).collect();
     let body = if rows.is_empty() {
         let (headline, hint) = match tab {
             Tab::Downloads => ("No downloads yet", format!("Select files and press {}", super::widgets::chord("mod+d"))),
@@ -275,17 +311,43 @@ fn controls(j: &JobView) -> Vec<(&'static str, &'static str, &'static IconPair, 
     }
 }
 
-fn job_row(p: Paint, j: &JobView) -> El {
+/// The tile left of a row: the job's arrow, a warning once it failed, the mint check once it's
+/// done. While a done job's bar still fills (`flourishing`) the arrow stays and the check
+/// waits, small and clear; then the arrow goes and the check lands on `settle`.
+fn tile(p: Paint, j: &JobView, flourishing: bool) -> El {
+    let t = p.t;
+    let arrow: &IconPair = if j.kind == JobKind::Download { &icons::DOWNLOAD } else { &icons::UPLOAD };
+    let tile = el().size(28.0, 28.0).radius(radius::ROW).fill(t.field);
+    let inset = (28.0 - size::ICON) / 2.0;
+    match &j.state {
+        TaskState::Done => {
+            let check = icon(icons::CHECK.at(p.scale), size::ICON)
+                .key(format!("tr-check-{}", j.id.0))
+                .color(t.accent)
+                .absolute(inset, inset)
+                .scale(if flourishing { 0.5 } else { 1.0 })
+                .opacity(if flourishing { 0.0 } else { 1.0 })
+                .scale_motion(motion::settle(p.reduced))
+                .opacity_motion(motion::MOVE);
+            let tile = if flourishing { tile.child(icon(arrow.at(p.scale), size::ICON).color(t.text_2).absolute(inset, inset)) } else { tile };
+            // Reduce motion: the check is just there (no cross-fade either).
+            let tile = if p.reduced { tile.instant_changes() } else { tile };
+            tile.child(check)
+        }
+        TaskState::Failed { .. } => tile.center().child(icon(icons::WARNING.at(p.scale), size::ICON).color(t.danger)),
+        _ => tile.center().child(icon(arrow.at(p.scale), size::ICON).color(t.text_2)),
+    }
+}
+
+/// One job's row; `flourish` is its done flourish, if one plays (none under reduce motion).
+fn job_row(p: Paint, j: &JobView, flourish: Option<Flourish>) -> El {
     let t = p.t;
     let id = j.id;
     let failed = matches!(j.state, TaskState::Failed { .. });
-    let (glyph, tint): (&IconPair, Color) = match &j.state {
-        TaskState::Done => (&icons::CHECK, t.accent),
-        TaskState::Failed { .. } => (&icons::WARNING, t.danger),
-        _ if j.kind == JobKind::Download => (&icons::DOWNLOAD, t.text_2),
-        _ => (&icons::UPLOAD, t.text_2),
-    };
-    let tile = el().size(28.0, 28.0).radius(radius::ROW).center().fill(t.field).child(icon(glyph.at(p.scale), size::ICON).color(tint));
+    let flourish = flourish.filter(|_| !p.reduced);
+    // A done job's bar has collapsed into the check: at rest, or as its flourish ends.
+    let collapsed = j.state == TaskState::Done && flourish.is_none();
+    let tile = tile(p, j, flourish.is_some());
 
     let buttons = controls(j).into_iter().map(|(name, label, glyph, cmd)| {
         el().key(format!("tr-{name}-{}", id.0))
@@ -325,22 +387,33 @@ fn job_row(p: Paint, j: &JobView) -> El {
         .child(row().gap(2.0).group_opacity(0.0, 1.0).children(buttons));
 
     let (fraction, bar) = match &j.state {
-        TaskState::Done => (1.0, t.accent),
+        TaskState::Done => (if let Some(Flourish::Finished { from }) = flourish { from } else { 1.0 }, t.accent),
         TaskState::Failed { .. } => (j.progress.fraction().max(0.02), t.danger),
         TaskState::Paused | TaskState::Cancelled => (j.progress.fraction(), t.text_3),
         _ if j.waiting_for_connection || j.conflict.is_some() => (j.progress.fraction(), t.text_3),
         _ => (j.progress.fraction(), t.accent),
     };
-    let progress = el()
+    // Collapsed, the bar keeps its room (the row doesn't change height), drawn shrunk into its
+    // left end, by the tile, and clear.
+    let mut progress = el()
         .key(format!("tr-bar-{}", id.0))
-        .role("progressbar")
-        .label(format!("{:.0}%", fraction * 100.0))
         .w_full()
         .h(3.0)
         .mt(3.0)
         .radius(1.5)
         .fill(t.border)
+        .origin(0.0, 0.5)
+        .scale(if collapsed { 0.0 } else { 1.0 })
+        .opacity(if collapsed { 0.0 } else { 1.0 })
+        .scale_motion(motion::MOVE)
+        .opacity_motion(motion::MOVE)
         .child(el().w_frac(fraction).h_full().radius(1.5).fill(bar).motion(motion::MOVE));
+    if !collapsed {
+        progress = progress.role("progressbar").label(format!("{:.0}%", fraction * 100.0));
+    } else if p.reduced {
+        // Reduce motion: no collapse, the bar is just gone.
+        progress = progress.instant_changes();
+    }
     let line = text(status_line(j))
         .key(format!("tr-line-{}", id.0))
         .font(type_::META)
@@ -416,4 +489,123 @@ fn footer(s: &App, p: Paint) -> El {
         .border_sides([p.hair, 0.0, 0.0, 0.0], t.border_subtle)
         .child(text(summary).key("tr-summary").font(type_::META).color(t.text_3).grow(1.0))
         .child(clear)
+}
+
+/// The app's poll (`AppSpec::poll`, at the start of each frame): steps the done flourishes and
+/// the ring's pulse on the window's clock. A step that changes what shows animates: it isn't
+/// input's doing, and Rune would land it at once otherwise.
+pub fn poll(s: &mut App, clock: f64, tx: &mut Tx) -> bool {
+    let step = s.transfers.flourish.step(clock);
+    if let Some(due) = step.wake {
+        tx.wake_at(due);
+    }
+    if step.changed {
+        tx.animated();
+    }
+    step.changed
+}
+
+// Outside the window.
+
+/// The app's identity for notifications: the bundle id on macOS (which reads it from the
+/// bundle, `packaging/macos/Info.plist`), the AppUserModelID on Windows, the desktop entry
+/// (`dromon.desktop`) on Linux.
+const NOTIFY_ID: &str = if cfg!(target_os = "linux") { "dromon" } else { "dev.dromon.Dromon" };
+/// The user-info key a notification carries its job under.
+const NOTIFY_JOB: &str = "job";
+
+/// Hooks the taskbar, the Dock badge and notifications up to the app: the window's sink takes
+/// `Watch`'s effects (the taskbar on the UI thread, notifications posted by a `dromon-notify`
+/// thread, since a first post on Linux waits for the session bus), and a click on a
+/// notification brings the window forward with the popover open on its job. Call it before
+/// the window opens (Windows takes the app's identity then). A headless run (`--snap`,
+/// `--script`, tests) gets none of it: nothing it does reaches the OS.
+pub fn connect_os(app: rune::App<App>) -> rune::App<App> {
+    if rune::tooling::headless_run().is_some() {
+        return app;
+    }
+    if let Err(e) = rune_notify::register(&rune_notify::Identity::new(NOTIFY_ID, "Dromon")) {
+        eprintln!("dromon: no notifications: {e}");
+    }
+    let handle = app.handle();
+    let clicks = handle.clone();
+    rune_notify::on_click(move |click| clicked(&clicks, &click));
+    let notices = spawn_poster();
+    // Each new native window (again after a GPU release) gets the sink, and what the taskbar
+    // showed.
+    app.on_window(move |window| {
+        let (window, notices) = (window.clone(), notices.clone());
+        handle.update_if(move |s, _| {
+            connect_window(s, window, notices);
+            false
+        });
+    })
+}
+
+/// From now on `s`'s taskbar effects go to `window` and its notifications to the poster.
+fn connect_window(s: &mut App, window: WindowHandle, notices: mpsc::Sender<Notice>) {
+    if *s.transfers.watch.shown() != Dock::default() {
+        show_taskbar(&window, s.transfers.watch.shown());
+    }
+    s.transfers.watch.os.connect(move |fx| match fx {
+        OsEffect::Taskbar(dock) => show_taskbar(&window, &dock),
+        // The OS's own word on focus as well (macOS, Windows), in case a focus change hasn't
+        // reached the app yet: a banner while the user looks at the app is noise.
+        OsEffect::Notify(n) => {
+            if !rune_notify::app_focused() {
+                let _ = notices.send(n);
+            }
+        }
+    });
+}
+
+/// Windows: the bar under the taskbar button and the count over it; macOS: the count on the
+/// Dock icon (the Dock has no bar). Linux shows neither (Rune has no badge there). On the UI
+/// thread.
+fn show_taskbar(window: &WindowHandle, dock: &Dock) {
+    if cfg!(not(any(target_os = "macos", target_os = "windows"))) {
+        return;
+    }
+    let progress = match dock.bar {
+        Bar::None => TaskbarProgress::None,
+        Bar::Busy => TaskbarProgress::Busy,
+        Bar::Paused => TaskbarProgress::Paused,
+        Bar::Error => TaskbarProgress::Error,
+    };
+    window.set_taskbar(Taskbar::new().progress(progress).badge(dock.count, dock.description()));
+}
+
+/// A thread that posts notifications as they come, so posting never waits on the UI thread.
+/// It ends with the app.
+fn spawn_poster() -> mpsc::Sender<Notice> {
+    let (tx, rx) = mpsc::channel::<Notice>();
+    let posting = std::thread::Builder::new().name("dromon-notify".into()).spawn(move || {
+        while let Ok(n) = rx.recv() {
+            let note = rune_notify::Notification::new(n.id, n.title).body(n.body).info(NOTIFY_JOB, n.job.0.to_string());
+            rune_notify::post(&note);
+        }
+    });
+    if let Err(e) = posting {
+        eprintln!("dromon: no notifications: {e}");
+    }
+    tx
+}
+
+/// A notification was clicked (on any thread): the window comes forward (Wayland with the
+/// server's activation token) and the popover opens on the job.
+fn clicked(handle: &AppHandle<App>, click: &rune_notify::Click) {
+    match click.activation_token() {
+        Some(token) => handle.activate(token),
+        None => handle.open(),
+    }
+    let job = click.get(NOTIFY_JOB).and_then(|v| v.parse().ok()).map(JobId);
+    handle.update_if(move |s, _| {
+        // Windows keeps the foreground from a process that doesn't hold it; this asks the way
+        // a clicked toast's app may.
+        rune_notify::bring_to_front();
+        if let Some(job) = job {
+            s.show_transfer(job);
+        }
+        true
+    });
 }

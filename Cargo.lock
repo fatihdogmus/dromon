@@ -91,6 +91,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "54dae3d1d7b8956f3506c4e999a74e77f932a59153ccf38ab8cf96db74bb9dc0"
 dependencies = [
  "cfg-if",
+ "getrandom 0.3.4",
  "getrandom 0.4.3",
  "once_cell",
  "serde",
@@ -1085,6 +1086,7 @@ dependencies = [
  "dromon-testkit",
  "dromon-transfer",
  "rune",
+ "rune-notify",
  "secrecy",
  "serde",
  "serde_json",
@@ -3932,6 +3934,22 @@ version = "0.1.0"
 source = "git+https://github.com/anomalyco/rune?rev=241d08d1d8dca18250c44f96fb3a99683d1351ea#241d08d1d8dca18250c44f96fb3a99683d1351ea"
 
 [[package]]
+name = "rune-notify"
+version = "0.0.1"
+source = "git+https://github.com/anomalyco/rune?rev=241d08d1d8dca18250c44f96fb3a99683d1351ea#241d08d1d8dca18250c44f96fb3a99683d1351ea"
+dependencies = [
+ "async-channel",
+ "async-io",
+ "block2 0.6.2",
+ "futures-lite",
+ "objc2 0.6.5",
+ "windows",
+ "windows-core",
+ "windows-registry",
+ "zbus",
+]
+
+[[package]]
 name = "rune-spell"
 version = "0.0.1"
 source = "git+https://github.com/anomalyco/rune?rev=241d08d1d8dca18250c44f96fb3a99683d1351ea#241d08d1d8dca18250c44f96fb3a99683d1351ea"
@@ -4738,7 +4756,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.6",
  "windows-sys 0.61.2",

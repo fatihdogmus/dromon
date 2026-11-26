@@ -155,6 +155,101 @@ fn cmd_d_downloads_the_selection_and_the_ring_follows_the_engine() {
     assert!(!shown(&rt, "tb-ring") && !shown(&rt, "tb-badge"));
 }
 
+/// `k` on screen (not on its way out).
+fn get(rt: &Runtime<App>, k: &str) -> rune::ElementInfo {
+    rt.elements().into_iter().find(|e| e.key.as_deref() == Some(k) && !e.exiting).unwrap_or_else(|| panic!("no element {k:?}"))
+}
+
+/// Whether a `tb-pulse-*` element is on screen.
+fn pulsing(rt: &Runtime<App>) -> bool {
+    rt.elements().into_iter().any(|e| e.key.as_deref().is_some_and(|k| k.starts_with("tb-pulse-")) && !e.exiting && e.opacity > 0.01)
+}
+
+/// The popover open over a download at 40%, then the engine says it's done (as the service
+/// would: a change no input caused). `forced`: the app forces reduce motion; `system`: the OS
+/// asks for it.
+fn finishing(forced: bool, system: bool) -> Runtime<App> {
+    let (mut rt, _rec) = recorded();
+    rt.set_system_reduced_motion(system);
+    rt.update(move |s, _| s.ui.access.reduce_motion = forced);
+    apply(&mut rt, ServiceEvent::Transfers(vec![job(1, JobKind::Download, TaskState::Running, 400, 1000)]));
+    click(&mut rt, "tb-transfers");
+    assert!(shown(&rt, "tr-1"));
+    rt.update(|s, _| s.apply(ServiceEvent::Transfers(vec![job(1, JobKind::Download, TaskState::Done, 1000, 1000)])));
+    rt
+}
+
+#[test]
+fn a_finished_job_fills_its_bar_collapses_it_into_the_check_and_the_ring_pulses() {
+    let mut rt = finishing(false, false);
+    rt.frame(0.0);
+    // Filling: the bar is still there and grows, the check waits, the ring stays full.
+    let bar = get(&rt, "tr-bar-1");
+    assert!(bar.opacity > 0.99 && (bar.scale - 1.0).abs() < 1e-3);
+    assert!(get(&rt, "tr-check-1").opacity < 0.01, "the check waits");
+    rt.frame(0.05);
+    let path = get(&rt, "tr-bar-1").path;
+    assert!(rt.elements().iter().any(|e| e.path.starts_with(&path) && e.path != path && e.moving), "the bar fills");
+    assert!(shown(&rt, "tb-ring") && !shown(&rt, "tb-badge"), "the ring stays for it, with nothing left to count");
+    assert!(!pulsing(&rt));
+
+    // Filled: the bar collapses into the check, which lands with a bounce, and the ring pulses.
+    rt.frame(0.3);
+    let (mut most, mut pulsed) = (0.0_f32, false);
+    for _ in 0..12 {
+        rt.frame(0.03);
+        most = most.max(get(&rt, "tr-check-1").scale);
+        pulsed |= pulsing(&rt);
+    }
+    assert!(most > 1.001, "the check overshoots a little on `settle` ({most})");
+    assert!(pulsed, "the ring pulses");
+    settle(&mut rt);
+    settle(&mut rt);
+    let (check, bar) = (get(&rt, "tr-check-1"), get(&rt, "tr-bar-1"));
+    assert!((check.scale - 1.0).abs() < 1e-3 && check.opacity > 0.999, "the check at rest");
+    assert!(bar.opacity < 0.001 && bar.scale < 0.001, "the bar gone into it");
+    assert_eq!(bar.role, "group", "no longer a progress bar");
+    assert!(!shown(&rt, "tb-ring") && !pulsing(&rt), "the ring goes once the pulse is over");
+    assert!(rt.state.transfers.flourish.pulse().is_none() && !rt.state.transfers.flourish.filling());
+}
+
+#[test]
+fn under_reduce_motion_the_check_just_appears_and_nothing_pulses() {
+    for (forced, system) in [(true, false), (false, true)] {
+        let mut rt = finishing(forced, system);
+        rt.frame(0.0);
+        let (check, bar) = (get(&rt, "tr-check-1"), get(&rt, "tr-bar-1"));
+        assert!(check.opacity > 0.999 && (check.scale - 1.0).abs() < 1e-3, "the check is there at once ({forced}, {system})");
+        assert!(bar.opacity < 0.001, "and the bar gone");
+        assert!(!shown(&rt, "tb-ring"), "the ring goes with the last active job");
+        for _ in 0..30 {
+            rt.frame(0.03);
+            assert!(!pulsing(&rt), "nothing pulses");
+            let check = get(&rt, "tr-check-1");
+            assert!((check.scale - 1.0).abs() < 1e-3 && check.opacity > 0.999, "nothing bounces or fades");
+        }
+    }
+}
+
+#[test]
+fn a_row_that_arrives_finished_shows_the_check_at_rest() {
+    let (mut rt, _rec) = recorded();
+    apply(&mut rt, ServiceEvent::Transfers(vec![job(1, JobKind::Download, TaskState::Done, 10, 10)]));
+    click(&mut rt, "tb-transfers");
+    assert!(get(&rt, "tr-check-1").opacity > 0.999 && get(&rt, "tr-bar-1").opacity < 0.001);
+    assert!(!shown(&rt, "tb-ring") && !pulsing(&rt));
+}
+
+#[test]
+fn nothing_reaches_the_os_from_a_test_the_effects_wait_in_the_state() {
+    use crate::state::transfers::{Bar, Dock, OsEffect};
+    // Without the window's sink (connected only in a real window, `views::connect_os`).
+    let (mut rt, _rec) = recorded();
+    rt.state.transfers.watch.os.take();
+    apply(&mut rt, ServiceEvent::Transfers(vec![job(1, JobKind::Download, TaskState::Running, 1, 2)]));
+    assert_eq!(rt.state.transfers.watch.os.take(), [OsEffect::Taskbar(Dock { count: 1, bar: Bar::Busy })]);
+}
+
 #[test]
 fn the_button_opens_the_popover_its_tabs_switch_and_a_click_outside_closes_it() {
     let mut rt = runtime();

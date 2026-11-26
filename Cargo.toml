@@ -34,6 +34,7 @@ dromon-transfer = { path = "crates/dromon-transfer" }
 # Rune is pre-release: pin one `dev` rev. When bumping, update every rev below together and
 # re-check Rune's root Cargo.toml for its current [patch.crates-io] list.
 rune = { git = "https://github.com/anomalyco/rune", rev = "241d08d1d8dca18250c44f96fb3a99683d1351ea" }
+rune-notify = { git = "https://github.com/anomalyco/rune", rev = "241d08d1d8dca18250c44f96fb3a99683d1351ea" }
 
 bytes = "1"
 glob = "0.3"

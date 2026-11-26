@@ -96,6 +96,8 @@ fn spec() -> AppSpec<App> {
         fonts: theme::FONTS,
         families: theme::FAMILIES,
         on_key: Some(on_key),
+        // The done flourish's phases, on the window's clock.
+        poll: Some(views::poll),
         ..AppSpec::new("Dromon", SIZE, init, views::view)
     }
 }
@@ -176,7 +178,7 @@ pub fn run() {
     match chosen_fixture() {
         Ok(Some(fx)) => {
             fixture::activate(fx.clone());
-            app().init(move || fixture::app(fx)).run();
+            views::connect_os(app().init(move || fixture::app(fx))).run();
             return;
         }
         Ok(None) => {}
@@ -214,6 +216,8 @@ pub fn run() {
         }
         app
     });
+    // The taskbar, the Dock badge and notifications (not in a headless run).
+    let app = views::connect_os(app);
     let handle = app.handle();
     let mut pending = Some((commands, handle));
     app.on_ready(move |_| {

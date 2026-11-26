@@ -1,14 +1,24 @@
 //! What the UI knows of transfers (§4.6, §6.8): the engine's latest snapshot of every job, and
 //! the popover's own state. The engine owns the jobs; this is a mirror, replaced whole by each
 //! `ServiceEvent::Transfers`.
+//!
+//! Each snapshot also drives what shows outside the popover: the taskbar, the Dock badge and
+//! notifications (`notify.rs`, [`Watch`]), and the done flourish of a job that just finished
+//! with the toolbar ring's pulse ([`Flourishes`], stepped on the window's clock by the app's
+//! poll, `views::transfers::poll`).
 
 use std::path::PathBuf;
 
 use dromon_core::{HostId, RemotePath};
-use dromon_transfer::{ConflictView, JobId, JobKind, JobRequest, JobView, Progress, RemoteItem, Reveal, aggregate};
+use dromon_transfer::{ConflictView, JobId, JobKind, JobRequest, JobView, Progress, RemoteItem, Reveal, TaskState, aggregate};
 
 use super::conn::Nav;
 use super::{Action, App, Command, Effect, TransferCommand};
+
+#[path = "notify.rs"]
+pub mod notify;
+
+pub use notify::{Bar, Dock, Notice, Os, OsEffect, Watch};
 
 #[cfg(test)]
 #[path = "transfers_tests.rs"]
@@ -42,6 +52,117 @@ pub struct Transfers {
     pub apply_all: bool,
     /// Files from another app are being dragged over a place that takes them (§3.6).
     pub drop: Option<DropHover>,
+    /// The jobs as the OS shows them: taskbar, Dock badge, notifications.
+    pub watch: Watch,
+    /// Done flourishes playing, and the toolbar ring's pulse.
+    pub flourish: Flourishes,
+}
+
+/// How long a finished job's bar takes to fill before it collapses into the check (the `move`
+/// spring's duration), in seconds.
+pub const FILL: f64 = 0.30;
+/// How long the toolbar ring's pulse lasts (the `settle` spring's duration), in seconds.
+pub const PULSE: f64 = 0.45;
+
+/// The done flourish of a job that finished while the app watched it (§6.6): its bar fills,
+/// then collapses into a mint check and the toolbar ring pulses once. A job without one (it
+/// finished long ago, or arrived finished) shows the check at rest.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Flourish {
+    /// It just finished: the bar is still where the last snapshot had it.
+    Finished { from: f32 },
+    /// The bar fills to the end, until `until` (seconds on the window's clock).
+    Filling { until: f64 },
+}
+
+impl Flourish {
+    /// The phase after this one at `clock`; `None` once the bar has filled: it collapses into
+    /// the check.
+    pub fn step(self, clock: f64) -> Option<Flourish> {
+        match self {
+            Flourish::Finished { .. } => Some(Flourish::Filling { until: clock + FILL }),
+            Flourish::Filling { until } if clock >= until => None,
+            f => Some(f),
+        }
+    }
+}
+
+/// What a step of the flourishes did: whether anything on screen changes (the view runs again,
+/// animated), and when the next step is due.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Stepped {
+    pub changed: bool,
+    pub wake: Option<f64>,
+}
+
+/// The flourishes playing and the ring's pulse.
+#[derive(Clone, Debug, Default)]
+pub struct Flourishes {
+    jobs: Vec<(JobId, Flourish)>,
+    /// The ring pulses until this time (the window's clock).
+    pulse: Option<f64>,
+    /// Pulses so far: each one draws a new element, so each plays.
+    pulses: u32,
+}
+
+impl Flourishes {
+    /// The flourish `id` is in, if any.
+    pub fn get(&self, id: JobId) -> Option<Flourish> {
+        self.jobs.iter().find(|(j, _)| *j == id).map(|(_, f)| *f)
+    }
+
+    /// Some bar is still filling.
+    pub fn filling(&self) -> bool {
+        !self.jobs.is_empty()
+    }
+
+    /// The pulse playing, numbered.
+    pub fn pulse(&self) -> Option<u32> {
+        self.pulse.map(|_| self.pulses)
+    }
+
+    /// Steps every flourish and the pulse at `clock`: a filled bar collapses and starts the
+    /// ring's pulse; a pulse that has run ends.
+    pub fn step(&mut self, clock: f64) -> Stepped {
+        let mut out = Stepped::default();
+        let mut collapsed = false;
+        self.jobs.retain_mut(|(_, f)| match f.step(clock) {
+            Some(next) => {
+                out.changed |= next != *f;
+                *f = next;
+                true
+            }
+            None => {
+                collapsed = true;
+                false
+            }
+        });
+        if collapsed {
+            self.pulse = Some(clock + PULSE);
+            self.pulses += 1;
+            out.changed = true;
+        } else if self.pulse.is_some_and(|until| clock >= until) {
+            self.pulse = None;
+            out.changed = true;
+        }
+        let dues = self.jobs.iter().map(|(_, f)| match f {
+            Flourish::Filling { until } => *until,
+            Flourish::Finished { .. } => clock,
+        });
+        out.wake = dues.chain(self.pulse).reduce(f64::min);
+        out
+    }
+
+    /// `before` was replaced by `jobs`: a job that was active and is done now starts its
+    /// flourish; flourishes of jobs no longer done (or cleared) stop.
+    fn update(&mut self, before: &[JobView], jobs: &[JobView]) {
+        for j in jobs.iter().filter(|j| j.state == TaskState::Done) {
+            if let Some(old) = before.iter().find(|o| o.id == j.id && o.state.is_active()) {
+                self.jobs.push((j.id, Flourish::Finished { from: old.progress.fraction() }));
+            }
+        }
+        self.jobs.retain(|(id, _)| jobs.iter().any(|j| j.id == *id && j.state == TaskState::Done));
+    }
 }
 
 /// Where a file drag would upload to.
@@ -67,6 +188,15 @@ impl Transfers {
     /// that ended with it (finished, failed or cancelled since the last snapshot, or new and
     /// already over), to be listed again.
     pub fn set(&mut self, jobs: Vec<JobView>) -> Vec<(HostId, RemotePath)> {
+        let now = (self.watch.clock)();
+        self.set_at(jobs, now)
+    }
+
+    /// [`Transfers::set`] at `now` (milliseconds on [`Watch::clock`]): also times the jobs for
+    /// notifications, updates the taskbar and starts the done flourishes.
+    pub fn set_at(&mut self, jobs: Vec<JobView>, now: i64) -> Vec<(HostId, RemotePath)> {
+        self.watch.update(&self.jobs, &jobs, now);
+        self.flourish.update(&self.jobs, &jobs);
         if !self.open
             && let Some(newest) = jobs.first()
             && self.jobs.first().map(|j| j.id) != Some(newest.id)
@@ -100,6 +230,19 @@ impl Transfers {
             return None;
         }
         Some(aggregate(active.iter().map(|j| &j.progress)))
+    }
+
+    /// The fraction the toolbar ring shows: the active jobs' bytes, or (with nothing active)
+    /// a full ring while a finished job's bar fills and the ring pulses for it; `None`: no ring.
+    pub fn ring_fraction(&self) -> Option<f32> {
+        let flourishing = self.flourish.filling() || self.flourish.pulse().is_some();
+        self.ring().map(|p| p.fraction()).or(flourishing.then_some(1.0))
+    }
+
+    /// The window gained or lost focus (the taskbar's red bar for failures is seen once it
+    /// gains it; notifications go out only while it doesn't have it).
+    pub fn window_focus(&mut self, focused: bool) {
+        self.watch.window_focus(focused, &self.jobs);
     }
 
     /// The name clash to ask about: the oldest job that has one.
@@ -152,6 +295,15 @@ impl App {
             },
             _ => {}
         }
+    }
+
+    /// A click on a transfer's notification: the popover opens on the job's tab (the app has
+    /// come to the front for it).
+    pub fn show_transfer(&mut self, job: JobId) {
+        if let Some(j) = self.transfers.get(job) {
+            self.transfers.tab = if j.kind.in_uploads_tab() { Tab::Uploads } else { Tab::Downloads };
+        }
+        self.transfers.open = true;
     }
 
     /// The name clash the conflict sheet asks about: [`Transfers::conflict`] while no prompt

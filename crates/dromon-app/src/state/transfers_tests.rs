@@ -368,3 +368,95 @@ fn changed_folders_are_the_destination_and_for_moves_the_sources() {
     let download = JobRequest::Download { host: a, items, into: PathBuf::from("/tmp") };
     assert!(download.changed_folders().is_empty());
 }
+
+#[test]
+fn a_flourish_fills_then_collapses_and_the_ring_pulses_once() {
+    use super::{FILL, PULSE};
+    let f = Flourish::Finished { from: 0.4 };
+    assert_eq!(f.step(10.0), Some(Flourish::Filling { until: 10.0 + FILL }));
+    let filling = Flourish::Filling { until: 10.3 };
+    assert_eq!(filling.step(10.2), Some(filling), "still filling");
+    assert_eq!(filling.step(10.3), None, "filled: it collapses");
+
+    let mut tr = Transfers::default();
+    tr.set_at(vec![job(1, JobKind::Download, TaskState::Running, 4, 10)], 0);
+    assert_eq!(tr.flourish.step(0.0), Stepped::default(), "nothing finished: nothing to do");
+    tr.set_at(vec![job(1, JobKind::Download, TaskState::Done, 10, 10)], 1_000);
+    assert_eq!(tr.flourish.get(JobId(1)), Some(Flourish::Finished { from: 0.4 }), "from where its bar was");
+    assert_eq!(tr.ring_fraction(), Some(1.0), "the ring stays, full, for it");
+
+    // The first frame starts the fill; the next steps wait for it.
+    let s = tr.flourish.step(5.0);
+    assert_eq!(s, Stepped { changed: true, wake: Some(5.0 + FILL) });
+    assert_eq!(tr.flourish.step(5.1), Stepped { changed: false, wake: Some(5.0 + FILL) });
+    // Filled: the bar collapses into the check and the ring pulses.
+    let s = tr.flourish.step(5.0 + FILL);
+    assert_eq!(s, Stepped { changed: true, wake: Some(5.0 + FILL + PULSE) });
+    assert_eq!(tr.flourish.get(JobId(1)), None, "at rest: the check");
+    assert_eq!(tr.flourish.pulse(), Some(1));
+    assert_eq!(tr.ring_fraction(), Some(1.0));
+    // The pulse ends; then nothing is left to do, and the ring goes.
+    assert!(!tr.flourish.step(5.5).changed);
+    assert_eq!(tr.flourish.step(5.0 + FILL + PULSE), Stepped { changed: true, wake: None });
+    assert_eq!((tr.flourish.pulse(), tr.ring_fraction()), (None, None));
+    assert_eq!(tr.flourish.step(9.0), Stepped::default());
+}
+
+#[test]
+fn only_jobs_seen_running_get_a_flourish_and_clearing_ends_it() {
+    let mut tr = Transfers::default();
+    // Arrived finished, failed or cancelled: no flourish.
+    tr.set_at(vec![job(1, JobKind::Download, TaskState::Done, 1, 1)], 0);
+    let running = |id| job(id, JobKind::Upload, TaskState::Running, 1, 2);
+    tr.set_at(vec![running(3), running(2), job(1, JobKind::Download, TaskState::Done, 1, 1)], 0);
+    tr.set_at(
+        vec![
+            job(3, JobKind::Upload, TaskState::Cancelled, 1, 2),
+            job(2, JobKind::Upload, TaskState::Failed { error: "x".into() }, 1, 2),
+            job(1, JobKind::Download, TaskState::Done, 1, 1),
+        ],
+        0,
+    );
+    assert!(!tr.flourish.filling());
+    assert_eq!(tr.ring_fraction(), None);
+
+    // Two finish together: both fill; another job still runs, so the ring keeps its bytes.
+    tr.set_at(vec![running(6), running(5), running(4)], 0);
+    tr.set_at(vec![running(6), job(5, JobKind::Upload, TaskState::Done, 2, 2), job(4, JobKind::Upload, TaskState::Done, 2, 2)], 0);
+    assert!(tr.flourish.get(JobId(5)).is_some() && tr.flourish.get(JobId(4)).is_some());
+    assert_eq!(tr.ring_fraction(), Some(0.5));
+    // Clear finished takes them away mid-flourish.
+    tr.set_at(vec![running(6)], 0);
+    assert!(!tr.flourish.filling());
+}
+
+#[test]
+fn a_notification_click_opens_the_popover_on_its_jobs_tab() {
+    let (mut s, _rec) = connected();
+    s.apply(ServiceEvent::Transfers(vec![job(2, JobKind::Upload, TaskState::Done, 1, 1), job(1, JobKind::Download, TaskState::Done, 1, 1)]));
+    s.show_transfer(JobId(1));
+    assert!(s.transfers.open);
+    assert_eq!(s.transfers.tab, super::Tab::Downloads);
+    s.transfers.open = false;
+    s.show_transfer(JobId(2));
+    assert_eq!((s.transfers.open, s.transfers.tab), (true, super::Tab::Uploads));
+    // A job cleared since: the popover opens where it was.
+    s.show_transfer(JobId(9));
+    assert_eq!((s.transfers.open, s.transfers.tab), (true, super::Tab::Uploads));
+}
+
+#[test]
+fn the_app_s_jobs_reach_the_taskbar_and_focus_decides_notifications() {
+    let (mut s, _rec) = connected();
+    s.transfers.watch.os.take();
+    s.transfers.window_focus(false);
+    s.apply(ServiceEvent::Transfers(vec![job(1, JobKind::Download, TaskState::Running, 1, 2)]));
+    s.transfers.set_at(vec![job(1, JobKind::Download, TaskState::Failed { error: "Permission denied".into() }, 1, 2)], i64::MAX / 2);
+    let held = s.transfers.watch.os.take();
+    assert!(held.contains(&OsEffect::Taskbar(Dock { count: 1, bar: notify::Bar::Busy })), "{held:?}");
+    assert!(held.contains(&OsEffect::Taskbar(Dock { count: 0, bar: notify::Bar::Error })), "{held:?}");
+    let lines: Vec<String> = held.iter().filter_map(|fx| if let OsEffect::Notify(n) = fx { Some(n.line()) } else { None }).collect();
+    assert_eq!(lines, ["Couldn't download job 1: Permission denied"]);
+    s.transfers.window_focus(true);
+    assert_eq!(s.transfers.watch.os.take(), [OsEffect::Taskbar(Dock::default())]);
+}

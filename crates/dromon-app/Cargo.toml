@@ -27,6 +27,8 @@ dromon-transfer.workspace = true
 # native-file-dialog: the identity file picker in quick connect (rfd on macOS and Windows, the
 # XDG portal on Linux).
 rune = { workspace = true, features = ["tooling", "native-file-dialog"] }
+# System notifications when a long transfer ends while the window is in the background (§5 M2).
+rune-notify.workspace = true
 secrecy.workspace = true
 # Fixtures (`--fixture`, the built-in demo) and remembered settings (`state::prefs`).
 serde.workspace = true
