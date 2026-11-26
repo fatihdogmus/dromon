@@ -22,6 +22,7 @@ pub mod ops;
 pub mod page;
 pub mod palette;
 pub mod prefs;
+pub mod properties;
 pub mod quick;
 pub mod refresh;
 pub mod selection;
@@ -55,7 +56,7 @@ pub use prefs::{NoStore, Saved, Store};
 pub use selection::{Selection, TypeSelect};
 #[cfg(test)]
 pub use service::Recorder;
-pub use service::{Backend, Command, FileOp, FileOpKind, HostBookCommand, HostBookEvent, OpId, ServiceEvent, Silent, TransferCommand, WindowId};
+pub use service::{Backend, Command, FileOp, FileOpKind, HostBookCommand, HostBookEvent, OpId, ServiceEvent, Silent, SizeId, SizeTotal, TransferCommand, WindowId};
 pub use settings::{Density, Settings, SettingsChange, SettingsView};
 pub use sheets::{Sheet, Sheets};
 pub use transfers::{DropHover, DropTarget, Tab, Transfers};
@@ -456,6 +457,7 @@ impl App {
             ServiceEvent::FileOpProgress { id, host, done, total } => self.ops.progress(id, &host, done, total),
             ServiceEvent::FileOpDone { id, host } => self.ops.done(id, &host),
             ServiceEvent::FileOpFailed { id, host, error } => self.ops.failed(id, &host, error),
+            ev @ (ServiceEvent::FolderSizeProgress { .. } | ServiceEvent::FolderSizeDone { .. } | ServiceEvent::FolderSizeFailed { .. }) => self.size_event(ev),
         }
     }
 

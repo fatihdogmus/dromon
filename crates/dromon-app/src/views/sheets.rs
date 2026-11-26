@@ -1,4 +1,5 @@
-//! Sheets (§6.8): sign in, a new host key, a yes/no question, and the connection log. They drop
+//! Sheets (§6.8): sign in, a new host key, a yes/no question, and the connection log (the
+//! delete, conflict, Add to SSH config and Properties sheets have files of their own). They drop
 //! from the toolbar's edge on the `move` spring, 12 pt radius, sheet elevation, over a veil
 //! that makes the window behind them inert. Escape cancels (Rune's modal dismissal); Return
 //! presses the primary button (`default_button`). Notices show as toasts that block nothing.
@@ -45,6 +46,7 @@ pub fn layer(s: &App, p: Paint) -> Option<El> {
         (None, Some(Sheet::Log { host })) => log_sheet(s, host, p),
         (None, Some(Sheet::Delete { names, .. })) => super::delete::sheet(s, names, p),
         (None, Some(Sheet::AddToConfig(v))) => super::add_config::sheet(s, v, p),
+        (None, Some(Sheet::Properties(v))) => super::properties::sheet(s, v, p),
         (None, None) => conflict::sheet(s, p)?,
     };
     Some(

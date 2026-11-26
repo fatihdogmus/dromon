@@ -4,10 +4,11 @@
 //!
 //! A command's events go to the window that sent it at once (the answer of `Backend::send`),
 //! and to every other window through its [`Backend::pending`] list (calling the wake, so it
-//! catches up): hosts, statuses, log lines, listings, operations, transfers. Two kinds go to
+//! catches up): hosts, statuses, log lines, listings, operations, transfers. Three kinds go to
 //! one window only, as the service sends them: a prompt (to the window that asked to sign in
 //! with `Command::ShowPrompts`, else the focused window, else the sender; a `ShowPrompts` sends
-//! the host's open prompt again to its sender alone), and `Opened` for a host that was up already for another window (to the sender).
+//! the host's open prompt again to its sender alone), `Opened` for a host that was up already for another window (to the sender),
+//! and a folder size's events (to the sender).
 //! A window that closes hands its open prompts on.
 
 use std::cell::RefCell;
@@ -124,6 +125,8 @@ impl Shared {
                     to(self, at, ev);
                 }
                 ServiceEvent::Opened { .. } if joins => to(self, from, ev),
+                // A folder size is the asking window's sheet's alone, as the service sends it.
+                ServiceEvent::FolderSizeProgress { .. } | ServiceEvent::FolderSizeDone { .. } | ServiceEvent::FolderSizeFailed { .. } => to(self, from, ev),
                 _ => {
                     if let ServiceEvent::Status { host, status: ConnStatus::Ready | ConnStatus::Failed(_) | ConnStatus::Disconnected } = &ev {
                         self.shown.remove(host);

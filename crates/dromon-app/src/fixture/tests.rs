@@ -58,6 +58,17 @@ fn hosts_and_servers() {
 }
 
 #[test]
+fn entries_may_name_their_owner_and_group() {
+    let fx = tree(r#"{"/w": [{"name": "a", "kind": "file", "owner": "alice", "group": "staff"}, {"name": "b", "kind": "file", "owner": "1001"}, {"name": "c", "kind": "dir"}]}"#);
+    let listed = fx.server("h").unwrap().list(&p("/w")).unwrap();
+    let owners: Vec<_> = listed.iter().map(|e| (e.owner.as_deref(), e.group.as_deref())).collect();
+    assert_eq!(owners, [(Some("alice"), Some("staff")), (Some("1001"), None), (None, None)], "left out: unknown");
+    // An entry serialized before owners existed still reads.
+    let old: dromon_core::Entry = serde_json::from_str(r#"{"name": "a", "kind": "File", "size": 1, "mtime": null, "mode": null}"#).unwrap();
+    assert_eq!((old.owner, old.group), (None, None));
+}
+
+#[test]
 fn errors_name_their_json_path() {
     let entry = |e: &str| error(&with_server(&format!(r#"{{"home": "/", "tree": {{"/var": [{{"name": "a", "kind": "dir"}}, {{"name": "b", "kind": "file"}}, {e}]}}}}"#)));
     assert_eq!(entry(r#"{"name": "c", "kind": "folder"}"#), r#"servers.h.tree./var: entry 3: unknown kind "folder" (expected file, dir, symlink or other)"#);
@@ -66,7 +77,9 @@ fn errors_name_their_json_path() {
     assert_eq!(entry(r#"{"name": "a", "kind": "file"}"#), r#"servers.h.tree./var: entry 3: "a" is listed twice"#);
     assert_eq!(entry(r#"{"name": "c", "kind": "file", "target": "dir"}"#), "servers.h.tree./var: entry 3: target: only a symlink has a target");
     assert_eq!(entry(r#"{"name": "c/d", "kind": "file"}"#), r#"servers.h.tree./var: entry 3: name: "c/d" is not a file name"#);
-    assert_eq!(entry(r#"{"name": "c", "kind": "file", "sise": 1}"#), r#"servers.h.tree./var: entry 3: unknown field "sise" (expected name, kind, target, size, mtime, mode)"#);
+    assert_eq!(entry(r#"{"name": "c", "kind": "file", "sise": 1}"#), r#"servers.h.tree./var: entry 3: unknown field "sise" (expected name, kind, target, size, mtime, mode, owner, group)"#);
+    assert_eq!(entry(r#"{"name": "c", "kind": "file", "owner": 501}"#), "servers.h.tree./var: entry 3: owner: expected a string, found a number");
+    assert_eq!(entry(r#"{"name": "c", "kind": "file", "group": ""}"#), "servers.h.tree./var: entry 3: group: must not be empty");
     assert_eq!(entry(r#"{"name": "c", "kind": "file", "size": -1}"#), "servers.h.tree./var: entry 3: size: expected a whole number of at least 0, found -1");
     assert_eq!(entry(r#"{"generate": {"pattern": "IMG.jpg", "count": 3}}"#), r#"servers.h.tree./var: entry 3: generate.pattern: "IMG.jpg" needs exactly one {} or {0N} (N digits, zero-padded) for the number"#);
     assert_eq!(entry(r#"{"generate": {"pattern": "a{}", "count": 3, "size": [5, 1]}}"#), "servers.h.tree./var: entry 3: generate.size: [5, 1]: min is above max");

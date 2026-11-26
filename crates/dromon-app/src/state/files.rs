@@ -1,6 +1,7 @@
 //! File operations in the app (§3.7, §5 M3): the inline new-folder and rename field
 //! (`edit.rs`), delete (its sheet, `sheets.rs`, and its toast, `toast.rs`), copy path, the in-app
-//! clipboard (`clip.rs`), dragging rows (`drag.rs`) and the context menus (`menu.rs`).
+//! clipboard (`clip.rs`), dragging rows (`drag.rs`), the context menus (`menu.rs`) and the
+//! Properties sheet (`properties.rs`).
 //!
 //! Everything that changes the server does nothing while the host on screen isn't connected
 //! (the listing is read-only while it reconnects, §6.8); copying and copy path still work.
@@ -17,6 +18,7 @@ use super::clip::{Clip, paths_text};
 use super::drag::{DragTarget, Over, RowDrag};
 use super::edit::{self, Edit, EditEffect, EditEvent, Field};
 use super::menu::{MenuKind, OpenMenu};
+use super::properties::Sizes;
 use super::service::{Command, FileOp, OpId, TransferCommand};
 use super::toast::{Toast, ToastId, Toasts, delete_toast};
 use super::{App, ConnView, Effect, Listing, hosts};
@@ -45,6 +47,8 @@ pub struct FileState {
     pending: Option<(HostId, RemotePath, String)>,
     /// What [`FileState::field_edit`] hands out with no field up (always empty).
     spare: TextEdit,
+    /// The Properties sheet's folder size walks (`properties.rs`).
+    pub(super) sizes: Sizes,
 }
 
 impl FileState {
@@ -103,6 +107,10 @@ pub enum FileAction {
     Refresh,
     /// The list scrolled to request `n` ([`FileState::scroll`]).
     Scrolled(u64),
+    /// ⌘I (Alt+Return elsewhere), the row menu's Properties: the sheet of the one selected row.
+    Properties,
+    /// The Properties sheet's Calculate (or Recalculate): walk its folder for its size.
+    Calculate,
 }
 
 /// How the delete sheet lists names: the first five, then "and 12 more".
@@ -251,6 +259,8 @@ impl App {
                     self.files.scroll = None;
                 }
             }
+            FileAction::Properties => self.open_properties(),
+            FileAction::Calculate => self.calculate(),
         }
     }
 
@@ -380,9 +390,10 @@ impl App {
     }
 
     /// After every action and event: moves the field along with its operation, closes a field
-    /// or drag whose folder (or row) went away, and asks the list to scroll to a row that just
-    /// appeared.
+    /// or drag whose folder (or row) went away, asks the list to scroll to a row that just
+    /// appeared, and cancels a folder size walk whose Properties sheet closed.
     pub(super) fn sync_files(&mut self) {
+        self.sync_properties();
         let on_screen = |s: &App, host: &HostId, folder: &RemotePath| {
             s.active.as_ref() == Some(host) && s.conn().is_some_and(|c| c.interactive() && c.cwd == *folder)
         };

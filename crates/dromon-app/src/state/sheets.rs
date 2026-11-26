@@ -1,5 +1,5 @@
 //! The window's sheets (§6.8): what ssh asks (sign in, a new host key, a yes/no question), the
-//! connection log, the delete confirmation and Add to SSH config. One sheet shows at a time; prompts that arrive meanwhile wait in order.
+//! connection log, the delete confirmation, Add to SSH config and a row's Properties. One sheet shows at a time; prompts that arrive meanwhile wait in order.
 //! Notices (ssh's "touch your security key") don't block anything: they show as toasts until
 //! the service closes them.
 //!
@@ -13,6 +13,7 @@ use dromon_core::{HostId, Prompt, PromptAnswer, PromptId, PromptKind, RemotePath
 use rune::TextEdit;
 
 use super::hostbook::AddToConfigView;
+use super::properties::PropertiesView;
 
 /// The sheet on screen.
 pub enum Sheet {
@@ -29,6 +30,9 @@ pub enum Sheet {
     Delete { host: HostId, folder: RemotePath, names: Vec<String> },
     /// "Add to SSH config": a saved host's block, where it goes and the backup (`hostbook.rs`).
     AddToConfig(Box<AddToConfigView>),
+    /// One row's properties, and a folder's size (`properties.rs`). Read-only: Close, Escape
+    /// and Return close it.
+    Properties(Box<PropertiesView>),
 }
 
 impl Sheet {
@@ -37,13 +41,14 @@ impl Sheet {
             Sheet::Ask { prompt, .. } | Sheet::Sent { prompt } => &prompt.host,
             Sheet::Log { host } | Sheet::Delete { host, .. } => host,
             Sheet::AddToConfig(v) => &v.host,
+            Sheet::Properties(v) => &v.host,
         }
     }
 
     pub fn prompt(&self) -> Option<&Prompt> {
         match self {
             Sheet::Ask { prompt, .. } | Sheet::Sent { prompt } => Some(prompt),
-            Sheet::Log { .. } | Sheet::Delete { .. } | Sheet::AddToConfig(_) => None,
+            Sheet::Log { .. } | Sheet::Delete { .. } | Sheet::AddToConfig(_) | Sheet::Properties(_) => None,
         }
     }
 }
@@ -119,10 +124,10 @@ impl Sheets {
             }
             return;
         }
-        // A question from ssh comes before the log or a delete still being asked about (whose
-        // host can't take it while it signs in anyway).
+        // A question from ssh comes before the log, a delete still being asked about (whose
+        // host can't take it while it signs in anyway) or a row's properties.
         let replaces = match &self.open {
-            None | Some(Sheet::Log { .. } | Sheet::Delete { .. } | Sheet::AddToConfig(_)) => true,
+            None | Some(Sheet::Log { .. } | Sheet::Delete { .. } | Sheet::AddToConfig(_) | Sheet::Properties(_)) => true,
             Some(Sheet::Sent { prompt }) => prompt.host == p.host,
             Some(Sheet::Ask { .. }) => false,
         };
@@ -208,7 +213,7 @@ impl Sheets {
     pub fn cancel(&mut self) -> Option<(PromptId, PromptAnswer)> {
         let id = match &self.open {
             Some(Sheet::Ask { prompt, .. }) => Some(prompt.id),
-            Some(Sheet::Sent { .. } | Sheet::Log { .. } | Sheet::Delete { .. } | Sheet::AddToConfig(_)) => None,
+            Some(Sheet::Sent { .. } | Sheet::Log { .. } | Sheet::Delete { .. } | Sheet::AddToConfig(_) | Sheet::Properties(_)) => None,
             None => return None,
         };
         self.close_and_advance();
@@ -262,6 +267,30 @@ impl Sheets {
         }
     }
 
+    /// Opens a row's Properties sheet, unless another sheet is up.
+    pub fn open_properties(&mut self, view: PropertiesView) -> bool {
+        if self.open.is_some() {
+            return false;
+        }
+        self.open = Some(Sheet::Properties(Box::new(view)));
+        true
+    }
+
+    /// The Properties sheet, while it's open.
+    pub fn properties(&self) -> Option<&PropertiesView> {
+        match &self.open {
+            Some(Sheet::Properties(v)) => Some(v),
+            _ => None,
+        }
+    }
+
+    pub fn properties_mut(&mut self) -> Option<&mut PropertiesView> {
+        match &mut self.open {
+            Some(Sheet::Properties(v)) => Some(v),
+            _ => None,
+        }
+    }
+
     /// `host`'s block was added: its sheet closes.
     pub fn close_add_to_config(&mut self, host: &HostId) {
         if matches!(&self.open, Some(Sheet::AddToConfig(v)) if &v.host == host) {
@@ -274,7 +303,8 @@ impl Sheets {
         self.queue.retain(|p| &p.host != host);
         self.notices.retain(|p| &p.host != host);
         let delete = matches!(&self.open, Some(Sheet::Delete { host: h, .. }) if h == host);
-        if delete || self.open.as_ref().and_then(Sheet::prompt).is_some_and(|p| &p.host == host) {
+        let properties = self.properties().is_some_and(|v| &v.host == host);
+        if delete || properties || self.open.as_ref().and_then(Sheet::prompt).is_some_and(|p| &p.host == host) {
             self.close_and_advance();
         }
     }

@@ -59,7 +59,7 @@ fn a_silent_backend_leaves_the_connection_connecting_until_events_arrive() {
     // The service thread's answers, applied by hand.
     s.apply(ServiceEvent::Opened { host: prod(), start: RemotePath::new("/srv") });
     assert_eq!(s.conn().unwrap().status, ConnStatus::Ready);
-    let entries = vec![Entry { name: "media".into(), kind: EntryKind::Dir, size: 0, mtime: None, mode: None }];
+    let entries = vec![Entry { name: "media".into(), kind: EntryKind::Dir, size: 0, mtime: None, mode: None, owner: None, group: None }];
     s.apply(ServiceEvent::Listing { host: prod(), path: RemotePath::new("/srv"), entries });
     assert_eq!(names(&s), ["media"]);
 }
