@@ -145,7 +145,7 @@ fn streamed() -> CopyOptions {
 
 /// The engine runs these in spawned tasks, so their futures must be `Send` (checked at compile
 /// time; never called).
-#[allow(dead_code)]
+#[expect(dead_code, reason = "a compile-time check, never called")]
 fn futures_are_send(a: &Sftp, b: &Sftp, plan: &FilePlan, copied: &Copied) {
     fn send<T: Send>(_: T) {}
     send(scan_remote_copy(a, &p("/"), &p("/x"), false, |_| {}));

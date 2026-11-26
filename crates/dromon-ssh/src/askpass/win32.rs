@@ -2,7 +2,7 @@
 //! user's SID, the user of a pipe's client process, and creating a pipe instance whose DACL lets
 //! in that user alone. Everything here is synchronous and returns owned, safe values.
 
-#![allow(unsafe_code)]
+#![allow(unsafe_code, reason = "the Win32 FFI behind the askpass pipe: this module is the crate's one exception")]
 
 use std::io;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};

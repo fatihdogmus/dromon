@@ -3,16 +3,16 @@
 
 mod fixture;
 mod fmt;
-// The icon set and the tokens are the spec's whole catalogue (§6.3–6.7); sheets, popovers and
-// transfers use the rest in later milestones.
-#[allow(dead_code)]
+// The icon set and the tokens are the spec's whole catalogue (§6.3–6.7), not all of it drawn yet.
+// The icons' tests draw every icon, so their dead code shows in some builds only: `allow`.
+#[allow(dead_code, reason = "the whole icon catalogue (§6.3–6.7); unused outside the in-crate tests")]
 mod icons;
 mod persist;
 mod reveal;
 mod scenes;
 pub mod service;
 pub mod state;
-#[allow(dead_code)]
+#[expect(dead_code, reason = "the whole token catalogue (§6.3–6.7); not every token is drawn yet")]
 mod theme;
 mod views;
 mod windows;

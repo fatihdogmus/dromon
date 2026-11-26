@@ -392,22 +392,7 @@ impl App {
                     c.status = status;
                 }
             }
-            ServiceEvent::Opened { host, start } => {
-                self.ui.sheets.on_settled(&host);
-                // The folder used last time on this host, with home to fall back on.
-                let remembered = self.saved().folder(host.as_str()).map(RemotePath::new).filter(|p| *p != start);
-                let Some(c) = self.conns.get_mut(&host) else { return };
-                c.status = ConnStatus::Ready;
-                c.opened = true;
-                c.home = Some(start.clone());
-                c.fallback = remembered.is_some().then(|| start.clone());
-                let path = remembered.unwrap_or(start);
-                c.cwd = path.clone();
-                c.listing = Listing::Loading;
-                c.paging = conn::Paging::Idle;
-                self.remember_folder(&host, &path);
-                self.send(Command::List { host, path });
-            }
+            ServiceEvent::Opened { host, start } => self.opened(host, start),
             ServiceEvent::Listing { host, path, entries } | ServiceEvent::Refreshed { host, path, entries } => {
                 if let Some(c) = self.conns.get_mut(&host) {
                     if path == c.cwd {
@@ -491,6 +476,24 @@ impl App {
             | ServiceEvent::FolderSizeDone { .. }
             | ServiceEvent::FolderSizeFailed { .. }) => self.size_event(ev),
         }
+    }
+
+    /// `host` is up in this window, its home `start`: it lists the folder used there last time,
+    /// with home to fall back on.
+    fn opened(&mut self, host: HostId, start: RemotePath) {
+        self.ui.sheets.on_settled(&host);
+        let remembered = self.saved().folder(host.as_str()).map(RemotePath::new).filter(|p| *p != start);
+        let Some(c) = self.conns.get_mut(&host) else { return };
+        c.status = ConnStatus::Ready;
+        c.opened = true;
+        c.home = Some(start.clone());
+        c.fallback = remembered.is_some().then(|| start.clone());
+        let path = remembered.unwrap_or(start);
+        c.cwd = path.clone();
+        c.listing = Listing::Loading;
+        c.paging = conn::Paging::Idle;
+        self.remember_folder(&host, &path);
+        self.send(Command::List { host, path });
     }
 
     /// Carries out `action`; returns what the view should do next.

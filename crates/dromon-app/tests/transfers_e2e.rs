@@ -45,7 +45,7 @@ fn host2() -> HostId {
 /// never run beside another test of this binary.
 static SESSIONS: RwLock<()> = RwLock::new(());
 
-#[allow(dead_code)] // held, never read
+#[expect(dead_code, reason = "the guard is held for its lock, never read")]
 enum SessionsGuard {
     Shared(RwLockReadGuard<'static, ()>),
     Exclusive(RwLockWriteGuard<'static, ()>),

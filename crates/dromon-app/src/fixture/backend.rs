@@ -439,23 +439,37 @@ impl Core {
                 ),
                 Step::Confirm { text } => (PromptKind::Confirm, text.clone()),
             };
-            a.asked += 1;
-            match a.auth.on_prompt(&kind, &text, &mut self.store) {
-                AuthDecision::AnswerFromMemory(secret) => {
-                    Self::log(host, format!("ssh asked “{}”: answered from memory.", first_line(&text)), out);
-                    queue.push_back(Work::Judge(PromptAnswer::Text(secret.expose_secret().to_owned())));
-                }
-                AuthDecision::AskUser { error } => {
-                    let id = self.next_id();
-                    if let Some(a) = self.conns.get_mut(host).and_then(|c| c.attempt.as_mut()) {
-                        a.waiting = Some(Open { id, kind: kind.clone(), text: text.clone(), error: error.clone() });
-                    }
-                    Self::log(host, format!("ssh asks “{}”", first_line(&text)), out);
-                    out.push(ServiceEvent::Prompt(Prompt { id, host: host.clone(), kind, text, error }));
-                    queue.push_back(Work::Life(Event::PromptOpened));
-                }
-            }
+            self.prompt(host, kind, text, queue, out);
             return;
+        }
+    }
+
+    /// ssh asks `text` of the current attempt: answered from memory as the service does, or
+    /// put to the user.
+    fn prompt(
+        &mut self,
+        host: &HostId,
+        kind: PromptKind,
+        text: String,
+        queue: &mut VecDeque<Work>,
+        out: &mut Vec<ServiceEvent>,
+    ) {
+        let Some(a) = self.conns.get_mut(host).and_then(|c| c.attempt.as_mut()) else { return };
+        a.asked += 1;
+        match a.auth.on_prompt(&kind, &text, &mut self.store) {
+            AuthDecision::AnswerFromMemory(secret) => {
+                Self::log(host, format!("ssh asked “{}”: answered from memory.", first_line(&text)), out);
+                queue.push_back(Work::Judge(PromptAnswer::Text(secret.expose_secret().to_owned())));
+            }
+            AuthDecision::AskUser { error } => {
+                let id = self.next_id();
+                if let Some(a) = self.conns.get_mut(host).and_then(|c| c.attempt.as_mut()) {
+                    a.waiting = Some(Open { id, kind: kind.clone(), text: text.clone(), error: error.clone() });
+                }
+                Self::log(host, format!("ssh asks “{}”", first_line(&text)), out);
+                out.push(ServiceEvent::Prompt(Prompt { id, host: host.clone(), kind, text, error }));
+                queue.push_back(Work::Life(Event::PromptOpened));
+            }
         }
     }
 

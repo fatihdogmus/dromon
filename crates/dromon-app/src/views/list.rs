@@ -228,31 +228,8 @@ fn file_row(s: &App, c: &ConnView, i: usize, p: Paint) -> El {
     let name = name.role("gridcell").label(e.name.clone()).column_index(1);
     // Cut rows stay dimmed until they're pasted or the clip changes.
     let cut = s.clip().as_ref().is_some_and(|k| k.is_cut(&c.host, &c.cwd.join(&e.name)));
-    let size_text = fmt::entry_size(e);
-    let mut size_cell = text(size_text.clone())
-        .font(type_::META)
-        .color(meta_color)
-        .w(size::COL_SIZE)
-        .align(Align::End)
-        .role("gridcell")
-        .label(size_text)
-        .column_index(2);
-    if !open {
-        size_cell = size_cell.description(format!("{} bytes", fmt::thousands(e.size)));
-    }
-    let modified_text = fmt::modified(e.mtime, s.now);
-    let mut modified = text(modified_text.clone())
-        .font(type_::META)
-        .color(meta_color)
-        .w(size::COL_MODIFIED)
-        .pl(space::S4)
-        .truncate()
-        .role("gridcell")
-        .label(modified_text)
-        .column_index(3);
-    if let Some(t) = e.mtime {
-        modified = modified.description(full_date(t));
-    }
+    let size_cell = size_cell(e, meta_color);
+    let modified = modified_cell(e, s.now, meta_color);
     let mut cells = row()
         .w_full()
         .h_full()
@@ -323,6 +300,38 @@ fn file_row(s: &App, c: &ConnView, i: usize, p: Paint) -> El {
         r = drop::folder_row(r, &e.name).data(target);
     }
     r
+}
+
+/// A row's size cell; a file's says its exact size in bytes besides.
+fn size_cell(e: &Entry, color: Color) -> El {
+    let size_text = fmt::entry_size(e);
+    let cell = text(size_text.clone())
+        .font(type_::META)
+        .color(color)
+        .w(size::COL_SIZE)
+        .align(Align::End)
+        .role("gridcell")
+        .label(size_text)
+        .column_index(2);
+    if e.kind.is_dir_like() { cell } else { cell.description(format!("{} bytes", fmt::thousands(e.size))) }
+}
+
+/// A row's date cell, relative to `now`; the whole date besides.
+fn modified_cell(e: &Entry, now: i64, color: Color) -> El {
+    let modified_text = fmt::modified(e.mtime, now);
+    let cell = text(modified_text.clone())
+        .font(type_::META)
+        .color(color)
+        .w(size::COL_MODIFIED)
+        .pl(space::S4)
+        .truncate()
+        .role("gridcell")
+        .label(modified_text)
+        .column_index(3);
+    match e.mtime {
+        Some(t) => cell.description(full_date(t)),
+        None => cell,
+    }
 }
 
 /// What the row's icon says of it, in words: a folder, a link (files say nothing more).

@@ -48,7 +48,12 @@ One mechanical format, so diffs show only real changes and nobody argues about l
   (`max_width = 120`, `use_small_heuristics = "Max"`). Wide lines are the house style: short
   expressions stay on one line up to 120 columns.
 - CI checks it: `cargo fmt --all --check` is part of `cargo lint`. Run `cargo fmt --all` before
-  every commit.
+  every commit. After a large edit it may need a second run before `--check` passes: rustfmt
+  doesn't always settle in one pass.
+- rustfmt follows `mod` declarations but not `include!`, which is how `lib.rs` and `hot.rs`
+  take in `app_root.rs`. The never-compiled `#[cfg(any())] #[path = "app_root.rs"]` module in
+  `crates/dromon-app/src/lib.rs` is what lets `cargo fmt` reach dromon-app's modules, so it
+  stays.
 - Never hand-format against rustfmt: no manual alignment it would undo, no `#[rustfmt::skip]`
   to keep a layout you prefer. Change `rustfmt.toml` only in its own pull request.
 - A pure reformat (after a rustfmt or config change) is its own pull request with nothing else
@@ -249,13 +254,24 @@ enough to read.
   shortcut table, a table-driven test), that one item gets
   `#[expect(clippy::<lint>, reason = "…")]` with a concrete reason. `#[expect]` fails once the
   lint no longer fires, so no stale suppression stays behind.
-- Never `#[allow(...)]`, never a module- or crate-level suppression, and never a higher
-  threshold to get past a hit.
+- Any suppression, of any lint, is `#[expect(<lint>, reason = "…")]` when the lint fires in
+  every build that compiles the item. `#[allow(<lint>, reason = "…")]` is only for a lint that
+  fires in some builds but not others (code compiled into both the library and `dromon-hot`
+  through `include!`, dead code only some test binary or feature uses, a `cfg` that changes
+  what is used), where an `#[expect]` would fail in the other builds, and for a module's
+  deliberate exception such as the Windows FFI's `unsafe_code` (`askpass/win32.rs`). Check the
+  choice by building every target that compiles the item (the test binaries, the examples,
+  `--features hot --bin dromon-hot`, `--features perf`).
+- No module- or crate-wide suppression except such a deliberate exception (win32.rs, and
+  `dromon-hot`'s unused library surface in `hot.rs`), and never a higher threshold to get past
+  a hit.
 
 ### Agent checklist
 
 - Does `cargo lint` pass?
 - Was each complexity hit refactored, or does its one `#[expect]` give a reason that holds?
+- Is every `#[allow]` one that the builds differ on, or a module's deliberate exception, with
+  its reason?
 
 ## Standard: Review Checklist
 

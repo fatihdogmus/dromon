@@ -69,8 +69,10 @@ Six crates, each depending only on crates above it in this table:
 - Pure logic goes in the lowest crate that can own it, as a function or a type with no clock
   and no I/O (`dromon_sftp::PollSchedule`, `dromon_transfer::queue::Queue`). The caller owns
   timers and sessions.
-- `unsafe` is denied workspace-wide (`[workspace.lints.rust]`); the one exception is
+- `unsafe` is denied workspace-wide (`[workspace.lints.rust]`); the app's one exception is
   `dromon-ssh/src/askpass/win32.rs` (the Win32 pipe DACL), which says so in its module docs.
+  The perf example's counting allocator (`examples/perf.rs`, a `GlobalAlloc`) is the other,
+  outside the app.
 
 ### Consequences
 

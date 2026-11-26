@@ -126,7 +126,7 @@ fn sha_local(path: &Path) -> String {
 
 /// The engine runs these in spawned tasks, so their futures must be `Send` (checked at compile
 /// time; never called).
-#[allow(dead_code)]
+#[expect(dead_code, reason = "a compile-time check, never called")]
 fn futures_are_send(sftp: &Sftp, plan: &FilePlan) {
     fn send<T: Send>(_: T) {}
     send(scan_remote(sftp, &p("/"), Path::new("x"), |_| {}));

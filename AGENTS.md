@@ -133,8 +133,10 @@ building again ([docs/testing.md](docs/testing.md#standard-build-once)).
   pull request; its squash commit on `main` is listed in `.git-blame-ignore-revs`.
 - `cargo lint` passes: the format check, clippy with `-D warnings` (with the complexity lints
   and `clippy.toml`'s thresholds) and the file-size limit. Refactor a hit, or put
-  `#[expect(clippy::…, reason = "…")]` on the one item; never `#[allow]`
-  ([docs/clean-code.md](docs/clean-code.md#standard-lints)).
+  `#[expect(<lint>, reason = "…")]` on the one item. `#[allow(<lint>, reason = "…")]` only where
+  the lint fires in some builds but not others, or for a module's deliberate exception such as
+  the Windows FFI's `unsafe_code`; never module- or crate-wide otherwise, never a raised
+  threshold ([docs/clean-code.md](docs/clean-code.md#standard-lints)).
 - No `.rs` file has more than 800 lines (a hard limit, checked by `cargo lint`); split along a
   real seam, with tests in a sibling `*_tests.rs` / `tests.rs`.
 - Nothing a server, a file or the user sends may panic the app; failures are `dromon_core::Error`.

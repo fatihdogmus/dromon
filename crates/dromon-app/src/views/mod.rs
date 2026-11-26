@@ -50,7 +50,7 @@ pub struct Paint {
     /// The OS display preferences in force (reduce motion, reduce transparency, increased
     /// contrast; [`access`]). `t` already follows them; Rune reduces every transition,
     /// sequence and loop itself; the list's refresh highlight reads `reduced`.
-    #[allow(dead_code)]
+    #[expect(dead_code, reason = "no view reads it yet: `t` and `reduced` already follow it")]
     pub access: Access,
 }
 
