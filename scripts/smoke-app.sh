@@ -183,10 +183,10 @@ connect() {
   DROMON_FIXTURE_KEEP=1 DROMON_REQUIRE_DOCKER=1 \
     timeout 300 cargo test -p dromon-sftp --quiet --test fixture -- --exact list_mixed_folder --nocapture >"$work/fixture.log" 2>&1 \
     || { cat "$work/fixture.log" >&2; fail "[connect] the fixture test failed or took over 5 min"; }
-  # dromon-testkit: sshd fixture on 127.0.0.1:<port>, container <id>, …
+  # dromon-testkit: [<variant> ]sshd fixture on 127.0.0.1:<port>, <banner>, container <id>, …
   # dromon-testkit: …; clean up with `docker rm -f <id>; rm -r <key folder>`
   local port
-  port="$(sed -n 's/^dromon-testkit: sshd fixture on 127\.0\.0\.1:\([0-9]*\),.*/\1/p' "$work/fixture.log" | head -n1)"
+  port="$(sed -n 's/^dromon-testkit: \([a-z]* \)\{0,1\}sshd fixture on 127\.0\.0\.1:\([0-9]*\),.*/\2/p' "$work/fixture.log" | head -n1)"
   container="$(sed -n 's/.*clean up with `docker rm -f \([0-9a-f]*\); rm -r \([^`]*\)`.*/\1/p' "$work/fixture.log" | head -n1)"
   keys="$(sed -n 's/.*clean up with `docker rm -f \([0-9a-f]*\); rm -r \([^`]*\)`.*/\2/p' "$work/fixture.log" | head -n1)"
   [[ -n "$port" && -n "$container" && -f "$keys/id_ed25519" ]] || { cat "$work/fixture.log" >&2; fail "[connect] couldn't read the fixture's port, container and keys"; }

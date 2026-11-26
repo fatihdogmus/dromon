@@ -20,7 +20,7 @@ cargo test -p dromon-sftp -- --ignored       # the slow S4 tests (1 GiB copy-dat
 ```
 
 Without Docker every fixture test prints `skipping <test>: Docker is not reachable (…)` and passes.
-The testkit prints `dromon-testkit: sshd fixture on 127.0.0.1:<port> …` when its container is up.
+The testkit prints `dromon-testkit: <variant> sshd fixture on 127.0.0.1:<port>, <server banner>, container <id> …` when its container is up (`scripts/smoke-app.sh --connect` reads the port from it).
 
 ## How it works
 
