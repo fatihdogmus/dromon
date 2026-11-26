@@ -413,6 +413,25 @@ fn a_folder_dropped_on_itself_or_the_folder_on_screen_goes_nowhere_and_escape_ca
 }
 
 #[test]
+fn double_clicking_a_file_row_downloads_it() {
+    let (mut rt, _, rec) = recorded();
+    let (x, y) = at(&rt, "rows/index.html");
+    rt.pointer_move(x, y);
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    rt.frame(0.05);
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    settle(&mut rt);
+    assert!(
+        matches!(&started(&rec)[..], [JobRequest::Download { host: h, items, .. }] if *h == host("prod") && *items == [index_html()]),
+        "one download of index.html: {:?}",
+        started(&rec)
+    );
+    assert_eq!(rt.state.conn().unwrap().cwd.as_str(), SITE, "a download doesn't navigate");
+}
+
+#[test]
 fn nothing_changes_the_server_while_reconnecting() {
     let (mut rt, board, rec) = recorded();
     click(&mut rt, "rows/index.html");
