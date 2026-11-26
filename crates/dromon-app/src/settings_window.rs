@@ -6,26 +6,29 @@
 //! destroyed) when closed, and never keeping the app running alone. The two windows' states
 //! talk through each other's `AppHandle`, on the UI thread, in call order:
 //!
-//! - main → pane: the app state's `settings_window` is a [`Link`]; `Action::OpenSettings` and
-//!   every applied change hand it the app's [`SettingsView`], which replaces the pane's copy,
-//!   so the window only ever shows the app's own values. Opening shows and focuses the one
-//!   window (opening it again brings it forward).
-//! - pane → main: each control's change goes to the main window as `Action::Setting`, where it
-//!   applies, is remembered, and comes back as the above.
+//! - main → pane: each main window's state has a [`Link`] as its `settings_window`;
+//!   `Action::OpenSettings` and every applied change hand it the app's [`SettingsView`], which
+//!   replaces the pane's copy, so the window only ever shows the app's own values. Opening
+//!   shows and focuses the one window (opening it again brings it forward).
+//! - pane → main: each control's change goes to the first main window open as
+//!   `Action::Setting`, where it applies, is remembered, comes back as the above, and goes on to
+//!   the other main windows (`News::Settings`).
 //!
-//! The main window's app menu gets "Settings…" (⌘,) on macOS; on Windows and Linux Rune has no
-//! app menu, and Ctrl+, reaches the main window's `on_key` instead.
+//! Every main window's app menu gets "Settings…" (⌘,) on macOS; on Windows and Linux Rune has
+//! no app menu, and Ctrl+, reaches the window's `on_key` instead.
 
 use rune::{App as RuneApp, AppHandle, AppSpec, ColorScheme, MenuItem, Tx, WindowOptions, WindowSpec};
 
 use crate::state::{Action, App, SettingsView, SettingsWindow};
 use crate::theme::{self, Appearance};
 use crate::views::{self, settings::Pane};
+use crate::windows::Fleet;
 
 /// The window's key (`--window settings` selects it in a headless run).
 pub const KEY: &str = "settings";
 
-/// The real window, as the app state sees it.
+/// The real window, as a main window's state sees it.
+#[derive(Clone)]
 struct Link {
     pane: AppHandle<Pane>,
     main: AppHandle<App>,
@@ -50,6 +53,10 @@ impl SettingsWindow for Link {
             p.error = None;
         });
     }
+
+    fn another(&self) -> Box<dyn SettingsWindow> {
+        Box::new(self.clone())
+    }
 }
 
 /// The window's app on `pane` (tests drive it with `headless_runtime`).
@@ -65,28 +72,36 @@ pub(crate) fn pane_app(pane: Pane) -> RuneApp<Pane> {
     RuneApp::new(app).init(move || pane).tab_visits_controls(true)
 }
 
-/// The window, sending its changes to `main`.
-fn spec(main: AppHandle<App>) -> WindowSpec<Pane> {
-    let pane = Pane::new(move |change| main.update(move |s, tx| views::run(s, Action::Setting(change), tx)));
+/// The window, sending its changes to the first main window open.
+fn spec(fleet: Fleet) -> WindowSpec<Pane> {
+    let pane = Pane::new(move |change| {
+        if let Some(main) = fleet.first() {
+            main.update(move |s, tx| views::run(s, Action::Setting(change), tx));
+        }
+    });
     // Made when first opened; one fixed size.
     WindowSpec::from_app(KEY, pane_app(pane).windowless())
         .options(WindowOptions { resizable: false, max_size: Some(views::settings::SIZE), ..WindowOptions::default() })
 }
 
-/// Adds the Settings window and the app menu's "Settings…" to the main window's app. The app
-/// state learns of the window once the app runs (a headless runtime never does: its state keeps
-/// the default `NoWindow`).
-pub fn attach(mut app: RuneApp<App>) -> RuneApp<App> {
+/// Adds the Settings window to the first main window's app (it lasts as long as the app;
+/// later main windows' states get the same link). The app state learns of the window once the
+/// app runs (a headless runtime never does: its state keeps the default `NoWindow`).
+pub fn attach(mut app: RuneApp<App>, fleet: &Fleet) -> RuneApp<App> {
     let main = app.handle();
-    let (pane, _window) = app.window(spec(main.clone()));
+    let (pane, _window) = app.window(spec(fleet.clone()));
     let link = Link { pane, main: main.clone() };
     main.update(move |s, _| s.attach_settings_window(Box::new(link)));
+    app
+}
+
+/// The app menu's "Settings…" (⌘,), in every main window's app.
+pub fn menu_item() -> MenuItem<App> {
     let item = MenuItem::new("Settings…", open).id("settings");
-    let item = match "mod+comma".parse() {
+    match "mod+comma".parse() {
         Ok(chord) => item.key_equivalent(chord),
         Err(_) => item,
-    };
-    app.menu_item(item)
+    }
 }
 
 fn open(s: &mut App, tx: &mut Tx) {

@@ -41,6 +41,9 @@ impl SettingsWindow for Window {
     fn show(&mut self, view: SettingsView) {
         self.0.borrow_mut().push((false, view));
     }
+    fn another(&self) -> Box<dyn SettingsWindow> {
+        Box::new(self.clone())
+    }
 }
 
 impl Window {

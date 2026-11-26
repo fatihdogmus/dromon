@@ -24,7 +24,7 @@ use dromon_core::{ConnStatus, Error, HostId, HostSpec, Prompt, PromptAnswer, Pro
 use tokio::sync::mpsc;
 
 use super::{Config, Sink, run};
-use crate::state::{Command, FileOp, OpId, ServiceEvent};
+use crate::state::{Command, FileOp, OpId, ServiceEvent, WindowId};
 
 const SFTP_SERVERS: [&str; 2] = ["/usr/lib/openssh/sftp-server", "/usr/lib/ssh/sftp-server"];
 const WAIT: Duration = Duration::from_secs(20);
@@ -84,21 +84,27 @@ if "answer" in reply:
 sys.exit(1)
 "#;
 
+/// Each event with the window it's for (`None`: every window).
 #[derive(Clone)]
-struct TestSink(mpsc::UnboundedSender<ServiceEvent>);
+struct TestSink(mpsc::UnboundedSender<(Option<WindowId>, ServiceEvent)>);
 
 impl Sink for TestSink {
     fn emit(&self, ev: ServiceEvent) {
-        let _ = self.0.send(ev);
+        let _ = self.0.send((None, ev));
+    }
+    fn emit_to(&self, window: WindowId, ev: ServiceEvent) {
+        let _ = self.0.send((Some(window), ev));
     }
 }
 
-struct Fixture {
-    dir: tempfile::TempDir,
-    commands: mpsc::UnboundedSender<Command>,
-    events: mpsc::UnboundedReceiver<ServiceEvent>,
+pub(super) struct Fixture {
+    pub(super) dir: tempfile::TempDir,
+    commands: mpsc::UnboundedSender<(WindowId, Command)>,
+    events: mpsc::UnboundedReceiver<(Option<WindowId>, ServiceEvent)>,
     /// Everything seen so far, for failure messages.
-    seen: Vec<ServiceEvent>,
+    pub(super) seen: Vec<ServiceEvent>,
+    /// The window each event in `seen` was for (`None`: every window).
+    pub(super) to: Vec<Option<WindowId>>,
 }
 
 fn write_exe(path: &Path, body: &str) {
@@ -106,13 +112,13 @@ fn write_exe(path: &Path, body: &str) {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
-fn host(alias: &str) -> HostId {
+pub(super) fn host(alias: &str) -> HostId {
     HostId(alias.into())
 }
 
 impl Fixture {
     /// The service running against the fake, or `None` (skip) without its tools.
-    fn start() -> Option<Fixture> {
+    pub(super) fn start() -> Option<Fixture> {
         let Some(sftp_server) = SFTP_SERVERS.iter().map(PathBuf::from).find(|p| p.is_file()) else {
             eprintln!("skipped: no sftp-server at {SFTP_SERVERS:?}");
             return None;
@@ -144,25 +150,36 @@ impl Fixture {
         let (commands, rx) = mpsc::unbounded_channel();
         let (sink, events) = mpsc::unbounded_channel();
         tokio::spawn(run(rx, TestSink(sink), cfg));
-        Some(Fixture { dir, commands, events, seen: Vec::new() })
+        Some(Fixture { dir, commands, events, seen: Vec::new(), to: Vec::new() })
     }
 
-    fn root(&self) -> RemotePath {
+    pub(super) fn root(&self) -> RemotePath {
         RemotePath::new(&self.dir.path().join("root").canonicalize().unwrap().to_string_lossy())
     }
 
-    fn send(&self, cmd: Command) {
-        self.commands.send(cmd).unwrap();
+    /// `cmd` from the first window.
+    pub(super) fn send(&self, cmd: Command) {
+        self.send_from(WindowId::FIRST, cmd);
+    }
+
+    pub(super) fn send_from(&self, window: WindowId, cmd: Command) {
+        self.commands.send((window, cmd)).unwrap();
     }
 
     /// Waits for the first event `pick` takes, skipping others.
-    async fn until<T>(&mut self, what: &str, mut pick: impl FnMut(&ServiceEvent) -> Option<T>) -> T {
+    pub(super) async fn until<T>(&mut self, what: &str, mut pick: impl FnMut(&ServiceEvent) -> Option<T>) -> T {
+        self.until_for(what, |_, ev| pick(ev)).await
+    }
+
+    /// [`Fixture::until`], with the window each event is for (`None`: every window).
+    pub(super) async fn until_for<T>(&mut self, what: &str, mut pick: impl FnMut(Option<WindowId>, &ServiceEvent) -> Option<T>) -> T {
         let deadline = tokio::time::Instant::now() + WAIT;
         loop {
             match tokio::time::timeout_at(deadline, self.events.recv()).await {
-                Ok(Some(ev)) => {
-                    let found = pick(&ev);
+                Ok(Some((to, ev))) => {
+                    let found = pick(to, &ev);
                     self.seen.push(ev);
+                    self.to.push(to);
                     if let Some(found) = found {
                         return found;
                     }
@@ -172,7 +189,7 @@ impl Fixture {
         }
     }
 
-    async fn status(&mut self, h: &str, want: ConnStatus) {
+    pub(super) async fn status(&mut self, h: &str, want: ConnStatus) {
         let h = host(h);
         self.until(&format!("{want:?}"), |ev| match ev {
             ServiceEvent::Status { host, status } if *host == h && *status == want => Some(()),
@@ -181,7 +198,7 @@ impl Fixture {
         .await
     }
 
-    async fn prompt(&mut self) -> Prompt {
+    pub(super) async fn prompt(&mut self) -> Prompt {
         self.until("a prompt", |ev| match ev {
             ServiceEvent::Prompt(p) => Some(p.clone()),
             _ => None,
@@ -190,7 +207,7 @@ impl Fixture {
     }
 
     /// The names of a whole listing of `path` (pages until `done`).
-    async fn listing(&mut self, path: &RemotePath) -> Vec<String> {
+    pub(super) async fn listing(&mut self, path: &RemotePath) -> Vec<String> {
         let mut names = Vec::new();
         loop {
             let (entries, done) = self
@@ -207,17 +224,17 @@ impl Fixture {
         }
     }
 
-    fn answer(&self, p: &Prompt, text: &str) {
+    pub(super) fn answer(&self, p: &Prompt, text: &str) {
         self.send(Command::AnswerPrompt { id: p.id, answer: PromptAnswer::Text(text.into()) });
     }
 
     /// Since `from`, whether any event matched.
-    fn saw_since(&self, from: usize, f: impl Fn(&ServiceEvent) -> bool) -> bool {
+    pub(super) fn saw_since(&self, from: usize, f: impl Fn(&ServiceEvent) -> bool) -> bool {
         self.seen[from..].iter().any(f)
     }
 
     /// Connects `pw` (answering its password) and returns the start folder.
-    async fn sign_in(&mut self) -> RemotePath {
+    pub(super) async fn sign_in(&mut self) -> RemotePath {
         self.send(Command::Connect { host: host("pw") });
         let p = self.prompt().await;
         self.answer(&p, "secret");
@@ -228,12 +245,12 @@ impl Fixture {
         .await
     }
 
-    fn op(&self, id: u64, op: FileOp) {
+    pub(super) fn op(&self, id: u64, op: FileOp) {
         self.send(Command::FileOp { id: OpId(id), host: host("pw"), op });
     }
 
     /// How operation `id` ended.
-    async fn op_end(&mut self, id: u64) -> Result<(), Error> {
+    pub(super) async fn op_end(&mut self, id: u64) -> Result<(), Error> {
         let id = OpId(id);
         self.until("the operation to end", |ev| match ev {
             ServiceEvent::FileOpDone { id: i, .. } if *i == id => Some(Ok(())),
@@ -244,11 +261,12 @@ impl Fixture {
     }
 
     /// True when nothing matching `f` arrives for `quiet`.
-    async fn none_for(&mut self, quiet: Duration, f: impl Fn(&ServiceEvent) -> bool) -> bool {
+    pub(super) async fn none_for(&mut self, quiet: Duration, f: impl Fn(&ServiceEvent) -> bool) -> bool {
         let deadline = tokio::time::Instant::now() + quiet;
-        while let Ok(Some(ev)) = tokio::time::timeout_at(deadline, self.events.recv()).await {
+        while let Ok(Some((to, ev))) = tokio::time::timeout_at(deadline, self.events.recv()).await {
             let hit = f(&ev);
             self.seen.push(ev);
+            self.to.push(to);
             if hit {
                 return false;
             }
@@ -257,12 +275,12 @@ impl Fixture {
     }
 
     /// `rel` under the served root.
-    fn local(&self, rel: &str) -> PathBuf {
+    pub(super) fn local(&self, rel: &str) -> PathBuf {
         self.dir.path().join("root").join(rel)
     }
 }
 
-fn p(s: &str) -> RemotePath {
+pub(super) fn p(s: &str) -> RemotePath {
     RemotePath::new(s)
 }
 

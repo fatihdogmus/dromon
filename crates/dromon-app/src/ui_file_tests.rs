@@ -274,7 +274,7 @@ fn copy_then_paste_in_the_same_folder_copies_on_the_server() {
     // ⌥⌘V moves it, and the clip is spent.
     press(&mut rt, Key::Command('v'), with(primary(), |m| m.alt = true));
     assert_eq!(started(&rec)[1], JobRequest::Move { host: host("prod"), items: vec![index_html()], into: p(SITE) });
-    assert_eq!(rt.state.files.clip, None);
+    assert_eq!(*rt.state.clip(), None);
 }
 
 #[test]
@@ -299,7 +299,7 @@ fn cut_rows_dim_and_paste_on_another_host_moves_across() {
         started(&rec),
         [JobRequest::CrossHostMove { from: host("prod"), items: vec![index_html()], to: host("nas"), into: p("/volume1") }]
     );
-    assert_eq!(rt.state.files.clip, None);
+    assert_eq!(*rt.state.clip(), None);
 }
 
 #[test]
@@ -324,7 +324,7 @@ fn a_paste_with_something_else_on_the_os_clipboard_does_nothing() {
     press(&mut rt, Key::Command('v'), primary());
     press(&mut rt, Key::Command('v'), with(primary(), |m| m.alt = true));
     assert!(started(&rec).is_empty());
-    assert!(rt.state.files.clip.is_some(), "kept, in case it's copied again");
+    assert!(rt.state.clip().is_some(), "kept, in case it's copied again");
 }
 
 #[test]
@@ -350,7 +350,7 @@ fn copy_path_puts_the_paths_on_the_clipboard() {
     // In the order on screen.
     let paths = "/var/www/site/package.json\n/var/www/site/README.md\n/var/www/site/robots.txt";
     assert_eq!(board.text().as_deref().map(String::as_str), Some(paths));
-    assert_eq!(rt.state.files.clip, None);
+    assert_eq!(*rt.state.clip(), None);
 }
 
 #[test]

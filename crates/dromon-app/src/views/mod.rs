@@ -28,7 +28,7 @@ use rune::{ChromeInsets, Cx, El, Tx, col, row};
 #[cfg(test)]
 pub use menu::popup as menu_popup;
 /// The app's poll (the done flourish) and its hookup to the taskbar and notifications.
-pub use transfers::{connect_os, poll};
+pub use transfers::{OsLink, connect_os, connect_window, poll};
 
 use crate::state::{Action, App, Effect, FileAction};
 use crate::theme::{self, Access, Tokens};
@@ -85,10 +85,11 @@ fn animate_refresh(s: &mut App, tx: &mut Tx) {
 }
 
 /// The window gained or lost focus (the root's `on_window_focus`): the service polls by it,
-/// and gaining it polls the folder on screen at once. Transfers notify only without it.
+/// and gaining it polls the folder on screen at once. Transfers notify only while no main
+/// window has it (`App::focus_moved`).
 fn window_focus(s: &mut App, focused: bool, tx: &mut Tx) {
     s.window_focus(focused);
-    s.transfers.window_focus(focused);
+    s.focus_moved(focused);
     animate_refresh(s, tx);
 }
 

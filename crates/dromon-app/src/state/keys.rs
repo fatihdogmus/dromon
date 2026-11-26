@@ -36,6 +36,10 @@ pub enum Shortcut {
     ShowTransfers,
     /// ⌘, (Ctrl+, elsewhere): the Settings window.
     Settings,
+    /// ⌘N (Ctrl+N elsewhere): another main window.
+    NewWindow,
+    /// ⌘W (Ctrl+W elsewhere): close this window.
+    CloseWindow,
 }
 
 /// The chord spec of ⌘1 … ⌘9 for the sidebar's host `n` (1-based), for hints.
@@ -139,6 +143,8 @@ pub fn shortcut(ev: &KeyEvent, platform: KeyPlatform) -> Option<Shortcut> {
         Key::Command('f') => Shortcut::Filter,
         Key::Command('d') if !m.shift && !m.alt => Shortcut::Download,
         Key::Command(',') if !m.shift && !m.alt => Shortcut::Settings,
+        Key::Command('n') if !m.shift && !m.alt => Shortcut::NewWindow,
+        Key::Command('w') if !m.shift && !m.alt => Shortcut::CloseWindow,
         // ⌘⇧. arrives as '.' or, with Shift applied by the layout, '>'.
         Key::Command('.') if m.shift => Shortcut::ToggleHidden,
         Key::Command('>') => Shortcut::ToggleHidden,
@@ -233,7 +239,10 @@ mod tests {
             let f5 = if p == KeyPlatform::Mac { None } else { f(FileKey::Refresh) };
             assert_eq!(on(Key::Function(5), NONE, p), f5, "F5 refreshes on Windows and Linux");
             assert_eq!(on(Key::Command('v'), primary, p), None, "⌘V is the paste handler's");
-            assert_eq!(on(Key::Command('n'), primary, p), None, "⌘N is a new window's (M4)");
+            assert_eq!(on(Key::Command('n'), primary, p), Some(Shortcut::NewWindow), "{p:?}");
+            assert_eq!(on(Key::Command('w'), primary, p), Some(Shortcut::CloseWindow), "{p:?}");
+            assert_eq!(on(Key::Command('w'), shift(primary), p), None, "⌘⇧W is left alone");
+            assert_eq!(on(Key::Command('n'), alt(primary), p), None);
         }
         // Delete: ⌘⌫ on macOS, the Delete key elsewhere.
         assert_eq!(k(Key::Backspace, CMD), f(FileKey::Delete));

@@ -1,13 +1,15 @@
 //! What the OS shows of transfers outside the window (§2, §5 M2): the Dock badge (macOS), the
 //! taskbar button's bar and badge (Windows), and a system notification when a job that ran
-//! more than 10 s ends while the window is in the background. Linux shows no badge (Rune draws
-//! none there); its notifications go to the desktop's notification server.
+//! more than 10 s ends while the app is in the background (no main window focused). Linux
+//! shows no badge (Rune draws none there); its notifications go to the desktop's notification
+//! server.
 //!
-//! Pure: [`Watch`] sees each snapshot of the jobs (`Transfers::set`) and each change of window
-//! focus, works out what to show, and hands it to its [`Os`] as [`OsEffect`]s: the taskbar only
-//! when what it shows changes, a notification once per job that ends. The window's sink
-//! (`views::transfers::os_sink`) carries them out; without one (tests, scenes, headless runs)
-//! they stay in [`Os::held`] for a test to read, and nothing reaches the OS.
+//! Pure: [`Watch`] sees each snapshot of the jobs (`Transfers::set`) and each change of the
+//! app's focus, works out what to show, and hands it to its [`Os`] as [`OsEffect`]s: the
+//! taskbar only when what it shows changes, a notification once per job that ends; only the
+//! leading main window's watch does ([`Watch::lead`]). The window's sink
+//! (`views::transfers::connect_window`) carries them out; without one (tests, scenes, headless
+//! runs) they stay in [`Os::held`] for a test to read, and nothing reaches the OS.
 //!
 //! Notification text never holds more than the popover shows: the job's title (an item's name
 //! or "3 items"), the host's alias and the engine's reason for a failure.
@@ -139,7 +141,7 @@ impl Notice {
 }
 
 /// Whether a job's end is worth a notification: it ran longer than [`NOTIFY_AFTER_MS`] and the
-/// window isn't focused (the user isn't looking at the app).
+/// app isn't focused (no main window is: the user isn't looking at the app).
 pub fn worth_telling(ran_ms: i64, focused: bool) -> bool {
     !focused && ran_ms > NOTIFY_AFTER_MS
 }
@@ -191,18 +193,28 @@ impl Os {
     }
 }
 
-/// The jobs as the OS sees them: when each started, the failures nobody has seen, the window's
+/// The jobs as the OS sees them: when each started, the failures nobody has seen, the app's
 /// focus and what the taskbar shows.
+///
+/// Every main window has one and keeps it current, but only the leading window's speaks
+/// ([`Watch::lead`], `App::leads`): the badge and the notifications are the app's, one of
+/// each, however many windows show the jobs. One that comes to lead shows what the taskbar
+/// should at once.
 #[derive(Clone, Debug)]
 pub struct Watch {
     /// When each active job was first seen active (milliseconds on `clock`).
     started: HashMap<JobId, i64>,
-    /// Jobs that failed while the window was in the background, until it gains focus.
+    /// Jobs that failed while the app was in the background, until it gains focus.
     unseen: HashSet<JobId>,
-    /// The window has focus (`views::window_focus`); unknown counts as not.
+    /// Some main window has focus (`App::focus_moved`): any one is the app's; unknown counts as
+    /// not.
     pub focused: bool,
-    /// What the taskbar shows now; nothing until the first change.
+    /// What the taskbar shows now (or would, from a window that doesn't speak); nothing until
+    /// the first change.
     shown: Dock,
+    /// Whether this window speaks for the app: only then do its effects reach [`Watch::os`]. A
+    /// lone window (scenes, tests) does.
+    speaks: bool,
     /// Wall time in milliseconds: how long jobs ran.
     pub clock: fn() -> i64,
     pub os: Os,
@@ -210,15 +222,76 @@ pub struct Watch {
 
 impl Default for Watch {
     fn default() -> Self {
-        Watch { started: HashMap::new(), unseen: HashSet::new(), focused: false, shown: Dock::default(), clock: system_ms, os: Os::default() }
+        Watch {
+            started: HashMap::new(),
+            unseen: HashSet::new(),
+            focused: false,
+            shown: Dock::default(),
+            speaks: true,
+            clock: system_ms,
+            os: Os::default(),
+        }
     }
 }
 
 impl Watch {
+    /// The watch of another window on the same jobs: their timings, unseen failures, the
+    /// focus and what the taskbar shows, without this one's sink; it speaks once it leads.
+    pub fn follower(&self) -> Watch {
+        Watch {
+            started: self.started.clone(),
+            unseen: self.unseen.clone(),
+            focused: self.focused,
+            shown: self.shown.clone(),
+            speaks: false,
+            clock: self.clock,
+            os: Os::default(),
+        }
+    }
+
+    /// Whether this window leads (`App::leads`), checked before each snapshot and whenever the
+    /// windows change. One that has just come to lead (the leading window closed) shows what
+    /// the taskbar should.
+    pub fn lead(&mut self, leads: bool) {
+        let was = std::mem::replace(&mut self.speaks, leads);
+        if leads && !was {
+            self.os.emit(OsEffect::Taskbar(self.shown.clone()));
+        }
+    }
+
+    /// Whether this window speaks for the app.
+    pub fn speaks(&self) -> bool {
+        self.speaks
+    }
+
+    /// The window closes: if it spoke for the app, its taskbar button shows nothing any more
+    /// (macOS sums the windows' badges, a closed window's too), and it speaks no more.
+    pub fn resign(&mut self) {
+        if self.speaks && self.shown != Dock::default() {
+            self.os.emit(OsEffect::Taskbar(Dock::default()));
+        }
+        self.speaks = false;
+    }
+
+    /// Shows again what the taskbar shows, if anything (a new sink: the native window was
+    /// made again), when this window speaks.
+    pub fn reapply(&mut self) {
+        if self.shown != Dock::default() {
+            self.tell(OsEffect::Taskbar(self.shown.clone()));
+        }
+    }
+
+    /// Hands `fx` to the OS if this window speaks for the app; else nothing comes of it.
+    fn tell(&mut self, fx: OsEffect) {
+        if self.speaks {
+            self.os.emit(fx);
+        }
+    }
+
     /// A new snapshot `jobs` replaces `before`, at `now` (milliseconds on [`Watch::clock`]):
     /// jobs that start (or start again, retried) are timed; one that ends after more than
-    /// 10 s, while the window isn't focused, is notified; a failure out of sight turns the bar
-    /// red until the window gains focus; the taskbar follows.
+    /// 10 s, while the app isn't focused, is notified; a failure out of sight turns the bar
+    /// red until the app gains focus; the taskbar follows.
     pub fn update(&mut self, before: &[JobView], jobs: &[JobView], now: i64) {
         for j in jobs {
             let was_active = before.iter().find(|o| o.id == j.id).map(|o| o.state.is_active());
@@ -239,7 +312,7 @@ impl Watch {
             if worth_telling(ran, self.focused)
                 && let Some(n) = notice(j)
             {
-                self.os.emit(OsEffect::Notify(n));
+                self.tell(OsEffect::Notify(n));
             }
         }
         self.started.retain(|id, _| jobs.iter().any(|j| j.id == *id && j.state.is_active()));
@@ -247,7 +320,8 @@ impl Watch {
         self.show(jobs);
     }
 
-    /// The window gained or lost focus. Gaining it is the user looking: failures are seen.
+    /// The app gained or lost focus (some main window has it, or none does). Gaining it is the
+    /// user looking: failures are seen.
     pub fn window_focus(&mut self, focused: bool, jobs: &[JobView]) {
         self.focused = focused;
         if focused {
@@ -266,7 +340,7 @@ impl Watch {
         let now = dock(jobs, !self.unseen.is_empty());
         if now != self.shown {
             self.shown = now.clone();
-            self.os.emit(OsEffect::Taskbar(now));
+            self.tell(OsEffect::Taskbar(now));
         }
     }
 }

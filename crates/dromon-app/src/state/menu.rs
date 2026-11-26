@@ -72,7 +72,7 @@ impl App {
     /// The menu's entries, as things stand.
     pub fn menu(&self, kind: &MenuKind) -> Vec<MenuEntry> {
         let live = self.conn().is_some_and(|c| c.interactive());
-        let paste = live && self.files.clip.is_some();
+        let paste = live && self.clip().is_some();
         match kind {
             MenuKind::Row(_) => {
                 let one = self.conn().is_some_and(|c| c.selection.len() == 1);

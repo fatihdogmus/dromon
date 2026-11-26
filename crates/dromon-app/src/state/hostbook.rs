@@ -198,7 +198,7 @@ impl App {
     }
 
     /// Replaces the hosts of `source` with `new`, keeping ones that went but are in use.
-    fn replace_section(&mut self, source: HostSource, new: Vec<HostSpec>) {
+    pub(super) fn replace_section(&mut self, source: HostSource, new: Vec<HostSpec>) {
         let kept: Vec<HostSpec> =
             self.hosts.hosts.iter().filter(|h| h.source == source && !new.iter().any(|n| n.id == h.id) && self.in_use(&h.id)).cloned().collect();
         let mut hosts: Vec<HostSpec> = self.hosts.hosts.drain(..).filter(|h| h.source != source).collect();
@@ -217,21 +217,23 @@ impl App {
         self.hosts.hosts.iter().filter(|h| h.source == HostSource::Recent).cloned().collect()
     }
 
-    /// Makes `list` the Recent section: shown, remembered and handed to the service.
+    /// Makes `list` the Recent section: shown, remembered, handed to the service and told to
+    /// the other windows.
     fn set_recent(&mut self, mut list: Vec<HostSpec>) {
         list.truncate(MAX_RECENT);
         self.replace_section(HostSource::Recent, list.clone());
-        self.saved.recent = list.iter().map(RecentHost::of).collect();
-        self.save();
+        let recent = list.iter().map(RecentHost::of).collect();
+        self.save(|s| s.recent = recent);
+        self.tell(super::News::Recent(list.clone()));
         self.send(Command::HostBook(HostBookCommand::Recent(list)));
     }
 
     /// The Recent section remembered from last time (`remember`), if any.
     pub(super) fn restore_recent(&mut self) {
-        if self.saved.recent.is_empty() {
+        let list: Vec<HostSpec> = self.saved().recent.iter().filter_map(RecentHost::spec).collect();
+        if list.is_empty() && self.saved().recent.is_empty() {
             return;
         }
-        let list: Vec<HostSpec> = self.saved.recent.iter().filter_map(RecentHost::spec).collect();
         self.replace_section(HostSource::Recent, list.clone());
         self.send(Command::HostBook(HostBookCommand::Recent(list)));
     }

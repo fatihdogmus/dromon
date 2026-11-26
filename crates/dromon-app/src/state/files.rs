@@ -28,11 +28,10 @@ mod tests;
 /// What a new folder is called, unless that's taken.
 pub const NEW_FOLDER: &str = "New folder";
 
-/// The file operations' own state.
+/// The file operations' own state. (The clip is every window's: [`App::clip`].)
 #[derive(Clone, Debug, Default)]
 pub struct FileState {
     pub edit: Edit,
-    pub clip: Option<Clip>,
     pub drag: Option<RowDrag>,
     /// The drawn context menu on screen (platforms without native menus).
     pub menu: Option<OpenMenu>,
@@ -175,7 +174,7 @@ impl App {
                 let Some(c) = self.conn().filter(|_| !names.is_empty()) else { return };
                 let clip = Clip::new(c.host.clone(), App::items(c, &names), action == FileAction::Cut);
                 fx.push(Effect::Copy(clip.text.clone()));
-                self.files.clip = Some(clip);
+                self.set_clip(Some(clip));
             }
             FileAction::CopyPath => {
                 let names = self.selected_names();
@@ -185,7 +184,7 @@ impl App {
             }
             FileAction::Paste { text, as_move } => self.paste(&text, as_move),
             FileAction::RequestPaste { as_move } => {
-                if self.live().is_some() && self.files.clip.is_some() {
+                if self.live().is_some() && self.clip().is_some() {
                     fx.push(Effect::ReadClipboard { as_move });
                 }
             }
@@ -308,10 +307,10 @@ impl App {
     /// holds it. A pasted cut (or a move) empties the clip, as Finder's does.
     fn paste(&mut self, text: &str, as_move: bool) {
         let Some(c) = self.live() else { return };
-        let Some(clip) = self.files.clip.as_ref().filter(|k| k.matches(text)) else { return };
+        let Some(clip) = self.clip().clone().filter(|k| k.matches(text)) else { return };
         let req = clip.paste(&c.host, c.cwd.clone(), as_move);
         if clip.cut || as_move {
-            self.files.clip = None;
+            self.set_clip(None);
         }
         self.start(req);
     }

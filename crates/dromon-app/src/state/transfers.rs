@@ -239,8 +239,9 @@ impl Transfers {
         self.ring().map(|p| p.fraction()).or(flourishing.then_some(1.0))
     }
 
-    /// The window gained or lost focus (the taskbar's red bar for failures is seen once it
-    /// gains it; notifications go out only while it doesn't have it).
+    /// The app gained or lost focus, which any main window having it gives it (the taskbar's
+    /// red bar for failures is seen once it gains it; notifications go out only while it
+    /// doesn't have it; `App::focus_moved`).
     pub fn window_focus(&mut self, focused: bool) {
         self.watch.window_focus(focused, &self.jobs);
     }

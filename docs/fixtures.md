@@ -325,6 +325,16 @@ is read or written and there are no new keys:
   (`-2`, `-3`, … for more in the same minute). Confirming moves the host from Saved to SSH
   Config.
 
+## Several windows
+
+In a window (`dromon --fixture f.json`, not headless) ⌘N opens more main windows on the same
+fixture, as the real app does on the one service: one connection per host, one set of folder
+trees and transfers. Each window has its own host and folder on screen; listings, statuses,
+operations and transfers reach every window, a prompt shows in the focused window (else the
+one whose command asked), and a host already up for one window opens at once in another.
+Headless runs (`--snap`, `--script`) have one window: ⌘N does nothing there, so flows can't
+drive two windows; the in-crate tests do (`fixture/windows_tests.rs`, `ui_window_tests.rs`).
+
 ## The built-in demo
 
 `crates/dromon-app/assets/fixtures/demo.json` is compiled into Dromon: nine hosts that connect at

@@ -4,10 +4,12 @@
 //! directly (`state/tests.rs`).
 
 pub mod clip;
+pub mod common;
 pub mod conn;
 pub mod drag;
 pub mod edit;
 pub mod files;
+pub mod frames;
 pub mod fuzzy;
 pub mod history;
 pub mod hostbook;
@@ -26,6 +28,7 @@ pub mod settings;
 pub mod sheets;
 pub mod toast;
 pub mod transfers;
+pub mod windows;
 
 #[cfg(test)]
 mod tests;
@@ -49,10 +52,13 @@ pub use prefs::{NoStore, Saved, Store};
 pub use selection::{Selection, TypeSelect};
 #[cfg(test)]
 pub use service::Recorder;
-pub use service::{Backend, Command, FileOp, FileOpKind, HostBookCommand, HostBookEvent, OpId, ServiceEvent, Silent, TransferCommand};
+pub use service::{Backend, Command, FileOp, FileOpKind, HostBookCommand, HostBookEvent, OpId, ServiceEvent, Silent, TransferCommand, WindowId};
 pub use settings::{Density, Settings, SettingsChange, SettingsView, SettingsWindow};
 pub use sheets::{Sheet, Sheets};
 pub use transfers::{DropHover, DropTarget, Tab, Transfers};
+pub use windows::{News, NoPeers, Peers};
+
+use common::Common;
 
 use dromon_transfer::{ConflictChoice, JobId};
 
@@ -128,9 +134,11 @@ pub struct App {
     pub backend: Box<dyn Backend>,
     /// The clock that stamps log lines (fixed in scenes and tests).
     pub wall_ms: fn() -> i64,
-    /// What's remembered between launches, and where changes go ([`App::remember`]).
-    pub saved: Saved,
-    store: Box<dyn Store>,
+    /// Which main window this is (`windows.rs`).
+    pub window: WindowId,
+    /// What every window shares: the clip, what's remembered between launches and where
+    /// changes go ([`App::remember`]), the other windows.
+    common: Common,
     /// The transfer engine's jobs and the popover.
     pub transfers: Transfers,
     /// New folder, rename and delete operations and how each is going.
@@ -216,6 +224,10 @@ pub enum Action {
     OpenSettings,
     /// A control in the Settings window (`settings.rs`).
     Setting(SettingsChange),
+    /// ⌘N, the File menu: another main window, on the welcome state (`windows.rs`).
+    NewWindow,
+    /// ⌘W, the File menu: close this window (the last one asks first while transfers run).
+    CloseWindow,
 }
 
 /// What an action asks the view layer to do afterwards.
@@ -251,8 +263,8 @@ impl App {
             sort: Sort::default(),
             backend,
             wall_ms: system_ms,
-            saved: Saved::default(),
-            store: Box::new(NoStore),
+            window: WindowId::FIRST,
+            common: Common::default(),
             transfers: Transfers::default(),
             ops: Ops::default(),
             files: FileState::default(),
@@ -261,45 +273,6 @@ impl App {
             inbox: VecDeque::new(),
             poll: refresh::PollUi::default(),
         }
-    }
-
-    /// Starts from settings remembered last time and saves later changes to `store`.
-    pub fn remember(&mut self, saved: Saved, store: Box<dyn Store>) {
-        if let Some(sort) = saved.sort {
-            self.sort = sort;
-        }
-        if let Some(w) = saved.sidebar_width.filter(|w| w.is_finite()) {
-            self.ui.sidebar_width = w.clamp(size::SIDEBAR_MIN, size::SIDEBAR_MAX);
-        }
-        self.saved = saved;
-        self.store = store;
-        self.restore_settings();
-        self.restore_recent();
-    }
-
-    /// Hands the remembered settings to the store, after a change.
-    fn save(&mut self) {
-        self.store.save(&self.saved);
-    }
-
-    /// The sidebar's resize grip was let go.
-    pub fn sidebar_resized(&mut self) {
-        self.saved.sidebar_width = Some(self.ui.sidebar_width);
-        self.save();
-    }
-
-    /// Remembers the folder on screen for `host`.
-    fn remember_folder(&mut self, host: &HostId, path: &RemotePath) {
-        if self.saved.folder(host.as_str()) != Some(path.as_str()) {
-            self.saved.set_folder(host.as_str(), path.as_str());
-            self.save();
-        }
-    }
-
-    /// Replaces the store, returning the old one (quitting drops the real store, which writes
-    /// what it still holds).
-    pub fn take_store(&mut self) -> Box<dyn Store> {
-        std::mem::replace(&mut self.store, Box::new(NoStore))
     }
 
     pub fn conn(&self) -> Option<&ConnView> {
@@ -312,9 +285,21 @@ impl App {
     }
 
     /// Sends `cmd` and applies whatever the backend answers right away (traced like
-    /// [`App::apply`]'s).
+    /// [`App::apply`]'s), after what came meanwhile from other windows' commands.
     fn send(&mut self, cmd: Command) {
-        let events = self.backend.send(cmd);
+        let mut events = self.backend.pending();
+        events.extend(self.backend.send(cmd));
+        self.take(events);
+    }
+
+    /// Applies what another window's commands brought this one (a synchronous backend's
+    /// `pending`), as a window does when it's woken for it.
+    pub fn catch_up(&mut self) {
+        let events = self.backend.pending();
+        self.take(events);
+    }
+
+    fn take(&mut self, events: Vec<ServiceEvent>) {
         if service::tracing() {
             for ev in &events {
                 eprintln!("dromon-trace: {}", service::trace_line(ev));
@@ -360,7 +345,7 @@ impl App {
             ServiceEvent::Opened { host, start } => {
                 self.ui.sheets.on_settled(&host);
                 // The folder used last time on this host, with home to fall back on.
-                let remembered = self.saved.folder(host.as_str()).map(RemotePath::new).filter(|p| *p != start);
+                let remembered = self.saved().folder(host.as_str()).map(RemotePath::new).filter(|p| *p != start);
                 let Some(c) = self.conns.get_mut(&host) else { return };
                 c.status = ConnStatus::Ready;
                 c.opened = true;
@@ -430,6 +415,9 @@ impl App {
                 }
             }
             ServiceEvent::Transfers(jobs) => {
+                // Every window sees every snapshot; the badge and notifications come from the
+                // leading one alone (`state/windows.rs`).
+                self.transfers.watch.lead(self.leads());
                 // A folder on screen that a job just finished changing is listed again (until
                 // polling, §4.5, the only way to see what a paste, move or upload made).
                 for (host, path) in self.transfers.set(jobs) {
@@ -500,8 +488,7 @@ impl App {
             Action::Sort(key) => {
                 self.sort = self.sort.toggled(key);
                 let sort = self.sort;
-                self.saved.sort = Some(sort);
-                self.save();
+                self.save(|s| s.sort = Some(sort));
                 if let Some(c) = self.conn_mut() {
                     c.set_sort(sort);
                     if let Some(cur) = c.selection.cursor() {
@@ -604,15 +591,17 @@ impl App {
             Action::Palette(a) => self.palette_action(a, &mut fx),
             Action::OpenSettings => self.open_settings(),
             Action::Setting(change) => self.change_setting(change),
+            Action::NewWindow => self.new_window(),
+            Action::CloseWindow => self.close_window(&mut fx),
         }
         fx
     }
 
-    /// The window's close button (⌘W, Alt+F4) was pressed: whether to close now. With
-    /// transfers running it asks first (the quit sheet) and says no; Quit there approves it.
-    /// macOS ⌘Q and logging out don't come through here.
+    /// The window's close button (⌘W, Alt+F4) was pressed: whether to close now. Closing the
+    /// last window quits, so then, with transfers running, it asks first (the quit sheet) and
+    /// says no; Quit there approves it. macOS ⌘Q and logging out don't come through here.
     pub fn close_requested(&mut self) -> bool {
-        if self.ui.quit_approved || self.transfers.active() == 0 {
+        if self.ui.quit_approved || self.transfers.active() == 0 || self.windows_open() > 1 {
             return true;
         }
         self.ui.confirm_quit = true;
@@ -622,9 +611,13 @@ impl App {
     /// Maps a shortcut to its action (`now` is for type-to-select). The conflict sheet is
     /// modal like the prompt sheets: while it's up, the list's shortcuts do nothing.
     pub fn shortcut(&mut self, sc: Shortcut, now: f64) -> Vec<Effect> {
-        // Settings is another window: it opens whatever is modal here, as the app menu's item does.
-        if sc == Shortcut::Settings {
-            return self.act(Action::OpenSettings);
+        // Settings is another window: it opens whatever is modal here, as the app menu's item
+        // does; so do ⌘N and ⌘W, which are about windows, not this one's content.
+        match sc {
+            Shortcut::Settings => return self.act(Action::OpenSettings),
+            Shortcut::NewWindow => return self.act(Action::NewWindow),
+            Shortcut::CloseWindow => return self.act(Action::CloseWindow),
+            _ => {}
         }
         if self.conflict_on_screen().is_some() || self.ui.confirm_quit {
             return Vec::new();
@@ -644,7 +637,7 @@ impl App {
             // ⌘K opens the palette from anywhere, a focused field included.
             Shortcut::Palette => Action::Palette(PaletteAction::Toggle),
             Shortcut::QuickConnect => Action::QuickConnect,
-            Shortcut::Settings => Action::OpenSettings,
+            Shortcut::Settings | Shortcut::NewWindow | Shortcut::CloseWindow => return Vec::new(),
             Shortcut::Download => Action::Download,
             Shortcut::Back => Action::Back,
             Shortcut::Forward => Action::Forward,

@@ -157,7 +157,7 @@ fn file_row(s: &App, c: &ConnView, i: usize, p: Paint) -> El {
         None => text(e.name.clone()).font(if selected { type_::BODY_STRONG } else { type_::BODY }).color(name_color).truncate().grow(1.0).min_w(0.0),
     };
     // Cut rows stay dimmed until they're pasted or the clip changes.
-    let cut = s.files.clip.as_ref().is_some_and(|k| k.is_cut(&c.host, &c.cwd.join(&e.name)));
+    let cut = s.clip().as_ref().is_some_and(|k| k.is_cut(&c.host, &c.cwd.join(&e.name)));
     let size_cell = text(fmt::entry_size(e)).font(type_::META).color(meta_color).w(size::COL_SIZE).align(Align::End);
     let modified =
         text(fmt::modified(e.mtime, s.now)).font(type_::META).color(meta_color).w(size::COL_MODIFIED).pl(space::S4).truncate();

@@ -1,6 +1,7 @@
 //! What Dromon remembers between launches (§4.7 "Persisted state"): the sort, the settings
-//! (§8), the sidebar's width, the last folder on each host and the recent quick connects. Never
-//! secrets, never anything a server sent beyond a folder path.
+//! (§8), the sidebar's width, the last folder on each host, the recent quick connects and the
+//! main windows' frames. Never secrets, never anything a server sent beyond a folder path.
+//! Every main window shares one [`Saved`] (`common.rs`).
 //!
 //! The app keeps a [`Saved`] and hands every change to a [`Store`]. The real app's store
 //! (`crate::persist`) writes Rune's `prefs.json` on a background thread, since the UI thread
@@ -12,6 +13,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use super::conn::Sort;
+use super::frames::Frame;
 use super::settings::Settings;
 
 #[cfg(test)]
@@ -40,6 +42,9 @@ pub struct Saved {
     /// The Recent section, newest first (§4.3: at most 10; addresses and options, never
     /// secrets). Checked again like typed input when read back.
     pub recent: Vec<RecentHost>,
+    /// The main windows' frames at the end of the last session, the first window's first
+    /// (`frames.rs`); the first one reopens.
+    pub frames: Vec<Frame>,
 }
 
 /// One recent quick connect, as remembered.

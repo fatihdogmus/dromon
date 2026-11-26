@@ -30,6 +30,7 @@ pub mod state;
 #[allow(dead_code)]
 mod theme;
 mod views;
+mod windows;
 
 #[cfg(test)]
 mod ui_access_tests;
@@ -51,10 +52,12 @@ mod ui_sheet_tests;
 mod ui_tests;
 #[cfg(test)]
 mod ui_transfer_tests;
+#[cfg(test)]
+mod ui_window_tests;
 
-use rune::{App as RuneApp, AppSpec, KeyEvent, KeyPlatform, Titlebar, Tx};
+use rune::{App as RuneApp, AppSpec, KeyEvent, KeyPlatform, Tx, WindowSpec};
 
-use state::{App, HostDirectory};
+use state::{App, HostDirectory, Shortcut};
 
 /// What the app opens at; also the sidebar's own minimum plus a usable list.
 const SIZE: (f32, f32) = (1080.0, 680.0);
@@ -73,11 +76,12 @@ fn init() -> App {
 
 /// Window keys nothing focused took: the list's shortcuts (§7).
 fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
-    // A sheet is modal: its own controls and Rune's modal handling (Escape) take the keys.
-    if s.ui.sheets.is_open() {
+    let Some(sc) = state::keys::shortcut(ev, KeyPlatform::current()) else { return false };
+    // A sheet is modal: its own controls and Rune's modal handling (Escape) take the keys; ⌘N
+    // and ⌘W are about windows, not this one's content.
+    if s.ui.sheets.is_open() && !matches!(sc, Shortcut::NewWindow | Shortcut::CloseWindow) {
         return false;
     }
-    let Some(sc) = state::keys::shortcut(ev, KeyPlatform::current()) else { return false };
     // Typing while the filter field has focus is the field's.
     if matches!(sc, state::Shortcut::Type(_)) && tx.focused().is_some() {
         return false;
@@ -102,16 +106,12 @@ fn spec() -> AppSpec<App> {
     }
 }
 
-/// The app with its window chrome: one 44 pt band for title bar and toolbar (§6.2), and the
-/// Settings window beside it (`settings_window.rs`). Its state starts on the demo fixture;
-/// [`run`] gives it the real service or `--fixture`'s instead.
+/// The app's first main window with its chrome: one 44 pt band for title bar and toolbar
+/// (§6.2), its hooks and menus (`windows.rs`), and the Settings window beside it
+/// (`settings_window.rs`). Its state starts on the demo fixture; [`run`] gives it the real
+/// service or `--fixture`'s instead. (⌘N's windows open only in a real run.)
 pub fn app() -> RuneApp<App> {
-    settings_window::attach(RuneApp::new(spec()))
-        .titlebar(Titlebar::new(theme::size::TOOLBAR))
-        // Closing the window with transfers running asks first (the quit sheet).
-        .on_close_request(|s, _tx| if s.close_requested() { rune::CloseResponse::Close } else { rune::CloseResponse::Defer })
-        // Nothing polls while the window is off screen (§4.5).
-        .on_visibility(views::window_visibility)
+    windows::first(&windows::Fleet::default())
 }
 
 /// Whether `DROMON_MOCK=1` asks for the built-in demo fixture.
@@ -175,17 +175,29 @@ pub fn run() {
         eprintln!("dromon: {msg}");
         std::process::exit(2);
     }
-    match chosen_fixture() {
-        Ok(Some(fx)) => {
-            fixture::activate(fx.clone());
-            views::connect_os(app().init(move || fixture::app(fx))).run();
-            return;
-        }
-        Ok(None) => {}
+    let fixture = match chosen_fixture() {
+        Ok(fixture) => fixture,
         Err(msg) => {
             eprintln!("dromon: {msg}");
             std::process::exit(2);
         }
+    };
+    // The main windows: the first one now, more with ⌘N (`windows.rs`).
+    let fleet = windows::Fleet::default();
+    // The taskbar, the Dock badge and notifications, once for the whole app and before its
+    // first window opens (not in a headless run).
+    fleet.connect_os();
+    if let Some(fx) = fixture {
+        fixture::activate(fx.clone());
+        let windows = fleet.clone();
+        windows::first(&fleet)
+            .init(move || {
+                let mut app = fixture::app(fx);
+                windows::join(&windows, &mut app);
+                app
+            })
+            .run();
+        return;
     }
 
     let (backend, commands) = service::channel();
@@ -195,7 +207,10 @@ pub fn run() {
         let prefs = rune::prefs::Prefs::open(persist::APP_ID);
         (persist::load(&prefs), prefs)
     });
-    let app = app().init(move || {
+    // Only the first window reopens, where it was; nothing reconnects (§12).
+    let frame = remembered.as_ref().and_then(|(saved, _)| saved.frames.first().copied());
+    let windows = fleet.clone();
+    let app = windows::first(&fleet).init(move || {
         // A headless run never reaches `on_ready`, so it reads the config here; no window
         // waits on it. A window gets its hosts from the service.
         let hosts = match rune::tooling::headless_run() {
@@ -214,25 +229,23 @@ pub fn run() {
         if let Some((saved, prefs)) = remembered {
             app.remember(saved, Box::new(persist::PrefsWriter::spawn(prefs)));
         }
+        windows::join(&windows, &mut app);
         app
     });
-    // The taskbar, the Dock badge and notifications (not in a headless run).
-    let app = views::connect_os(app);
-    let handle = app.handle();
-    let mut pending = Some((commands, handle));
-    app.on_ready(move |_| {
-        // Once, after the first frame: start the network side.
-        if let Some((commands, handle)) = pending.take()
-            && let Err(e) = service::start(commands, service::RuneSink(handle), service::Config::for_app())
+    let mut pending = Some((commands, fleet.sink()));
+    let app = app.on_ready(move |_| {
+        // Once, after the first frame: start the network side, for every main window.
+        if let Some((commands, sink)) = pending.take()
+            && let Err(e) = service::start(commands, sink, service::Config::for_app())
         {
             eprintln!("dromon: couldn't start the service thread: {e}");
         }
-    })
-    .on_quit(|s, _tx| {
-        // Dropping the channel stops the service: connections close and secrets are wiped.
-        s.backend = Box::new(state::Silent::default());
-        // Dropping the settings writer waits for its last write.
-        drop(s.take_store());
-    })
-    .run();
+    });
+    // Quitting (`windows.rs`, `App::quitting`): each window's end of the channel goes, which
+    // stops the service (connections close, secrets are wiped), and the settings are written.
+    match frame {
+        // The displays are known only once the event loop runs: the window fits on one of them.
+        Some(frame) => rune::run_windows(move |displays| [WindowSpec::from_app("main", windows::at_frame(app, Some(frame), displays))]),
+        None => app.run(),
+    }
 }

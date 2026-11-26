@@ -10,8 +10,9 @@
 //! phases are `state::transfers::Flourish`, stepped by [`poll`]. Under reduce motion the check
 //! is there at once and nothing pulses.
 //!
-//! Outside the window ([`connect_os`]): the taskbar button's bar and badge (Windows), the Dock
-//! badge (macOS), and system notifications, from the effects of `state::transfers::Watch`.
+//! Outside the window ([`connect_os`], [`connect_window`]): the taskbar button's bar and badge
+//! (Windows), the Dock badge (macOS), and system notifications, from the effects of the leading
+//! main window's `state::transfers::Watch`. The flourish plays in every window.
 
 use std::f32::consts::PI;
 use std::sync::mpsc;
@@ -25,6 +26,7 @@ use rune::{
 use super::{Paint, run};
 use crate::fmt;
 use crate::icons::{self, IconPair};
+use crate::service::RuneSink;
 use crate::state::transfers::{Bar, Dock, Flourish, Notice, OsEffect, PULSE};
 use crate::state::{Action, App, Tab, TransferCommand};
 use crate::theme::{motion, radius, size, space, type_};
@@ -514,39 +516,36 @@ const NOTIFY_ID: &str = if cfg!(target_os = "linux") { "dromon" } else { "dev.dr
 /// The user-info key a notification carries its job under.
 const NOTIFY_JOB: &str = "job";
 
-/// Hooks the taskbar, the Dock badge and notifications up to the app: the window's sink takes
-/// `Watch`'s effects (the taskbar on the UI thread, notifications posted by a `dromon-notify`
-/// thread, since a first post on Linux waits for the session bus), and a click on a
-/// notification brings the window forward with the popover open on its job. Call it before
-/// the window opens (Windows takes the app's identity then). A headless run (`--snap`,
-/// `--script`, tests) gets none of it: nothing it does reaches the OS.
-pub fn connect_os(app: rune::App<App>) -> rune::App<App> {
+/// The app's way to notifications once it's hooked up to them ([`connect_os`]): the poster
+/// thread. Every main window's sink holds it ([`connect_window`]).
+#[derive(Clone)]
+pub struct OsLink {
+    notices: mpsc::Sender<Notice>,
+}
+
+/// Hooks the app up to notifications, once per run: registers its identity, starts the
+/// `dromon-notify` thread that posts them (a first post on Linux waits for the session bus),
+/// and has a click on one bring the app forward with the popover open on its job, in the
+/// focused main window or else the leading one. `windows` are the main windows. Call it
+/// before the first window opens (Windows takes the app's identity then). A headless run
+/// (`--snap`, `--script`, tests) gets none of it (`None`): nothing it does reaches the OS.
+pub fn connect_os(windows: RuneSink) -> Option<OsLink> {
     if rune::tooling::headless_run().is_some() {
-        return app;
+        return None;
     }
     if let Err(e) = rune_notify::register(&rune_notify::Identity::new(NOTIFY_ID, "Dromon")) {
         eprintln!("dromon: no notifications: {e}");
     }
-    let handle = app.handle();
-    let clicks = handle.clone();
-    rune_notify::on_click(move |click| clicked(&clicks, &click));
-    let notices = spawn_poster();
-    // Each new native window (again after a GPU release) gets the sink, and what the taskbar
-    // showed.
-    app.on_window(move |window| {
-        let (window, notices) = (window.clone(), notices.clone());
-        handle.update_if(move |s, _| {
-            connect_window(s, window, notices);
-            false
-        });
-    })
+    rune_notify::on_click(move |click| clicked(&windows, &click));
+    Some(OsLink { notices: spawn_poster() })
 }
 
-/// From now on `s`'s taskbar effects go to `window` and its notifications to the poster.
-fn connect_window(s: &mut App, window: WindowHandle, notices: mpsc::Sender<Notice>) {
-    if *s.transfers.watch.shown() != Dock::default() {
-        show_taskbar(&window, s.transfers.watch.shown());
-    }
+/// From now on `s`'s taskbar effects go to `window` (its native window, each time it's made)
+/// and its notifications to the poster, and the taskbar shows again what it showed. Every main
+/// window has the sink; only the leading one's `Watch` uses it (`App::leads`), so there's one
+/// badge and one notification per job for the whole app.
+pub fn connect_window(s: &mut App, window: WindowHandle, os: OsLink) {
+    let notices = os.notices;
     s.transfers.watch.os.connect(move |fx| match fx {
         OsEffect::Taskbar(dock) => show_taskbar(&window, &dock),
         // The OS's own word on focus as well (macOS, Windows), in case a focus change hasn't
@@ -557,6 +556,7 @@ fn connect_window(s: &mut App, window: WindowHandle, notices: mpsc::Sender<Notic
             }
         }
     });
+    s.transfers.watch.reapply();
 }
 
 /// Windows: the bar under the taskbar button and the count over it; macOS: the count on the
@@ -591,14 +591,30 @@ fn spawn_poster() -> mpsc::Sender<Notice> {
     tx
 }
 
-/// A notification was clicked (on any thread): the window comes forward (Wayland with the
-/// server's activation token) and the popover opens on the job.
-fn clicked(handle: &AppHandle<App>, click: &rune_notify::Click) {
-    match click.activation_token() {
+/// A notification was clicked (on any thread). Which main window shows it is the windows'
+/// state's to say, on the UI thread (`App::notice_window`): the focused one, else the leading
+/// one. Any window asks, then that one alone comes forward with the popover open on the job.
+fn clicked(windows: &RuneSink, click: &rune_notify::Click) {
+    let token = click.activation_token().map(str::to_owned);
+    let job = click.get(NOTIFY_JOB).and_then(|v| v.parse().ok()).map(JobId);
+    let Some((_, any)) = windows.handles().into_iter().next() else { return };
+    let windows = windows.clone();
+    any.update_if(move |s, _| {
+        let to = s.notice_window();
+        if let Some((_, handle)) = windows.handles().into_iter().find(|(w, _)| Some(*w) == to) {
+            show_clicked(&handle, token, job);
+        }
+        false
+    });
+}
+
+/// The clicked notification's window comes forward (Wayland with the server's activation
+/// token) and its popover opens on the job.
+fn show_clicked(handle: &AppHandle<App>, token: Option<String>, job: Option<JobId>) {
+    match token {
         Some(token) => handle.activate(token),
         None => handle.open(),
     }
-    let job = click.get(NOTIFY_JOB).and_then(|v| v.parse().ok()).map(JobId);
     handle.update_if(move |s, _| {
         // Windows keeps the foreground from a process that doesn't hold it; this asks the way
         // a clicked toast's app may.

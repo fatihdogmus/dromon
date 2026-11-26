@@ -159,5 +159,5 @@ fn scenes_and_fixtures_keep_nothing() {
     let mut s = fixture::app(fixture::demo());
     s.act(Action::Sort(SortKey::Size));
     // NoStore: nothing to observe but that it doesn't panic, and the in-memory copy follows.
-    assert_eq!(s.saved.sort, Some(Sort { key: SortKey::Size, dir: SortDir::Descending }));
+    assert_eq!(s.saved().sort, Some(Sort { key: SortKey::Size, dir: SortDir::Descending }));
 }

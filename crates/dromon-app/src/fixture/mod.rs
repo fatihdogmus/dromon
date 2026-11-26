@@ -6,7 +6,8 @@
 //!   names the JSON path (`servers.prod.tree./var: entry 3: unknown kind "folder"`).
 //! - [`FixtureBackend`] answers the UI's commands from it synchronously, with the same
 //!   `ServiceEvent`s the real service emits (status changes driven by the service's own
-//!   lifecycle machine, prompts with the real retry errors, log lines, 512-entry pages).
+//!   lifecycle machine, prompts with the real retry errors, log lines, 512-entry pages), to
+//!   every main window as the service does (`windows.rs`).
 //! - [`demo`] is the built-in demo (`assets/fixtures/demo.json`): what scenes, the in-crate tests
 //!   and `DROMON_MOCK=1` run on.
 //! - [`transfers::Engine`] runs transfers on it: the real queue (`dromon_transfer::queue`) with
@@ -26,6 +27,7 @@ mod hostbook;
 mod parse;
 pub mod transfers;
 mod tree;
+mod windows;
 
 #[cfg(test)]
 mod backend_tests;
@@ -45,8 +47,8 @@ use std::sync::{Arc, OnceLock};
 use dromon_core::{Entry, EntryKind, Error, HostSpec, RemotePath};
 use dromon_transfer::JobView;
 
-pub use backend::FixtureBackend;
 pub use generate::Generator;
+pub use windows::FixtureBackend;
 pub use parse::parse;
 
 /// Ids of the fixture's own job snapshots start above this, clear of the ids a session's jobs get

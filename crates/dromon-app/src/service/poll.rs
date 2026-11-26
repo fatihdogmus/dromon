@@ -121,7 +121,6 @@ impl Poller {
         self.due
     }
 
-    #[cfg(test)]
     pub fn visibility(&self) -> Visibility {
         self.vis
     }

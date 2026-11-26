@@ -94,7 +94,8 @@ fn without_auth_it_connects_at_once_with_the_services_events() {
             log("Connected."),
         ]
     );
-    assert!(connect(&mut b).is_empty(), "connecting while up does nothing");
+    // Connecting while up (another window asking) opens it again for the asker, and nothing more.
+    assert_eq!(connect(&mut b), [ServiceEvent::Opened { host: prod(), start: RemotePath::new("/home/deploy") }]);
 }
 
 #[test]

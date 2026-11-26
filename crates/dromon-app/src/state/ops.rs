@@ -45,6 +45,11 @@ pub struct Ops {
 }
 
 impl Ops {
+    /// No operations yet; ids are handed out after `base` (each window has its own range).
+    pub fn numbered_from(base: u64) -> Ops {
+        Ops { ops: Vec::new(), last_id: base }
+    }
+
     /// Records a new operation on `host` and returns the id to send it with.
     pub fn begin(&mut self, host: HostId, op: &FileOp) -> OpId {
         self.last_id += 1;

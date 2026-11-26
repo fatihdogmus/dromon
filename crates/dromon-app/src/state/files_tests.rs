@@ -237,10 +237,10 @@ fn copy_and_cut_fill_the_clip_and_the_os_clipboard() {
     also(&mut s, "assets");
     let fx = file(&mut s, FileAction::Copy);
     assert_eq!(fx, [Effect::Copy("/var/www/site/assets\n/var/www/site/index.html".into())]);
-    let clip = s.files.clip.clone().unwrap();
+    let clip = s.clip().clone().unwrap();
     assert_eq!((clip.host, clip.cut, clip.items.len()), (host("prod"), false, 2));
     file(&mut s, FileAction::Cut);
-    assert!(s.files.clip.as_ref().unwrap().cut);
+    assert!(s.clip().as_ref().unwrap().cut);
 }
 
 #[test]
@@ -249,7 +249,7 @@ fn copy_path_writes_the_selection_or_the_folder_on_screen() {
     assert_eq!(file(&mut s, FileAction::CopyPath), [Effect::Copy(SITE.into())]);
     click(&mut s, "index.html");
     assert_eq!(file(&mut s, FileAction::CopyPath), [Effect::Copy("/var/www/site/index.html".into())]);
-    assert_eq!(s.files.clip, None, "copy path isn't a copy");
+    assert_eq!(*s.clip(), None, "copy path isn't a copy");
 }
 
 #[test]
@@ -261,12 +261,12 @@ fn paste_on_the_same_host_copies_or_moves_and_a_cut_empties_the_clip() {
     file(&mut s, FileAction::Paste { text: text.clone(), as_move: false });
     let index = item("/var/www/site/index.html", EntryKind::File, 14_812);
     assert_eq!(started(&rec), [JobRequest::RemoteCopy { host: host("prod"), items: vec![index.clone()], into: p(SITE) }]);
-    assert!(s.files.clip.is_some(), "a copy pastes again");
+    assert!(s.clip().is_some(), "a copy pastes again");
 
     file(&mut s, FileAction::Cut);
     file(&mut s, FileAction::Paste { text: text.clone(), as_move: false });
     assert_eq!(started(&rec)[1], JobRequest::Move { host: host("prod"), items: vec![index.clone()], into: p(SITE) });
-    assert_eq!(s.files.clip, None, "a pasted cut is gone, as in Finder");
+    assert_eq!(*s.clip(), None, "a pasted cut is gone, as in Finder");
 
     // ⌥⌘V moves a copied clip.
     file(&mut s, FileAction::Copy);
@@ -302,7 +302,7 @@ fn a_foreign_clipboard_text_pastes_nothing() {
     assert!(started(&rec).is_empty());
     // ⌥⌘V and the menus read the clipboard first, only with a clip.
     assert_eq!(file(&mut s, FileAction::RequestPaste { as_move: true }), [Effect::ReadClipboard { as_move: true }]);
-    s.files.clip = None;
+    s.set_clip(None);
     assert!(file(&mut s, FileAction::RequestPaste { as_move: true }).is_empty());
 }
 
@@ -403,7 +403,7 @@ fn the_list_keys_leave_a_focused_field_alone() {
     s.act(Action::OpenFilter);
     assert!(s.text_focused());
     assert!(s.shortcut(crate::state::Shortcut::File(crate::state::keys::FileKey::Copy), 0.0).is_empty());
-    assert_eq!(s.files.clip, None);
+    assert_eq!(*s.clip(), None);
     s.ui.filter_edit.focused = false;
     assert_eq!(s.shortcut(crate::state::Shortcut::File(crate::state::keys::FileKey::Copy), 0.0).len(), 1);
 }

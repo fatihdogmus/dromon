@@ -2,10 +2,17 @@
 //! runtime, which discovers hosts, runs one ssh per connected host, answers ssh's prompts
 //! through the askpass helper and the UI's sheets, and serves SFTP listings.
 //!
-//! - UI → service: [`ChannelBackend`] puts each [`Command`] on an unbounded channel; sending
-//!   never blocks the UI.
-//! - Service → UI: every [`ServiceEvent`] goes to a [`Sink`]; in the app that is [`RuneSink`],
-//!   which applies it on the UI thread with `AppHandle::update_if`.
+//! - UI → service: [`ChannelBackend`] puts each [`Command`] on an unbounded channel, with the
+//!   main window it came from (each window has its own backend, [`ChannelBackend::another`]);
+//!   sending never blocks the UI.
+//! - Service → UI: every [`ServiceEvent`] goes to a [`Sink`], for every main window
+//!   ([`Sink::emit`]) or one ([`Sink::emit_to`]: a prompt, a host opening in a window that asked
+//!   for it); in the app that is [`RuneSink`], which applies it on the UI thread of each window
+//!   with `AppHandle::update_if`.
+//!
+//! The service is one for all the windows (`windows.rs`): one connection per host, one transfer
+//! engine. The manager knows how each window shows, and each host's task which folder each
+//! window has on screen there.
 //!
 //! The manager ([`run`]) routes commands and askpass requests to one task per host
 //! (`conn.rs`), whose lifecycle is the pure machine in `lifecycle.rs` and whose prompts go
@@ -24,12 +31,16 @@ pub(crate) mod lifecycle;
 /// Adaptive polling of the folder on screen (§4.5); the fixture backend's polls use it too.
 pub(crate) mod poll;
 mod transfers;
+/// The windows as a host's task sees them; the fixture backend uses it too.
+pub(crate) mod windows;
 
 // A shell-script fake ssh and OpenSSH's sftp-server: Unix only.
 #[cfg(all(test, unix))]
 mod tests;
+#[cfg(all(test, unix))]
+mod windows_e2e_tests;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ffi::OsString;
 use std::future::pending;
 use std::path::PathBuf;
@@ -42,26 +53,53 @@ use tokio::sync::mpsc;
 
 use self::auth::PromptIds;
 use self::conn::{ConnCmd, ConnHandle, Shared};
-use crate::state::{App, Backend, Command, ServiceEvent};
+use crate::state::{App, Backend, Command, ServiceEvent, WindowId};
 
 /// Where the service's events go.
 pub trait Sink: Clone + Send + Sync + 'static {
+    /// To every main window.
     fn emit(&self, ev: ServiceEvent);
-}
-
-/// The app's sink: applies each event on the UI thread. The view re-runs once per batch of
-/// updates drained together.
-pub struct RuneSink(pub rune::AppHandle<App>);
-
-impl Clone for RuneSink {
-    fn clone(&self) -> Self {
-        RuneSink(self.0.clone())
+    /// To main window `window` alone. A sink that doesn't tell windows apart hands it on like
+    /// any other.
+    fn emit_to(&self, window: WindowId, ev: ServiceEvent) {
+        let _ = window;
+        self.emit(ev);
     }
 }
 
-impl Sink for RuneSink {
-    fn emit(&self, ev: ServiceEvent) {
-        self.0.update_if(move |app, tx| {
+/// The app's sink: every main window's `AppHandle`, by window id. Each event is applied on
+/// the UI thread in the windows it's for; a window's view re-runs once per batch of updates
+/// drained together. Windows join as they open and leave as they close (`crate::windows`).
+#[derive(Clone, Default)]
+pub struct RuneSink(Arc<Mutex<Handles>>);
+
+/// The main windows' handles, in the order they opened.
+type Handles = Vec<(WindowId, rune::AppHandle<App>)>;
+
+impl RuneSink {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Handles> {
+        self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Window `id` hears events from now on.
+    pub fn add(&self, id: WindowId, handle: rune::AppHandle<App>) {
+        let mut windows = self.lock();
+        windows.retain(|(w, _)| *w != id);
+        windows.push((id, handle));
+    }
+
+    /// Window `id` closed.
+    pub fn remove(&self, id: WindowId) {
+        self.lock().retain(|(w, _)| *w != id);
+    }
+
+    /// The windows, in the order they opened.
+    pub fn handles(&self) -> Handles {
+        self.lock().clone()
+    }
+
+    fn deliver(handle: &rune::AppHandle<App>, ev: ServiceEvent) {
+        handle.update_if(move |app, tx| {
             app.apply(ev);
             // A refresh that changed rows animates them (§4.5), though no input caused it.
             if app.take_animate() {
@@ -72,28 +110,55 @@ impl Sink for RuneSink {
     }
 }
 
-/// The UI's end of the command channel.
+impl Sink for RuneSink {
+    fn emit(&self, ev: ServiceEvent) {
+        for (_, handle) in self.handles() {
+            Self::deliver(&handle, ev.clone());
+        }
+    }
+
+    /// A window that's gone has nothing to show it in (its prompts moved when it closed).
+    fn emit_to(&self, window: WindowId, ev: ServiceEvent) {
+        if let Some((_, handle)) = self.handles().into_iter().find(|(w, _)| *w == window) {
+            Self::deliver(&handle, ev);
+        }
+    }
+}
+
+/// One main window's end of the command channel.
 pub struct ChannelBackend {
-    tx: mpsc::UnboundedSender<Command>,
+    window: WindowId,
+    tx: mpsc::UnboundedSender<(WindowId, Command)>,
+}
+
+impl ChannelBackend {
+    /// The end for main window `window` of the same channel.
+    pub fn for_window(&self, window: WindowId) -> ChannelBackend {
+        ChannelBackend { window, tx: self.tx.clone() }
+    }
 }
 
 impl Backend for ChannelBackend {
     fn send(&mut self, cmd: Command) -> Vec<ServiceEvent> {
         // A service that's gone (it only stops when the app quits) has nothing to answer.
-        if let Err(mpsc::error::SendError(Command::AnswerPrompt { answer, .. })) = self.tx.send(cmd) {
+        if let Err(mpsc::error::SendError((_, Command::AnswerPrompt { answer, .. }))) = self.tx.send((self.window, cmd)) {
             auth::wipe(answer);
         }
         Vec::new()
     }
+
+    fn another(&mut self, window: WindowId) -> Option<Box<dyn Backend>> {
+        Some(Box::new(self.for_window(window)))
+    }
 }
 
-/// The service's end of the command channel.
-pub type Commands = mpsc::UnboundedReceiver<Command>;
+/// The service's end of the command channel: each command with the window it came from.
+pub type Commands = mpsc::UnboundedReceiver<(WindowId, Command)>;
 
-/// A command channel: the backend for the app, the receiver for [`start`].
+/// A command channel: the first window's backend, the receiver for [`start`].
 pub fn channel() -> (ChannelBackend, Commands) {
     let (tx, rx) = mpsc::unbounded_channel();
-    (ChannelBackend { tx }, rx)
+    (ChannelBackend { window: WindowId::FIRST, tx }, rx)
 }
 
 /// How the service runs ssh and finds hosts.
@@ -175,13 +240,13 @@ pub async fn run<S: Sink>(mut commands: Commands, sink: S, cfg: Config) {
     let engine = transfers::start(sink.clone());
     let shared = Shared { cfg: Arc::new(cfg), askpass, store: store.clone(), ids: PromptIds::default(), engine };
     let mut conns: HashMap<HostId, ConnHandle> = HashMap::new();
-    // Nothing polls until the UI says the window shows.
-    let mut window = Visibility::Hidden;
+    // How each window shows, as it last said; nothing polls for a window until it says.
+    let mut windows: BTreeMap<WindowId, Visibility> = BTreeMap::new();
     loop {
         tokio::select! {
             cmd = commands.recv() => match cmd {
-                Some(Command::HostBook(cmd)) => book.command(cmd, &mut known),
-                Some(cmd) => dispatch(cmd, &known, &mut conns, &shared, &sink, &mut window),
+                Some((_, Command::HostBook(cmd))) => book.command(cmd, &mut known),
+                Some((from, cmd)) => dispatch(from, cmd, &known, &mut conns, &shared, &sink, &mut windows),
                 None => break,
             },
             Some(req) = recv_opt(&mut requests) => route(req, &conns),
@@ -193,34 +258,38 @@ pub async fn run<S: Sink>(mut commands: Commands, sink: S, cfg: Config) {
     auth::lock(&store).clear_all();
 }
 
+/// Carries out `cmd` from window `from`.
 fn dispatch<S: Sink>(
+    from: WindowId,
     cmd: Command,
     known: &HashMap<HostId, HostSpec>,
     conns: &mut HashMap<HostId, ConnHandle>,
     shared: &Shared,
     sink: &S,
-    window: &mut Visibility,
+    windows: &mut BTreeMap<WindowId, Visibility>,
 ) {
     match cmd {
         Command::Connect { host } => {
             let Some(spec) = known.get(&host).cloned() else {
                 let status = ConnStatus::Failed("Dromon doesn't know this host any more.".into());
-                sink.emit(ServiceEvent::Status { host, status });
+                sink.emit_to(from, ServiceEvent::Status { host, status });
                 return;
             };
             let alive = conns.get(&host).is_some_and(|c| !c.cmds.is_closed());
             if !alive {
                 let c = conn::start(spec.clone(), shared.clone(), sink.clone());
-                let _ = c.cmds.send(ConnCmd::Window(*window));
+                for (w, vis) in windows.iter() {
+                    let _ = c.cmds.send(ConnCmd::Window(*w, *vis));
+                }
                 conns.insert(host.clone(), c);
             }
             if let Some(c) = conns.get(&host) {
-                let _ = c.cmds.send(ConnCmd::Connect(spec));
+                let _ = c.cmds.send(ConnCmd::Connect(from, spec));
             }
         }
         Command::List { host, path } => {
             if let Some(c) = conns.get(&host) {
-                let _ = c.cmds.send(ConnCmd::List(path));
+                let _ = c.cmds.send(ConnCmd::List(from, path));
             }
         }
         Command::Disconnect { host } => match conns.get(&host) {
@@ -236,7 +305,7 @@ fn dispatch<S: Sink>(
             let conn = shared.ids.owner(id).and_then(|host| conns.get(&host));
             match conn {
                 Some(c) => {
-                    if let Err(mpsc::error::SendError(ConnCmd::Answer(_, answer))) = c.cmds.send(ConnCmd::Answer(id, answer)) {
+                    if let Err(mpsc::error::SendError(ConnCmd::Answer(_, _, answer))) = c.cmds.send(ConnCmd::Answer(from, id, answer)) {
                         auth::wipe(answer);
                     }
                 }
@@ -258,18 +327,25 @@ fn dispatch<S: Sink>(
             }
         }
         Command::Window { visible, focused } => {
-            *window = match (visible, focused) {
+            let vis = match (visible, focused) {
                 (false, _) => Visibility::Hidden,
                 (true, true) => Visibility::Focused,
                 (true, false) => Visibility::VisibleUnfocused,
             };
+            windows.insert(from, vis);
             for c in conns.values() {
-                let _ = c.cmds.send(ConnCmd::Window(*window));
+                let _ = c.cmds.send(ConnCmd::Window(from, vis));
             }
         }
         Command::Poll { host } => {
             if let Some(c) = conns.get(&host) {
-                let _ = c.cmds.send(ConnCmd::PollNow);
+                let _ = c.cmds.send(ConnCmd::PollNow(from));
+            }
+        }
+        Command::WindowClosed => {
+            windows.remove(&from);
+            for c in conns.values() {
+                let _ = c.cmds.send(ConnCmd::Closed(from));
             }
         }
         // The manager's loop takes these first.

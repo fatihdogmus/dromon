@@ -9,11 +9,26 @@
 //!
 //! Secrets cross this boundary in exactly one place, [`Command::AnswerPrompt`]'s
 //! [`PromptAnswer`], whose `Debug` is redacted. Events never carry secrets.
+//!
+//! Every main window (⌘N) has a backend of its own over the one service ([`Backend::another`]):
+//! the backend says which window each command came from, so the service knows each window's
+//! folder on screen and how it shows, and which window a prompt goes to. Events about hosts,
+//! listings and transfers go to every window, and each takes what concerns it.
 
 use dromon_core::{ConnStatus, Entry, Error, HostId, HostSpec, Prompt, PromptAnswer, PromptId, RemotePath};
 use dromon_transfer::{ConflictChoice, JobId, JobRequest, JobView, TaskState};
 
 pub use super::hostbook::{HostBookCommand, HostBookEvent};
+
+/// One main window of the app, for the session: the first is [`WindowId::FIRST`], each ⌘N
+/// takes the next number.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct WindowId(pub u32);
+
+impl WindowId {
+    /// The window the app starts with.
+    pub const FIRST: WindowId = WindowId(0);
+}
 
 /// What the UI asks of the service.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,13 +49,16 @@ pub enum Command {
     /// screen when the operation changed it ([`FileOp::relists`]). A host that isn't connected
     /// answers `FileOpFailed` with [`Error::ConnectionLost`] at once.
     FileOp { id: OpId, host: HostId, op: FileOp },
-    /// How the window shows (§4.5): the folder on screen of each connected host is polled
-    /// only while `visible`, at the focused or the slower unfocused interval. Until the first
-    /// one arrives the service polls nothing.
+    /// How the sending window shows (§4.5): a folder on screen is polled while a window that
+    /// shows it is `visible`, at the focused interval while one of them is focused, else the
+    /// slower unfocused one. Until a window's first one arrives its folders aren't polled.
     Window { visible: bool, focused: bool },
-    /// Poll `host`'s folder on screen now (the window just gained focus): answered like any
-    /// poll, with `Refreshed` or `ListFailed` when it changed, else nothing.
+    /// Poll the sending window's folder on screen on `host` now (it just gained focus):
+    /// answered like any poll, with `Refreshed` or `ListFailed` when it changed, else nothing.
     Poll { host: HostId },
+    /// The sending window closed: its folders aren't polled any more, and a prompt waiting
+    /// in it moves to another window.
+    WindowClosed,
     /// Saved and recent hosts, Add to SSH config (`state/hostbook.rs`); answered with
     /// `HostBook` events.
     HostBook(HostBookCommand),
@@ -227,6 +245,25 @@ pub fn trace_line(ev: &ServiceEvent) -> String {
 /// backend returns an empty list and delivers events later.
 pub trait Backend {
     fn send(&mut self, cmd: Command) -> Vec<ServiceEvent>;
+
+    /// The same service for another main window, `window` (⌘N): its commands are that
+    /// window's. `None`: this backend serves one window only (scenes, most tests).
+    fn another(&mut self, window: WindowId) -> Option<Box<dyn Backend>> {
+        let _ = window;
+        None
+    }
+
+    /// Events that arrived for this window since it last asked, from what another window did
+    /// (a synchronous backend's; a threaded one delivers through its sink instead).
+    fn pending(&mut self) -> Vec<ServiceEvent> {
+        Vec::new()
+    }
+
+    /// Call `wake(window)` when events wait in [`Backend::pending`] for `window`, so it
+    /// catches up without waiting for its own next command.
+    fn set_wake(&mut self, wake: Box<dyn Fn(WindowId)>) {
+        drop(wake);
+    }
 }
 
 /// A backend that never answers: connections stay where the UI left them (the `connecting`

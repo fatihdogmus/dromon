@@ -201,6 +201,9 @@ impl SettingsWindow for Opened {
         *self.0.borrow_mut() += 1;
     }
     fn show(&mut self, _: SettingsView) {}
+    fn another(&self) -> Box<dyn SettingsWindow> {
+        Box::new(self.clone())
+    }
 }
 
 fn main_runtime() -> Runtime<App> {

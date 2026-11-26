@@ -1,12 +1,13 @@
 //! Settings (§6.8, §8): theme, list density, the download folder, transfers at once per host,
 //! and whether hidden files show by default.
 //!
-//! The values live once, here in the main window's state ([`App::settings`]). The Settings
-//! window is a second Rune window with its own state (`views/settings.rs`): the app tells it
-//! what to show through a [`SettingsWindow`] after every change, and it sends each change back
-//! as [`Action::Setting`](super::Action::Setting) (`settings_window.rs` carries both ways over
-//! the two windows' `AppHandle`s). A change applies at once and is remembered in `prefs.json`
-//! ([`Saved::settings`](super::Saved::settings)).
+//! The values live in each main window's state ([`App::settings`]), the same in all of them.
+//! The Settings window is one more Rune window with its own state (`views/settings.rs`): the
+//! app tells it what to show through a [`SettingsWindow`] after every change, and it sends each
+//! change back as [`Action::Setting`](super::Action::Setting) to one main window
+//! (`settings_window.rs` carries both ways over the windows' `AppHandle`s). A change applies
+//! there at once, is remembered in `prefs.json` ([`Saved::settings`](super::Saved::settings))
+//! and reaches the other main windows as [`News::Settings`](super::News::Settings).
 
 use std::ops::RangeInclusive;
 use std::path::{Path, PathBuf};
@@ -140,6 +141,8 @@ pub trait SettingsWindow {
     fn open(&mut self, view: SettingsView);
     /// The values changed: show `view` (whether the window is open or not).
     fn show(&mut self, view: SettingsView);
+    /// The same Settings window, for another main window's state (there's one for the app).
+    fn another(&self) -> Box<dyn SettingsWindow>;
 }
 
 /// No window: scenes, tests and headless runs, where a second window never opens.
@@ -148,6 +151,9 @@ pub struct NoWindow;
 impl SettingsWindow for NoWindow {
     fn open(&mut self, _: SettingsView) {}
     fn show(&mut self, _: SettingsView) {}
+    fn another(&self) -> Box<dyn SettingsWindow> {
+        Box::new(NoWindow)
+    }
 }
 
 impl App {
@@ -171,11 +177,12 @@ impl App {
     /// no section: the defaults, with ⌘⇧.'s last state (which used to be remembered) as the
     /// hidden-files default.
     pub(super) fn restore_settings(&mut self) {
-        let settings = match self.saved.settings.clone() {
+        let saved = self.saved().settings.clone();
+        let settings = match saved {
             Some(s) => s.clamped(),
-            None => Settings { show_hidden: self.saved.show_hidden.unwrap_or(true), ..Settings::default() },
+            None => Settings { show_hidden: self.saved().show_hidden.unwrap_or(true), ..Settings::default() },
         };
-        self.apply_settings(settings);
+        self.apply_settings(settings, true);
     }
 
     /// ⌘, (Ctrl+, elsewhere), the app menu's Settings…, the palette.
@@ -184,25 +191,37 @@ impl App {
         self.settings_window.open(view);
     }
 
-    /// A control in the Settings window: applied at once, remembered, and shown back.
+    /// A control in the Settings window: applied at once, remembered, shown back, and told to
+    /// the other main windows (which apply it too).
     pub(super) fn change_setting(&mut self, change: SettingsChange) {
         let new = self.settings.with(change);
         if new != self.settings {
-            self.apply_settings(new);
-            self.saved.settings = Some(self.settings.clone());
-            // The old ⌘⇧. state is the section's now.
-            self.saved.show_hidden = None;
-            self.save();
+            self.apply_settings(new, true);
+            let settings = self.settings.clone();
+            self.save(|s| {
+                s.settings = Some(settings.clone());
+                // The old ⌘⇧. state is the section's now.
+                s.show_hidden = None;
+            });
+            self.tell(super::News::Settings(settings));
         }
         let view = self.settings_view();
         self.settings_window.show(view);
     }
 
-    /// Makes `new` the settings and carries out what changed: the theme repaints both windows,
+    /// Another window's settings change (already remembered and told to the engine there).
+    pub(super) fn adopt_settings(&mut self, settings: Settings) {
+        if settings != self.settings {
+            self.apply_settings(settings, false);
+        }
+    }
+
+    /// Makes `new` the settings and carries out what changed: the theme repaints the windows,
     /// density the list (its views read [`Density::row`]), the download folder is read by the
-    /// next download, the engine hears the new limit, and the hidden-files default is the one
-    /// hosts opened from now on start with (the ones open keep theirs).
-    fn apply_settings(&mut self, new: Settings) {
+    /// next download, the engine hears the new limit (`engine`: from this window), and the
+    /// hidden-files default is the one hosts opened from now on start with (the ones open keep
+    /// theirs).
+    fn apply_settings(&mut self, new: Settings, engine: bool) {
         let old = std::mem::replace(&mut self.settings, new);
         let s = &self.settings;
         if old.theme != s.theme {
@@ -211,7 +230,7 @@ impl App {
         if old.show_hidden != s.show_hidden {
             self.show_hidden_default = s.show_hidden;
         }
-        if old.transfers_at_once != s.transfers_at_once {
+        if engine && old.transfers_at_once != s.transfers_at_once {
             let n = s.transfers_at_once;
             self.send(Command::Transfer(TransferCommand::PerHost(n)));
         }
