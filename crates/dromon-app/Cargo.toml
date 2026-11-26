@@ -6,6 +6,8 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+# `cargo run -p dromon-app` runs the app; `dromon-hot` is for scripts/dev.sh only.
+default-run = "dromon"
 
 # The app (UI, state, service thread) is a library so the end-to-end tests (`tests/e2e.rs`) can
 # drive it with the real `dromon` binary as ssh's askpass helper (`CARGO_BIN_EXE_dromon`).

@@ -1,0 +1,15 @@
+# Developer commands: `cargo dev`, `cargo demo`, `cargo goldens`, … (`cargo xtask` lists them).
+# Each runs the xtask crate, which runs a script under scripts/ or a cargo command.
+[alias]
+xtask = "run --quiet --package xtask --"
+dev = "xtask dev"
+app = "xtask app"
+demo = "xtask demo"
+lint = "xtask lint"
+goldens = "xtask goldens"
+flows = "xtask flows"
+smoke = "xtask smoke"
+repro = "xtask repro"
+perf = "xtask perf"
+accents = "xtask accents"
+package-linux = "xtask package-linux"

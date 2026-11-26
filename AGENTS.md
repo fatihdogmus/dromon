@@ -15,17 +15,21 @@ The plan is `.plans/dromon-plan.md`; where implementation stands is `.plans/prog
 
 ## Commands
 
+`cargo <command>` aliases (`.cargo/config.toml`, the `xtask` crate; `cargo xtask` lists them) run
+the scripts under `scripts/`; `bash scripts/<name>.sh` is the same.
+
 ```sh
 cargo test --workspace                     # everything; the sshd tests run when Docker answers
 DROMON_REQUIRE_DOCKER=1 cargo test --workspace   # CI: fail instead of skipping without Docker
-cargo clippy --workspace --all-targets -- -D warnings
-bash scripts/goldens.sh                    # re-render tests/goldens (look at every changed image)
-bash scripts/goldens.sh --check            # CI: render to target/goldens, compare within ±2 per channel
-bash scripts/flows.sh                      # render tests/flows/* to target/flows (strips, trees)
-bash scripts/smoke-app.sh [--window] [--connect]
-bash scripts/dev.sh [--mock] [-- APP ARGS]   # live editing: view/theme fn-body edits patch into the running app
-bash scripts/repro.sh <issue-number|issue.md>
-bash scripts/perf.sh [--gate frames,first-rows,throughput,soak|all]   # §9 performance gates: one table; exits 1 on a wide miss
+cargo lint                                 # clippy --workspace --all-targets -- -D warnings
+cargo app [ARGS] / cargo demo [ARGS]       # the app (debug) on your ssh config / on the built-in demo
+cargo dev [--mock] [-- APP ARGS]           # live editing: view/theme fn-body edits patch into the running app
+cargo goldens                              # re-render tests/goldens (look at every changed image)
+cargo goldens --check                      # CI: render to target/goldens, compare within ±2 per channel
+cargo flows                                # render tests/flows/* to target/flows (strips, trees)
+cargo smoke [--window] [--connect]
+cargo repro <issue-number|issue.md>
+cargo perf [--gate frames,first-rows,throughput,soak|all]   # §9 performance gates: one table; exits 1 on a wide miss
 ```
 
 ## Verifying a change

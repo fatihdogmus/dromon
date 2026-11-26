@@ -86,7 +86,7 @@ git clone https://github.com/fatihdogmus/dromon && cd dromon
 cargo run --release -p dromon-app      # the toolchain is pinned in rust-toolchain.toml
 ```
 
-Linux needs `libxkbcommon-dev` and `libwayland-dev`. Want to look around without a server? `DROMON_MOCK=1 cargo run -p dromon-app` opens a built-in demo.
+Linux needs `libxkbcommon-dev` and `libwayland-dev`. Want to look around without a server? `cargo demo` opens a built-in demo.
 
 </details>
 
@@ -161,7 +161,7 @@ On Windows and Linux, <kbd>Ctrl</kbd> takes the place of <kbd>⌘</kbd>; Delete 
 Most bugs can be shown **without your servers**. The [bug report form](https://github.com/fatihdogmus/dromon/issues/new?template=bug.yml) asks for a small *fixture* (fake hosts, folders and sign-in prompts) and a *script* (the clicks and keys), and Dromon replays them headless:
 
 ```sh
-bash scripts/repro.sh 42      # issue #42 → target/repro/42/{summary.md,end.png,strip.png}
+cargo repro 42      # issue #42 → target/repro/42/{summary.md,end.png,strip.png}
 ```
 
 Maintainers can comment `/repro` on an issue and CI replies with the same output. Writing the fixture with an AI agent works well: point it at [`docs/fixtures.md`](docs/fixtures.md).
@@ -169,10 +169,15 @@ Maintainers can comment `/repro` on an issue and CI replies with the same output
 ## 🛠️ Contributing
 
 ```sh
-cargo test --workspace          # unit, headless UI and end-to-end tests (Docker runs a real sshd)
-bash scripts/goldens.sh         # re-render the screenshots above; they're also the visual tests
-bash scripts/flows.sh           # render user flows to image strips in target/flows
+cargo dev                 # the app with live editing: UI changes appear as you save
+cargo demo                # the app on a built-in demo, no servers needed
+cargo test --workspace    # unit, headless UI and end-to-end tests (Docker runs a real sshd)
+cargo lint                # clippy, as CI runs it
+cargo goldens             # re-render the screenshots above; they're also the visual tests
+cargo flows               # render user flows to image strips in target/flows
 ```
+
+`cargo xtask` lists every command.
 
 How the code is organised, how to verify a change and how to triage an issue: [`AGENTS.md`](AGENTS.md). How releases are built and signed: [`docs/releasing.md`](docs/releasing.md).
 
