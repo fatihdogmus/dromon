@@ -17,6 +17,11 @@ path = "src/lib.rs"
 name = "dromon"
 path = "src/main.rs"
 
+[features]
+# Rune's headless phase clocks (`frame-profile`) for `examples/perf.rs` (`scripts/perf.sh`):
+# the scroll frames split into view, commit, layout, text and paint. Measuring builds only.
+perf = ["rune/frame-profile"]
+
 [dependencies]
 dromon-core.workspace = true
 dromon-sftp.workspace = true

@@ -136,7 +136,32 @@ impl Selection {
     /// Drops names that are no longer on screen (after a refresh, a filter or hiding
     /// dotfiles); the cursor and anchor go with them.
     pub fn retain(&mut self, rows: &[&str]) {
-        let on: HashSet<&str> = rows.iter().copied().collect();
+        self.retain_rows(rows.iter().copied());
+    }
+
+    /// [`Selection::retain`] with the rows given one by one, in one pass and without copying
+    /// their names: only the names this holds are looked for among them (by comparing them,
+    /// when there are a few; a 100,000-row folder refreshes its rows on every page).
+    pub fn retain_rows<'a>(&mut self, rows: impl Iterator<Item = &'a str>) {
+        if self.items.is_empty() && self.cursor.is_none() && self.anchor.is_none() {
+            return;
+        }
+        let few = self.items.len() <= 16;
+        let on: HashSet<&str> = {
+            let held: Vec<&str> = if few {
+                self.items.iter().map(String::as_str).chain(self.cursor.as_deref()).chain(self.anchor.as_deref()).collect()
+            } else {
+                Vec::new()
+            };
+            let holds = |n: &str| {
+                if few {
+                    held.contains(&n)
+                } else {
+                    self.items.contains(n) || self.cursor.as_deref() == Some(n) || self.anchor.as_deref() == Some(n)
+                }
+            };
+            rows.filter(|n| holds(n)).collect()
+        };
         self.items.retain(|n| on.contains(n.as_str()));
         if self.cursor.as_deref().is_some_and(|c| !on.contains(c)) {
             self.cursor = None;

@@ -62,11 +62,11 @@ impl Fresh {
 
 /// Where the cursor goes when its row `gone` left: the first row after it (in the order
 /// `before` had) that's still there, else the nearest one before it.
-pub fn neighbour<'a>(before: &'a [String], gone: &str, still: impl Fn(&str) -> bool) -> Option<&'a str> {
-    let at = before.iter().position(|n| n == gone)?;
-    let after = before[at + 1..].iter().find(|n| still(n));
-    let prior = || before[..at].iter().rev().find(|n| still(n));
-    after.or_else(prior).map(String::as_str)
+pub fn neighbour<'a, S: AsRef<str>>(before: &'a [S], gone: &str, still: impl Fn(&str) -> bool) -> Option<&'a str> {
+    let at = before.iter().position(|n| n.as_ref() == gone)?;
+    let after = before[at + 1..].iter().find(|n| still(n.as_ref()));
+    let prior = || before[..at].iter().rev().find(|n| still(n.as_ref()));
+    after.or_else(prior).map(AsRef::as_ref)
 }
 
 /// How the window shows, as last told to the service.

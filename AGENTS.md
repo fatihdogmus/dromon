@@ -24,6 +24,7 @@ bash scripts/goldens.sh --check            # CI: render to target/goldens, compa
 bash scripts/flows.sh                      # render tests/flows/* to target/flows (strips, trees)
 bash scripts/smoke-app.sh [--window] [--connect]
 bash scripts/repro.sh <issue-number|issue.md>
+bash scripts/perf.sh [--gate frames,first-rows,throughput,soak|all]   # §9 performance gates: one table; exits 1 on a wide miss
 ```
 
 ## Verifying a change

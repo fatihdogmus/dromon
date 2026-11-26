@@ -8,7 +8,7 @@ mod host;
 mod natural;
 mod path;
 
-pub use entry::{Entry, EntryKind, LinkTarget, SortDir, SortKey, sort_entries};
+pub use entry::{Entry, EntryKind, LinkTarget, SortDir, SortKey, merge_sorted, sort_entries};
 pub use error::{Error, Result};
 pub use event::{ConnStatus, Prompt, PromptAnswer, PromptId, PromptKind};
 pub use host::{HostId, HostSource, HostSpec};
