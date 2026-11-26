@@ -25,7 +25,7 @@ optdepends=('vulkan-driver: GPU drawing (vulkan-radeon, vulkan-intel, nvidia-uti
 provides=(dromon)
 conflicts=(dromon)
 options=(!strip !debug)
-_release="$url/releases/download/v$_version"
+_release="$url/releases/download/$_version"
 source_x86_64=("$_release/Dromon-$_version-linux-x64.deb" "$_release/Dromon-$_version-linux-x64.deb.asc")
 # The .deb's sha256 from the release's GPG-signed SHA256SUMS; the .asc is checked by validpgpkeys.
 sha256sums_x86_64=('0000000000000000000000000000000000000000000000000000000000000000' 'SKIP')

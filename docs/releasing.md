@@ -1,8 +1,9 @@
 # Releasing Dromon
 
-A release is a version tag. `.github/workflows/release.yml` builds, packages and signs every file
-and attaches it to a **draft** GitHub release; a maintainer reads the draft and publishes it by
-hand.
+A release is one run of `.github/workflows/release.yml`: you pick patch, minor or major and
+approve once; it bumps the version, builds, packages and signs every file, tags the commit with
+the plain version (`0.1.0`, no `v`), publishes the GitHub release, and brings the version commit
+to `main`.
 
 | File | For | Signed with |
 |---|---|---|
@@ -19,54 +20,49 @@ runs and the files ship unsigned (Windows), ad-hoc signed (macOS) or without GPG
 
 ## Cutting a release
 
-1. **Bump the version** in an ordinary commit: `[workspace.package].version` in the root
-   `Cargo.toml` (`0.1.0`, or `0.1.0-rc.1` for a release candidate), then `cargo build` so
-   `Cargo.lock` follows. Merge it to `main` like any change (CI green).
-2. **Tag that commit** with the same version and push the tag:
+1. **Run it**: Actions → Release → *Run workflow*, branch `main`, and pick **patch**, **minor**
+   or **major** (from `0.1.0`: `0.1.1`, `0.2.0`, `1.0.0`). Or:
    ```sh
-   git tag -s v0.1.0 -m "Dromon 0.1.0"    # -s if you sign tags; -a otherwise
-   git push origin v0.1.0
+   gh workflow run release.yml -R fatihdogmus/dromon --ref main -f bump=minor
    ```
-   The `plan` job fails unless the tag is exactly `v` + the Cargo version, so `--locked` builds
-   and `dromon --version` always agree with the tag.
-3. **Wait** for the run named `Release v0.1.0` (roughly 40-60 minutes). Approve each job that
-   waits for the `release` environment ([environment](#1-the-release-environment)); with
-   `WINDOWS_SIGNING=signpath`, also approve the signing request in SignPath.
-4. **Review the draft** (Releases → Draft). The notes list every file, its SHA-256 and how it is
-   signed, with the user steps for anything unsigned. Write what changed at the top (an HTML
-   comment marks the spot). Optionally download a file and check it as a user would
-   ([checking a download](#checking-a-download)).
-5. **Publish** the draft. Tags with `-rc.N` are marked as pre-releases.
-6. Publishing starts **Homebrew** ([`homebrew.yml`](#homebrew)), which updates the cask in the
-   tap a few minutes later. Nothing to approve.
+2. **Approve once.** `plan` names the version in its summary and commits the bump (`Cargo.toml`,
+   `Cargo.lock`) to the branch `release/<version>`; the `approve` job then waits for you
+   (Review deployments → `release-approval`). The builds run meanwhile; nothing is signed before
+   you approve. With `WINDOWS_SIGNING=signpath`, SignPath also asks for its own approval.
+3. **That's it** (roughly 40-60 minutes). At the end `publish` attests every file, tags the
+   version commit `<version>`, and publishes the release; its notes list the commits since the
+   previous release, then every file with its SHA-256 and how it is signed. `land` brings the
+   version commit to `main` (a fast-forward, or a merge commit if `main` moved during the run)
+   and deletes `release/<version>`; `homebrew` updates the cask in the tap.
 
-A failed tag run can be re-run from the Actions page (same commit); a re-run only updates the
-draft, and the workflow never touches a published release. To release a fixed commit, bump to the
-next version: never move a published tag.
+Nothing is tagged, published or pushed to `main` before the very end, so a run that fails or is
+cancelled leaves only the `release/<version>` branch, which the next run overwrites. Re-run the
+failed jobs from the Actions page, or start a new run. A published release and its tag are never
+changed: to fix one, release the next version.
 
-**Check runs.** Actions → Release → *Run workflow* (mode `check`, from `main`: once protected,
-the `release` environment admits only `main` and `v*` tags) runs the same builds and packages,
-signs with whatever credentials exist, and publishes nothing: the files stay
-as the run's artifacts (`release-files`, `sign-linux`, `release-notes` and the per-platform
-builds). Use it after changing packaging or signing setup, and before the first tag.
+**Dry runs.** The same, with *Dry run* ticked (from any branch): the same builds and packages at
+the current version, signed with whatever credentials exist (after your approval), and nothing
+bumped, tagged, published or pushed: the files stay as the run's artifacts (`release-files`,
+`sign-linux`, `release-notes` and the per-platform builds). Use it after changing packaging or
+signing setup.
 
 ## What the workflow does
 
-It compiles, packages, signs and publishes; it runs no lint and no tests (the tagged commit was
-tested by `ci.yml` on `main`). The only checks are part of packaging and signing: each build
-script runs the packaged `dromon --version`, and each signing step verifies the signature it just
-made.
+It compiles, packages, signs and publishes; it runs no lint and no tests (the commit on `main`
+was tested by `ci.yml`). The only checks are part of packaging and signing: each build script
+runs the packaged `dromon --version`, and each signing step verifies the signature it just made.
 
 ```
-plan ─┬─ credentials (release env) ───────────────────────────────────────────────┐
+plan ─┬─ approve (release-approval: you) ── credentials (release env) ──────────────┐
       ├─ build-linux (x64, ubuntu-22.04) ── package-arch ───────────────────────────┤
       ├─ build-macos (macos-15, arm64) ── sign-macos (release env)* ────────────────┤
       └─ build-windows (x64) ── sign-windows-exe (release env)*                     │
                                     ── package-windows (x64)                        │
                                     ── sign-windows-msi (release env)* ─────────────┤
          assemble ◄─────────────────────────────────────────────────────────────────┘
-            └── sign-linux (release env)* ── publish (release env; tag runs only)
-         * runs only when its credentials exist
+            └── sign-linux (release env)* ── publish (release env) ─┬─ land
+                                                                    └─ homebrew (homebrew.yml)
+         * runs only when its credentials exist; publish, land and homebrew: releases only
 ```
 
 To check packages by hand the way a user would (install, run, uninstall), the scripts are still
@@ -75,8 +71,9 @@ there: `scripts/package-linux.sh --verify` (Debian, Ubuntu, Arch containers),
 
 | Job | Needs | Environment | Produces |
 |---|---|---|---|
-| `plan` | | — | mode (`release`/`check`), version, tag; fails on a tag ≠ Cargo version |
-| `credentials` | plan | `release` | which credentials exist (`windows`, `macos`, `gpg`); enforces the [policy](#credentials-policy) |
+| `plan` | | — | mode (`release`/`check`), version, tag; for a release the version commit on `release/<version>` (`set-version.sh`), whose SHA every job builds |
+| `approve` | plan | `release-approval` | nothing: the run's one approval |
+| `credentials` | plan, approve | `release` | which credentials exist (`windows`, `macos`, `gpg`); enforces the [policy](#credentials-policy) |
 | `build-linux` ×2 | plan | — | `.deb` (binary built on Ubuntu 22.04: glibc 2.35) |
 | `package-arch` | build-linux | — | both `.pkg.tar.zst`, made by makepkg from the `.deb`s |
 | `build-macos` | plan | — | `Dromon.app.zip` (Apple silicon, ad-hoc signed) and the unsigned DMG |
@@ -87,7 +84,9 @@ there: `scripts/package-linux.sh --verify` (Debian, Ubuntu, Arch containers),
 | `sign-macos` | credentials, build-macos | `release` | signed, notarized, stapled app in a signed, notarized, stapled DMG |
 | `assemble` | every build and signing job | — | `release-files` (the 7 files + `SHA256SUMS`), `release-notes` |
 | `sign-linux` | assemble | `release` | `.deb.asc`, `.pkg.tar.zst.sig`, `SHA256SUMS.asc`, the public key |
-| `publish` | assemble, sign-linux | `release` | attestations; the draft release (tag runs only) |
+| `publish` | assemble, sign-linux | `release` | attestations; the tag and the published release (releases only) |
+| `land` | publish | — | `main` gets the version commit; `release/<version>` is deleted |
+| `homebrew` | publish | `homebrew` | the cask in the tap ([Homebrew](#homebrew)) |
 
 ### The security boundary
 
@@ -97,7 +96,8 @@ as carefully as code that holds the keys (a CODEOWNERS rule for both is worth ad
 - **Build and package jobs** run repository code (cargo, the packaging scripts, the app
   itself) with no environment, no secrets and no `id-token`. They produce unsigned files.
 - **`credentials`, `sign-*` and `publish`** run in the `release` environment, which holds every
-  signing secret and variable. They check out only `/.github/release/` (sign-macos also reads
+  signing secret and variable and admits only `main`, and only after `approve`, the one job you
+  approve (environment `release-approval`). They check out only `/.github/release/` (sign-macos also reads
   `packaging/macos/Info.plist`, as data), run only those scripts and SHA-pinned actions, and
   never build, install project dependencies, or run anything from the artifacts.
 - **Artifacts are data with a digest.** Every artifact carries an `ARTIFACT-SHA256SUMS`; the job
@@ -110,15 +110,15 @@ as carefully as code that holds the keys (a CODEOWNERS rule for both is worth ad
   GPG passphrase reaches gpg on a file descriptor; the credentials job sees only whether a secret
   is set (`secrets.X != ''`), never its value; the keychain and `GNUPGHOME` are deleted afterwards.
 - **Provenance**: `publish` attests every file with `actions/attest-build-provenance` (Sigstore,
-  keyless): anyone can check that a file came from this workflow at this tag.
+  keyless): anyone can check that a file came from this workflow, run from `main`.
 
 ### Credentials policy
 
 | Platform | Credentials missing | Partly set |
 |---|---|---|
-| Linux (GPG) | check run: warning, no GPG signatures. **Tag release: fails** (the key is free). | fails |
-| Windows | the files ship **unsigned**, with a warning in the run summary and the release notes. A tag release fails when the repository variable `DROMON_REQUIRE_SIGNED_WINDOWS` is `true`. | fails (`WINDOWS_SIGNING` set, its values incomplete) |
-| macOS | the app ships **ad-hoc signed, not notarized**, with a warning. A tag release fails when `DROMON_REQUIRE_SIGNED_MACOS` is `true`. | fails |
+| Linux (GPG) | dry run: warning, no GPG signatures. **Release: fails** (the key is free). | fails |
+| Windows | the files ship **unsigned**, with a warning in the run summary and the release notes. A release fails when the repository variable `DROMON_REQUIRE_SIGNED_WINDOWS` is `true`. | fails (`WINDOWS_SIGNING` set, its values incomplete) |
+| macOS | the app ships **ad-hoc signed, not notarized**, with a warning. A release fails when `DROMON_REQUIRE_SIGNED_MACOS` is `true`. | fails |
 
 Set the `DROMON_REQUIRE_SIGNED_*` variables once a platform's signing works, so a lost secret can
 never silently ship an unsigned release.
@@ -130,7 +130,7 @@ never silently ship an unsigned release.
 Start here; each is independent of the others.
 
 - **Linux: GPG (free).** A dedicated release key signs the `.deb`s, the Arch packages and
-  `SHA256SUMS`. Required for tag releases: [set it up](#2-linux-the-release-gpg-key) first.
+  `SHA256SUMS`. Required for releases: [set it up](#2-linux-the-release-gpg-key) first.
 - **Every file: Sigstore build-provenance attestations (free).** Already on, nothing to set up
   for a public repository. Users check any file with `gh attestation verify`. (A private
   repository needs GitHub Enterprise Cloud for attestations.)
@@ -176,45 +176,49 @@ identity from release to release.
 ### 1. The `release` environment
 
 Every signing secret and variable lives in the GitHub environment `release` (Settings →
-Environments). The first run creates it without protection; protect it before adding secrets:
+Environments), which admits only `main`. Your one approval per run is a second environment,
+`release-approval`, with you as its required reviewer and no secrets: GitHub asks again for
+every job that enters a reviewed environment once it becomes ready, so the secrets' environment
+has no reviewer and its jobs wait on `approve` instead.
 
 ```sh
 REPO=fatihdogmus/dromon
 ME=$(gh api user --jq .id)
-# Required reviewer (you); deployments only from tags v* and branch main (for check runs).
-gh api -X PUT "repos/$REPO/environments/release" --input - <<EOF
-{
-  "reviewers": [{ "type": "User", "id": $ME }],
-  "prevent_self_review": false,
-  "deployment_branch_policy": { "protected_branches": false, "custom_branch_policies": true }
-}
+# release: the secrets; main only, no reviewer.
+gh api -X PUT "repos/$REPO/environments/release" --input - <<'EOF'
+{ "reviewers": [], "deployment_branch_policy": { "protected_branches": false, "custom_branch_policies": true } }
 EOF
-gh api -X POST "repos/$REPO/environments/release/deployment-branch-policies" -f name='v*' -f type=tag
 gh api -X POST "repos/$REPO/environments/release/deployment-branch-policies" -f name=main -f type=branch
+# release-approval: you approve each run here (any branch, for dry runs).
+gh api -X PUT "repos/$REPO/environments/release-approval" --input - <<EOF
+{ "reviewers": [{ "type": "User", "id": $ME }], "prevent_self_review": false, "deployment_branch_policy": null }
+EOF
 ```
 
-With a required reviewer, each job that enters the environment waits for approval:
-`credentials` early, then the signing jobs, `sign-linux` and `publish`. Jobs waiting at the same
-moment can be approved together. If that is too many clicks, drop the reviewer and rely on the
-tag ruleset below plus your review of the draft.
+A dry run from another branch builds and packages, then stops at `credentials`: `release`
+admits only `main`. Run dry runs that should sign from `main`.
 
-**Tag ruleset**: only you can create, move or delete `v*` tags.
+**Tag ruleset**: a tag, once made, can't be moved or deleted (admins excepted). Creating one
+stays open to anyone with write access, so the workflow's token can tag releases: a personal
+repository can't name GitHub Actions as a ruleset bypass actor (organizations can, as
+`{ "actor_type": "Integration", "actor_id": 15368 }`, and could then restrict creation too).
 
 ```sh
 gh api -X POST "repos/$REPO/rulesets" --input - <<'EOF'
 {
-  "name": "release tags",
+  "name": "Release tags",
   "target": "tag",
   "enforcement": "active",
-  "conditions": { "ref_name": { "include": ["refs/tags/v*"], "exclude": [] } },
-  "rules": [{ "type": "creation" }, { "type": "update" }, { "type": "deletion" }, { "type": "non_fast_forward" }],
+  "conditions": { "ref_name": { "include": ["refs/tags/*"], "exclude": [] } },
+  "rules": [{ "type": "update" }, { "type": "deletion" }, { "type": "non_fast_forward" }],
   "bypass_actors": [{ "actor_type": "RepositoryRole", "actor_id": 5, "bypass_mode": "always" }]
 }
 EOF
 ```
 
-`actor_id` 5 is the repository *Admin* role. Protect `main` too (pull requests, required CI),
-and keep 2FA on your GitHub account.
+`actor_id` 5 is the repository *Admin* role. `land` pushes the version commit to `main` with
+the workflow's token: protecting `main` (pull requests, required CI) would block it unless the
+token may bypass. Keep 2FA on your GitHub account.
 
 Setting values (secrets from stdin or a file, never from your shell history):
 
@@ -407,12 +411,12 @@ All are in the `release` environment unless marked *repository*.
 
 `brew install --cask fatihdogmus/tap/dromon` installs from the tap
 [fatihdogmus/homebrew-tap](https://github.com/fatihdogmus/homebrew-tap). Its `Casks/dromon.rb`
-is written by `.github/workflows/homebrew.yml`, which runs when a release is published (and by
-hand: Actions → Homebrew → *Run workflow* with the tag). On a macOS runner it:
+is written by `.github/workflows/homebrew.yml`, which `release.yml` calls after publishing (and
+by hand: Actions → Homebrew → *Run workflow* with the tag). On a macOS runner it:
 
 1. skips the release unless it is GitHub's latest one and not a prerelease;
 2. downloads `Dromon-<v>-macos-arm64.dmg` and `SHA256SUMS`, and checks the DMG's SHA-256 against
-   its line and against the Sigstore attestation `release.yml` made for that tag;
+   its line and against the Sigstore attestation `release.yml` made (run from `main`);
 3. asks Gatekeeper (`spctl --assess`) whether `Dromon.app` is notarized;
 4. writes the cask (`.github/release/homebrew-cask.sh`) and pushes it to the tap.
 
@@ -420,8 +424,8 @@ While the app is not notarized, the cask's `postflight` removes the quarantine f
 `Dromon.app` (Homebrew no longer has `--no-quarantine`, and only third-party taps may do this),
 and its caveats say so. A notarized release drops both, with no change here.
 
-The `homebrew` environment (deployments from `v*` tags and `main`, no reviewer: publishing the
-release was the approval) holds `HOMEBREW_TAP_DEPLOY_KEY`, the private half of a deploy key with
+The `homebrew` environment (deployments from `main`, no reviewer: the release run was the
+approval) holds `HOMEBREW_TAP_DEPLOY_KEY`, the private half of a deploy key with
 write access to the tap only. To replace it:
 
 ```sh
@@ -527,8 +531,7 @@ check run, look at:
   `packaging/macos/build-app.sh` notes how to make a universal binary for Intel Macs), its file
   name in `assemble.sh` and a row in `release-notes.sh`.
 - **SignPath**: `packaging/signpath/dromon-msi.xml` follows SignPath's documented syntax but is
-  only validated when uploaded to SignPath. The exe's ProductVersion string is the full release
-  version (`0.1.0-rc.1`); its numeric FileVersion is `0.1.0.0`.
+  only validated when uploaded to SignPath. The exe's ProductVersion string is the release
+  version (`0.1.0`); its numeric FileVersion is `0.1.0.0`.
 - **Attestations** need a public repository (or GitHub Enterprise Cloud).
-- **MSI versions** are numeric: `0.1.0-rc.1` installs as 0.1.0, and same-version upgrades are
-  allowed, so the final release replaces its rc.
+- **MSI versions** are numeric, and same-version upgrades are allowed.

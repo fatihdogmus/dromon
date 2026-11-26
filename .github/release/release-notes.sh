@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# release-notes.sh <release dir>: prints the draft release's notes (Markdown): every file, its
-# SHA-256, whether and how it is signed, and how a user checks it, with the steps to open an
-# unsigned build. The maintainer adds the changes at the top before publishing the draft.
+# release-notes.sh <release dir>: prints the release notes' files part (Markdown): every file,
+# its SHA-256, whether and how it is signed, and how a user checks it, with the steps to open an
+# unsigned build. publish-github-release.sh puts the changes since the last release above it.
 #
 # Environment: VERSION, MODE (release|check), GITHUB_REPOSITORY, GITHUB_SERVER_URL,
 # WINDOWS_SIGNING (none|azure|sslcom|signpath), MACOS_SIGNED, GPG_SIGNED (true|false),
@@ -17,7 +17,7 @@ v=${VERSION:?}
 windows=${WINDOWS_SIGNING:-none}
 macos=${MACOS_SIGNED:-false}
 gpg=${GPG_SIGNED:-false}
-download="$server/$repo/releases/download/v$v"
+download="$server/$repo/releases/download/$v"
 
 case "$windows" in
   none) windows_status=":warning: **Unsigned**: Windows SmartScreen warns before it runs" ;;
@@ -46,8 +46,6 @@ rows=$(
 )
 
 cat <<EOF
-<!-- Write what changed in Dromon $v here, then publish this draft. -->
-
 ## Downloads
 
 | File | For | Signature | SHA-256 |
@@ -162,5 +160,5 @@ EOF
 fi
 if [ "${MODE:-release}" != release ]; then
   echo
-  echo "_Check run: nothing was published or attested._"
+  echo "_Dry run: nothing was published or attested._"
 fi

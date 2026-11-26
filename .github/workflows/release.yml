@@ -13,43 +13,49 @@ name: Release
 # Targets for now: Windows x64 (Windows on Arm runs it emulated), macOS Apple silicon only (no
 # Intel Macs), Linux x86_64. The packaging scripts take an --arch / -Arch to add more later.
 #
-# - push of tag vX.Y.Z or vX.Y.Z-rc.N: a draft GitHub release for the tag, which the maintainer
-#   publishes by hand. The tag must equal Cargo.toml's [workspace.package].version.
-# - workflow_dispatch, mode=check: the same builds and packages, signed with whatever
-#   credentials exist; nothing is published, the files stay as this run's artifacts.
+# Run it from Actions → Release → Run workflow on main, choosing patch, minor or major:
+# - plan bumps [workspace.package].version (0.1.0 → 0.1.1 | 0.2.0 | 1.0.0) in a commit on top of
+#   main, pushed to the branch release/<version>; every job builds that commit.
+# - approve waits for the maintainer: the run's one approval (environment release-approval).
+#   The builds run meanwhile; nothing is signed before it.
+# - publish tags the commit <version> (plain semver), publishes the GitHub release, then main
+#   gets the version commit (land) and the Homebrew cask is updated (homebrew.yml).
+# Dry run: the same builds, packages and signatures at the current version; nothing is bumped,
+# tagged, published or pushed, and the files stay as this run's artifacts.
 #
 # Security boundary (this file and .github/release/):
 # - build and package jobs run repository code with no environment, secrets or id-token, and
 #   produce unsigned files.
 # - credentials, sign-* and publish jobs run in the `release` environment (which holds every
-#   signing secret and variable), check out only /.github/release/ (plus data files they read),
-#   run only those scripts and SHA-pinned actions, and treat artifacts as data.
+#   signing secret and variable, and admits only main), only after approve, check out only
+#   /.github/release/ (plus data files they read), run only those scripts and SHA-pinned
+#   actions, and treat artifacts as data.
 # - every artifact carries an ARTIFACT-SHA256SUMS whose digest the job that made it reports as
 #   an output; every job that downloads it checks that digest (.github/release/download).
 # - each signing job runs only when its credentials exist (credentials job); otherwise the file
 #   ships unsigned, with a warning, unless the release requires it (credentials.sh).
 
 on:
-  push:
-    tags:
-      - "v[0-9]+.[0-9]+.[0-9]+"
-      - "v[0-9]+.[0-9]+.[0-9]+-rc.[0-9]+"
   workflow_dispatch:
     inputs:
-      mode:
-        description: "check: build, package, sign with the credentials that exist; publish nothing"
+      bump:
+        description: "Version to release: the next patch, minor or major version"
         type: choice
-        options: [check]
-        default: check
+        options: [patch, minor, major]
+        default: patch
+      dry-run:
+        description: "Dry run: build, package and sign only; no version bump, tag, release or push"
+        type: boolean
+        default: false
 
-run-name: ${{ github.event_name == 'push' && format('Release {0}', github.ref_name) || format('Check {0}', github.ref_name) }}
+run-name: ${{ inputs.dry-run && format('Dry run ({0})', github.ref_name) || format('Release ({0})', inputs.bump) }}
 
 permissions:
   contents: read
 
-# One run per tag (or branch, for checks) at a time; a running release is never cancelled.
+# One release at a time; a running release is never cancelled.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 defaults:
@@ -61,14 +67,17 @@ env:
   CARGO_INCREMENTAL: "0"
 
 jobs:
+  # The version, and for a release its version commit on branch release/<version>.
   plan:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: write
     outputs:
       mode: ${{ steps.plan.outputs.mode }}
       version: ${{ steps.plan.outputs.version }}
       tag: ${{ steps.plan.outputs.tag }}
-      prerelease: ${{ steps.plan.outputs.prerelease }}
+      sha: ${{ steps.plan.outputs.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -76,21 +85,36 @@ jobs:
           sparse-checkout: |
             /.github/release/
             /Cargo.toml
+            /Cargo.lock
           sparse-checkout-cone-mode: false
-          persist-credentials: false
+          # Pushes the version commit to release/<version> (releases only).
+          persist-credentials: ${{ !inputs.dry-run }}
       - id: plan
         run: bash .github/release/plan.sh
         env:
-          EVENT: ${{ github.event_name }}
-          REF_TYPE: ${{ github.ref_type }}
-          REF_NAME: ${{ github.ref_name }}
-          INPUT_MODE: ${{ inputs.mode }}
+          BUMP: ${{ inputs.bump }}
+          DRY_RUN: ${{ inputs.dry-run }}
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+
+  # The run's one approval: the maintainer's, for the version plan chose (its summary says
+  # which). Every job that holds a secret waits for it, through credentials.
+  approve:
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: release-approval
+    steps:
+      - run: echo "Approved, $MODE of Dromon $VERSION." >> "$GITHUB_STEP_SUMMARY"
+        env:
+          MODE: ${{ needs.plan.outputs.mode }}
+          VERSION: ${{ needs.plan.outputs.version }}
 
   # Which signing credentials the release environment holds (secrets only as "is it set"), and
-  # whether this run may go on without some (Linux GPG is required for a tag release; Windows
+  # whether this run may go on without some (Linux GPG is required for a release; Windows
   # and macOS only when DROMON_REQUIRE_SIGNED_WINDOWS / _MACOS is true).
   credentials:
-    needs: plan
+    needs: [plan, approve]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     environment: release
@@ -105,7 +129,7 @@ jobs:
         name: Check out the release scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.plan.outputs.sha }}
           sparse-checkout: /.github/release/
           sparse-checkout-cone-mode: false
           persist-credentials: false
@@ -153,7 +177,7 @@ jobs:
       - &checkout-build
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.plan.outputs.sha }}
           persist-credentials: false
       - name: System packages
         run: |
@@ -505,7 +529,7 @@ jobs:
       - name: Check out the release scripts (and Info.plist, read as data)
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.plan.outputs.sha }}
           sparse-checkout: |
             /.github/release/
             /packaging/macos/Info.plist
@@ -648,7 +672,7 @@ jobs:
           name: sign-linux
           path: ${{ runner.temp }}/signatures
 
-  # ---- Publish: a draft GitHub release (tag runs only) -------------------------------------
+  # ---- Publish: the tag, the GitHub release, main, the Homebrew cask (releases only) --------
 
   publish:
     needs: [plan, credentials, assemble, sign-linux]
@@ -687,11 +711,40 @@ jobs:
           subject-path: |
             ${{ runner.temp }}/release/release-files/Dromon-*
             ${{ runner.temp }}/release/release-files/SHA256SUMS
-      - name: Create or update the draft release
+      - name: Tag and publish the release
         run: bash .github/release/publish-github-release.sh "$RUNNER_TEMP/notes/release-notes/RELEASE_NOTES.md" "$RUNNER_TEMP/release/release-files" "$RUNNER_TEMP/signatures/sign-linux"
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.plan.outputs.tag }}
           VERSION: ${{ needs.plan.outputs.version }}
-          PRERELEASE: ${{ needs.plan.outputs.prerelease }}
-          SHA: ${{ github.sha }}
+          SHA: ${{ needs.plan.outputs.sha }}
+
+  # main gets the version commit (fast-forward, or a merge if main moved meanwhile), and the
+  # release/<version> branch goes.
+  land:
+    needs: [plan, publish]
+    if: ${{ !cancelled() && needs.publish.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - *checkout-release
+      - run: bash .github/release/land-version.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ needs.plan.outputs.sha }}
+          BRANCH: release/${{ needs.plan.outputs.version }}
+          VERSION: ${{ needs.plan.outputs.version }}
+
+  # A release published with the workflow's token starts no other workflow, so the cask update
+  # is called from here.
+  homebrew:
+    needs: [plan, publish]
+    if: ${{ !cancelled() && needs.publish.result == 'success' }}
+    permissions:
+      contents: read
+      attestations: read
+    uses: ./.github/workflows/homebrew.yml
+    with:
+      tag: ${{ needs.plan.outputs.tag }}

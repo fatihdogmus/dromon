@@ -323,7 +323,7 @@ main() {
   if [ -n "${DROMON_RELEASE_URL:-}" ]; then
     base=${DROMON_RELEASE_URL%/}
   else
-    base=$REPO_URL/releases/download/v$VERSION
+    base=$REPO_URL/releases/download/$VERSION
   fi
   name=Dromon-$VERSION-$ASSET_SUFFIX
 

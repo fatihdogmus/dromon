@@ -1,7 +1,7 @@
 name: Homebrew
 
 # Updates the cask in the tap (fatihdogmus/homebrew-tap, Casks/dromon.rb) when a release is
-# published by hand from its draft, so `brew install --cask fatihdogmus/tap/dromon` and
+# published (release.yml calls it), so `brew install --cask fatihdogmus/tap/dromon` and
 # `brew upgrade` get it. Only the latest non-prerelease release is written; the DMG must match
 # the release's SHA256SUMS and its build attestation (.github/release/homebrew-update.sh).
 #
@@ -9,12 +9,20 @@ name: Homebrew
 # the tap and nothing else. Without it the job only writes the cask to its summary.
 
 on:
+  # release.yml calls it after publishing (a release its token publishes starts no workflow).
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release tag (X.Y.Z)"
+        type: string
+        required: true
+  # A release published by hand.
   release:
     types: [published]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to write the cask for (vX.Y.Z); must be the latest release"
+        description: "Release tag to write the cask for (X.Y.Z); must be the latest release"
         required: true
 
 run-name: Homebrew cask for ${{ github.event.release.tag_name || inputs.tag }}

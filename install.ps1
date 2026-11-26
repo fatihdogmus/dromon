@@ -77,7 +77,7 @@
     if ($env:DROMON_RELEASE_URL) {
         $base = $env:DROMON_RELEASE_URL.TrimEnd('/')
     } else {
-        $base = "https://github.com/$repo/releases/download/v$version"
+        $base = "https://github.com/$repo/releases/download/$version"
     }
     $name = "Dromon-$version-windows-x64.msi"
 

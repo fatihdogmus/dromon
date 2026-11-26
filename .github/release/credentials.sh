@@ -3,14 +3,14 @@
 # may go on without some of them. Reads only variables and, for secrets, whether each is set
 # (release.yml passes `secrets.X != ''`, never a secret's value).
 #
-#   Linux (GPG)  required for a tag release (it costs nothing); a check run without it warns.
+#   Linux (GPG)  required for a release (it costs nothing); a dry run without it warns.
 #   Windows      WINDOWS_SIGNING = azure | sslcom | signpath; unset ships the MSI unsigned.
 #   macOS        Developer ID + notary key; none ships the app ad-hoc signed and unnotarized.
 #
 # A platform whose credentials are set only in part fails the run (a half-configured backend is
 # a mistake, not a choice). Repository variables DROMON_REQUIRE_SIGNED_WINDOWS and
-# DROMON_REQUIRE_SIGNED_MACOS = true make a tag release fail when that platform would ship
-# unsigned (a check run warns).
+# DROMON_REQUIRE_SIGNED_MACOS = true make a release fail when that platform would ship
+# unsigned (a dry run warns).
 #
 # Outputs: windows (none|azure|sslcom|signpath), macos (true|false), apple-team-id, gpg
 # (true|false), gpg-fingerprint.
@@ -37,9 +37,9 @@ present() {
   done
   echo "$count"
 }
-# Fail a tag release, warn a check run.
+# Fail a release, warn a dry run.
 required() {
-  if [ "$release" = true ]; then die "$1"; else warn "$1 (a tag release would fail)"; fi
+  if [ "$release" = true ]; then die "$1"; else warn "$1 (a release would fail)"; fi
 }
 
 summary "### Signing credentials"
