@@ -505,9 +505,11 @@ console window.
 As a consequence, `dromon --version` typed in `cmd` or PowerShell prints nothing visible (a GUI
 program doesn't attach to its parent's console), but captured output works:
 `& "C:\Program Files\Dromon\dromon.exe" --version | Out-String` (PowerShell then also waits for
-it). `verify-msi.ps1` and `build-exe.ps1` read it that way. Not yet verified on Windows: the
-askpass round trip itself (Dromon's Windows askpass transport isn't implemented in `dromon-ssh`
-yet), and that GitHub's runners behave as described.
+it). `verify-msi.ps1` and `build-exe.ps1` read it that way. The Windows askpass transport is a
+named pipe whose DACL admits only the current user (`dromon-ssh/src/askpass/server.rs` and
+`win32.rs`); the `windows` CI job runs the askpass round trip with Windows' own `ssh.exe`, on
+debug builds, which keep the console. The GUI-subsystem release build as the helper is checked
+by hand only.
 
 ## Building packages locally
 

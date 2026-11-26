@@ -41,7 +41,7 @@
 //! ([`Variant::Toxic`], [`Fixture::toxiproxy`]). Same users, keys and seed data; what a variant
 //! lacks is asked through [`Fixture::has`] / [`Fixture::supports`]. [`matrix::run`] runs one
 //! check against every variant of [`matrix::variants`]: only the default one unless
-//! `DROMON_SERVER_MATRIX=1` ([`matrix::MATRIX_ENV`]). See `tests/docker/README.md`.
+//! `DROMON_SERVER_MATRIX=1` ([`matrix::MATRIX_ENV`]). See `docs/test-servers.md`.
 
 use std::fmt;
 use std::io::{Read as _, Write as _};

@@ -29,7 +29,7 @@ use crate::{BACKEND_ENV, Fixture, env_flag, native_backend, note, try_fixture};
 pub const MATRIX_ENV: &str = "DROMON_SERVER_MATRIX";
 
 /// A server of the matrix. All run on the Docker backend with the users, keys and seed data of
-/// `tests/docker/` (see `tests/docker/README.md`); what one lacks is a
+/// `tests/docker/` (see `docs/test-servers.md`); what one lacks is a
 /// [`Feature`](crate::Feature).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Variant {
