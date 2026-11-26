@@ -1,0 +1,24 @@
+# ../sshd_config for Alpine's sshd: no PAM (Alpine builds it without), so no `UsePAM` and no
+# keyboard-interactive user; Alpine's sftp-server path.
+Port 22
+HostKey /etc/ssh/ssh_host_ed25519_key
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+AllowUsers key pw keypw enc
+MaxStartups 100:30:200
+MaxSessions 50
+PrintMotd no
+Subsystem sftp /usr/lib/ssh/sftp-server
+LogLevel INFO
+
+Match User pw
+    PasswordAuthentication yes
+    PubkeyAuthentication no
+    AuthenticationMethods password
+
+Match User keypw
+    PasswordAuthentication yes
+    AuthenticationMethods publickey,password

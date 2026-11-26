@@ -2,7 +2,8 @@
 
 A Debian trixie OpenSSH server (PAM enabled) for the integration tests in
 `crates/dromon-sftp/tests/fixture.rs`, `crates/dromon-ssh/tests/askpass_e2e.rs`,
-`crates/dromon-transfer/tests/io.rs` and `crates/dromon-app/tests/{e2e,transfers_e2e}.rs`. Users,
+`crates/dromon-transfer/tests/io.rs` and `crates/dromon-app/tests/{e2e,transfers_e2e}.rs`, and
+other servers for the [server matrix](#server-matrix) (`*/tests/matrix.rs`). Users,
 passwords and how each one logs in: `Dockerfile`, `sshd_config` and `pam-sshd`. Where Docker
 can't run (macOS CI), the same users and data on the machine's own sshd: see
 [Native sshd](#native-sshd-macos-ci).
@@ -23,9 +24,10 @@ The testkit prints `dromon-testkit: sshd fixture on 127.0.0.1:<port> …` when i
 
 ## How it works
 
-- **Image**: built from the files in this folder (not `README.md`) as
-  `dromon-testkit-sshd:<hash of those files>`. The build is skipped while that tag exists, so it
-  happens once per change. Old tags stay behind: `docker image rm $(docker image ls -q dromon-testkit-sshd)`.
+- **Image**: built from the files in this folder (not `README.md` or the subfolders, which are the
+  [server matrix](#server-matrix)'s) as `dromon-testkit-sshd:<hash of those files>`. The build is
+  skipped while that tag exists, so it happens once per change. Old tags stay behind:
+  `docker image rm $(docker image ls -q dromon-testkit-sshd)`.
 - **Keys**: each test process generates its keypairs with `ssh-keygen` into
   `$TMPDIR/dromon-testkit-<pid>-…/` and copies the public keys into the container before it starts;
   no key is in the image. Folders of finished processes are deleted on the next start.
@@ -38,6 +40,75 @@ The testkit prints `dromon-testkit: sshd fixture on 127.0.0.1:<port> …` when i
   1 GiB `fixture/big/big.bin` is made over ssh on first use by the `--ignored` tests only.
   `seed.sh <home>` seeds another home (the native backend's key user); without an argument it is
   `/home/key`.
+
+## Server matrix
+
+The same SFTP and transfer checks against several real servers (`.plans/dromon-plan.md` §9, M5):
+`crates/dromon-sftp/tests/matrix.rs` (capabilities, listings of 100, 10k and 100k entries with
+paging and timings, stat/mkdir/rename/remove_all, symlink loops, unreadable folders, reads and
+writes, copy-data or streaming) and `crates/dromon-transfer/tests/matrix.rs` (download, upload,
+same-host copy, moves, symlink loops in scans, resume after a connection reset). Each check runs
+against every server at once and prints one line per server; it fails after all of them ran if
+any failed:
+
+```text
+matrix: sftp copy-data or streaming        bullseye  ok       0.3 s  no copy-data: streamed
+```
+
+```sh
+cargo test -p dromon-sftp -p dromon-transfer --test matrix          # trixie only (as in every cargo test)
+DROMON_SERVER_MATRIX=1 cargo test -p dromon-sftp -p dromon-transfer --test matrix   # every server
+```
+
+| Variant (`dromon_testkit::Variant`) | Image | What differs |
+|---|---|---|
+| `Trixie` (the default, `fixture()`) | `Dockerfile` | OpenSSH 10, PAM: everything |
+| `Bullseye` | `bullseye/Dockerfile` | OpenSSH 8.4p1: posix-rename, but no `limits@openssh.com` (32 KiB chunks) and no `copy-data` (same-host copies stream); packages from a fixed snapshot.debian.org date (bullseye has left the mirrors) |
+| `Alpine` | `alpine/Dockerfile`, `alpine/sshd_config` | Alpine's musl OpenSSH, busybox tools, no PAM: `kbd` can't log in, no TOTP |
+| `Toxic` | `Dockerfile` + `toxiproxy/` | the trixie image behind toxiproxy: about 20 ms (±10) more round trip, 4 MB/s each way, replies sliced into ~1.4 KB pieces (`toxiproxy::BASE_TOXICS`); tests add toxics and reset connections through toxiproxy's HTTP API |
+
+- **Selection**: `dromon_testkit::fixture_of(Variant, test)` starts one server per variant and test
+  process on first use (`fixture(test)` is `Trixie`); `matrix::run(check, |fixture| …)` runs a
+  check against `matrix::variants()`: all four with `DROMON_SERVER_MATRIX=1`, else `Trixie` only,
+  so a plain `cargo test` starts nothing new. On the native backend the matrix skips (its servers
+  are Docker images).
+- **Same users and data**: every image has the five users, takes the same keys and runs the same
+  `entrypoint.sh` and `seed.sh` (under busybox on Alpine); `bullseye/` also reuses `sshd_config`,
+  `pam-sshd` and `google_authenticator`. The testkit adds those shared files to each variant's
+  build context; the tag hashes the whole context.
+- **Capabilities are asked, not assumed**: `Fixture::has(Feature::CopyData | Limits | PosixRename |
+  Toxics | Totp)` (silent), `Fixture::supports(…, test)` (prints the skip line),
+  `Outcome::unless(fixture, feature)` in a matrix check. The capability check asserts that what
+  the session detects matches the fixture's answer.
+- **toxiproxy**: a container of `toxiproxy/Dockerfile` (Shopify's binaries, `toxiproxy.sh`) next
+  to the sshd container, with its own lifeline; its proxy `sshd` forwards `0.0.0.0:2222` to the
+  sshd container's address on the Docker bridge (`UPSTREAM`), and the testkit adds the base toxics
+  through the API (port 8474, published on 127.0.0.1 like 2222; `Fixture::toxiproxy()`). The
+  resume check (`matrix::run_exclusive`: no other check uses that server meanwhile) adds 1 MB/s
+  caps and more latency, cuts a download and an upload at 2 MiB with `reset_peer`
+  (`Toxiproxy::reset_peers`), reconnects and checks that both resume from their part files and
+  end with the exact bytes.
+- **Big folders**: `fixture/mixed` (100) and `fixture/many` (10k) are seeded; the 100k folder is
+  made by one command on the server in the matrix run only (`Outcome::matrix_only()`), listed
+  paged and whole, and deleted again.
+- **Time**: about 2 minutes for both binaries on a warm machine (images cached); the 100k listing
+  behind toxiproxy (about 30 s per listing) is the slowest check.
+
+CI: the `linux` job's `Server matrix (Docker sshd variants)` step.
+
+## Windows OpenSSH server (CI)
+
+`crates/dromon-transfer/tests/windows_sshd.rs` checks Windows' own OpenSSH server, whose SFTP
+paths are `/C:/Users/<user>`: the home folder and the drive (`/C:`, which the server reads as
+`C:\`) resolve and list, a file and a folder tree round-trip with their mtimes, renames, a
+same-host copy and a delete. It is opt-in: without `DROMON_WINDOWS_SSHD=1` its tests skip. The
+`windows` job's `Tests (Windows OpenSSH server, /C:/ paths)` step starts the inbox `sshd`
+(installing the `OpenSSH.Server` capability if missing), writes a fresh key to
+`%ProgramData%\ssh\administrators_authorized_keys` (the runner's user is an administrator; the
+file's ACL is Administrators and SYSTEM only, as sshd requires), checks one login and runs it with
+`DROMON_WINDOWS_SSHD_KEY`, `DROMON_WINDOWS_SSHD_USER` and `DROMON_WINDOWS_SSHD_PORT` (and
+optionally `DROMON_WINDOWS_SSHD_HOST`, default 127.0.0.1). The same variables point it at any
+Windows machine with sshd and a key-authorized user.
 
 ## Native sshd (macOS CI)
 

@@ -20,6 +20,12 @@
 //!
 //! Debugging: `DROMON_FIXTURE_KEEP=1` skips the lifeline, so the container (and the key folder)
 //! outlive the tests; the start line prints the port, key folder and the `docker rm -f` command.
+//!
+//! Variants ([`Variant`]): each is an image of its own folder under `tests/docker/` (its
+//! Dockerfile, plus the shared files it copies), tagged by the hash of its build context, and
+//! started the same way. [`Variant::Toxic`] starts a container of the default image and a
+//! toxiproxy container (`tests/docker/toxiproxy/`, its own lifeline) whose proxy forwards to the
+//! sshd container's address on the Docker network; the fixture's port is the proxy's.
 
 use std::io::Read as _;
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
@@ -31,20 +37,59 @@ use testcontainers::bollard::models::{HostConfig, PortBinding};
 use testcontainers::core::client::docker_client_instance;
 use testcontainers::core::{BuildImageOptions, IntoContainerPort, WaitFor};
 use testcontainers::runners::{AsyncBuilder, AsyncRunner};
-use testcontainers::{GenericBuildableImage, ImageExt};
-use tokio::sync::OnceCell;
+use testcontainers::{ContainerAsync, ContainerRequest, GenericBuildableImage, GenericImage, ImageExt};
 
+use crate::toxiproxy::{self, Toxiproxy};
 use crate::{
-    Account, ENCRYPTED_KEY, Fixture, HOST, IMAGE_NAME, KEEP_ENV, KEY, LABEL, NULL_DEVICE, Role, Server, State,
-    client_keys, env_flag, note, probe_login,
+    Account, ENCRYPTED_KEY, Fixture, HOST, IMAGE_NAME, KEEP_ENV, KEY, LABEL, NULL_DEVICE, Role, Server, State, Variant,
+    client_keys, env_flag, note, probe_login, read_banner,
 };
 
 const CONTEXT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/docker");
-/// Everything the Dockerfile uses (README.md is not part of the image).
-const CONTEXT_FILES: [&str; 6] = ["Dockerfile", "sshd_config", "pam-sshd", "google_authenticator", "entrypoint.sh", "seed.sh"];
 pub(crate) const SSH_PORT: u16 = 22;
 const LIFELINE_PORT: u16 = 9999;
 pub(crate) const HOST_PUBLIC_KEY: &str = "/etc/ssh/ssh_host_ed25519_key.pub";
+
+/// One image: its name, its Dockerfile and the other files of its build context, as paths
+/// under `tests/docker/` and names in the context.
+struct ImageSpec {
+    name: &'static str,
+    dockerfile: &'static str,
+    files: &'static [(&'static str, &'static str)],
+}
+
+/// The files of `tests/docker/` the Debian images copy (README.md is not part of an image).
+const DEBIAN_FILES: &[(&str, &str)] = &[
+    ("sshd_config", "sshd_config"),
+    ("pam-sshd", "pam-sshd"),
+    ("google_authenticator", "google_authenticator"),
+    ("entrypoint.sh", "entrypoint.sh"),
+    ("seed.sh", "seed.sh"),
+];
+
+const TRIXIE: ImageSpec = ImageSpec { name: IMAGE_NAME, dockerfile: "Dockerfile", files: DEBIAN_FILES };
+const BULLSEYE: ImageSpec =
+    ImageSpec { name: "dromon-testkit-sshd-bullseye", dockerfile: "bullseye/Dockerfile", files: DEBIAN_FILES };
+const ALPINE: ImageSpec = ImageSpec {
+    name: "dromon-testkit-sshd-alpine",
+    dockerfile: "alpine/Dockerfile",
+    files: &[("alpine/sshd_config", "sshd_config"), ("entrypoint.sh", "entrypoint.sh"), ("seed.sh", "seed.sh")],
+};
+const TOXIPROXY: ImageSpec = ImageSpec {
+    name: "dromon-testkit-toxiproxy",
+    dockerfile: "toxiproxy/Dockerfile",
+    files: &[("toxiproxy/toxiproxy.sh", "toxiproxy.sh")],
+};
+
+impl ImageSpec {
+    fn of(variant: Variant) -> &'static ImageSpec {
+        match variant {
+            Variant::Trixie | Variant::Toxic => &TRIXIE,
+            Variant::Bullseye => &BULLSEYE,
+            Variant::Alpine => &ALPINE,
+        }
+    }
+}
 
 /// The running container.
 #[derive(Debug)]
@@ -69,13 +114,13 @@ impl Container {
     }
 }
 
-pub(crate) async fn start() -> State {
+pub(crate) async fn start(variant: Variant) -> State {
     let docker = match reachable_docker().await {
         Ok(docker) => docker,
         Err(why) => return State::Unreachable(why),
     };
-    match start_container(&docker).await {
-        Ok(fixture) => State::Ready(fixture),
+    match start_container(&docker, variant).await {
+        Ok(fixture) => State::Ready(Box::new(fixture)),
         Err(why) => State::Failed(why),
     }
 }
@@ -138,73 +183,114 @@ async fn reachable_docker() -> Result<Docker, String> {
     }
 }
 
-async fn start_container(docker: &Docker) -> Result<Fixture, String> {
-    let started = Instant::now();
-    let keep = env_flag(KEEP_ENV);
-    let keys = client_keys(keep)?;
-
-    let tag = context_hash()?;
-    let image_name = format!("{IMAGE_NAME}:{tag}");
+/// Builds `spec`'s image unless its tag exists: the image, `name:tag`, and whether it was cached.
+async fn build_image(docker: &Docker, spec: &ImageSpec) -> Result<(GenericImage, String, bool), String> {
+    let tag = context_hash(spec)?;
+    let image_name = format!("{}:{tag}", spec.name);
     let cached = docker.inspect_image(&image_name).await.is_ok();
-    let mut buildable = GenericBuildableImage::new(IMAGE_NAME, &tag).with_dockerfile(Path::new(CONTEXT).join("Dockerfile"));
-    for file in CONTEXT_FILES.iter().filter(|f| **f != "Dockerfile") {
-        buildable = buildable.with_file(Path::new(CONTEXT).join(file), format!("./{file}"));
+    let mut buildable =
+        GenericBuildableImage::new(spec.name, &tag).with_dockerfile(Path::new(CONTEXT).join(spec.dockerfile));
+    for (src, dst) in spec.files {
+        buildable = buildable.with_file(Path::new(CONTEXT).join(src), format!("./{dst}"));
     }
     let image = buildable
         .build_image_with(BuildImageOptions::new().with_skip_if_exists(true))
         .await
         .map_err(|e| format!("build {image_name}: {e}"))?;
-    let image_ready = started.elapsed();
+    Ok((image, image_name, cached))
+}
 
-    let mut request = image
-        .with_exposed_port(SSH_PORT.tcp())
-        .with_exposed_port(LIFELINE_PORT.tcp())
-        .with_wait_for(WaitFor::message_on_stderr("Server listening on"))
-        .with_copy_to("/keys/id_ed25519.pub", keys.join(format!("{KEY}.pub")))
-        .with_copy_to("/keys/id_ed25519_enc.pub", keys.join(format!("{ENCRYPTED_KEY}.pub")))
+/// A container of `image`, ready once `ready` is on its stderr, with `ports` published on
+/// 127.0.0.1 at random host ports, deleted by Docker once it stops (its lifeline ends it).
+fn container_request(image: GenericImage, ports: &'static [u16], ready: &str, keep: bool) -> ContainerRequest<GenericImage> {
+    let mut image = image.with_wait_for(WaitFor::message_on_stderr(ready));
+    for port in ports {
+        image = image.with_exposed_port(port.tcp());
+    }
+    let request = image
         .with_label(LABEL, std::process::id().to_string())
         .with_startup_timeout(Duration::from_secs(120))
-        .with_host_config_modifier(|host_config: &mut HostConfig| {
-            // Docker deletes the container once it stops (the lifeline ends it), and the ports
-            // are reachable from this machine only.
+        .with_host_config_modifier(move |host_config: &mut HostConfig| {
+            // The ports are reachable from this machine only.
             host_config.auto_remove = Some(true);
             host_config.publish_all_ports = Some(false);
             let binding = || Some(vec![PortBinding { host_ip: Some(HOST.into()), host_port: Some(String::new()) }]);
-            host_config.port_bindings = Some(
-                [(format!("{SSH_PORT}/tcp"), binding()), (format!("{LIFELINE_PORT}/tcp"), binding())].into_iter().collect(),
-            );
+            host_config.port_bindings = Some(ports.iter().map(|p| (format!("{p}/tcp"), binding())).collect());
         });
+    if keep { request.with_env_var(KEEP_ENV, "1") } else { request }
+}
+
+/// Attaches the container's lifeline (none when kept).
+async fn lifeline_of(container: &ContainerAsync<GenericImage>, keep: bool) -> Result<Option<TcpStream>, String> {
     if keep {
-        request = request.with_env_var(KEEP_ENV, "1");
+        return Ok(None);
     }
+    let port = container.get_host_port_ipv4(LIFELINE_PORT).await.map_err(|e| format!("port {LIFELINE_PORT}: {e}"))?;
+    attach_lifeline(port).map(Some)
+}
+
+async fn start_container(docker: &Docker, variant: Variant) -> Result<Fixture, String> {
+    let started = Instant::now();
+    let keep = env_flag(KEEP_ENV);
+    let keys = client_keys(keep)?;
+    let (image, image_name, cached) = build_image(docker, ImageSpec::of(variant)).await?;
+    let image_ready = started.elapsed();
+
+    let request = container_request(image, &[SSH_PORT, LIFELINE_PORT], "Server listening on", keep)
+        .with_copy_to("/keys/id_ed25519.pub", keys.join(format!("{KEY}.pub")))
+        .with_copy_to("/keys/id_ed25519_enc.pub", keys.join(format!("{ENCRYPTED_KEY}.pub")));
     // Until it is forgotten below, dropping `container` (an error on the way) removes it.
     let container = request.start().await.map_err(|e| format!("start {image_name}: {e}"))?;
     let container_id = container.id().to_owned();
-    let port = container.get_host_port_ipv4(SSH_PORT).await.map_err(|e| format!("port {SSH_PORT}: {e}"))?;
-    let lifeline = if keep {
-        None
-    } else {
-        let lifeline_port =
-            container.get_host_port_ipv4(LIFELINE_PORT).await.map_err(|e| format!("port {LIFELINE_PORT}: {e}"))?;
-        Some(attach_lifeline(lifeline_port)?)
-    };
+    let mut port = container.get_host_port_ipv4(SSH_PORT).await.map_err(|e| format!("port {SSH_PORT}: {e}"))?;
+    let lifeline = lifeline_of(&container, keep).await?;
 
-    let fixture = Fixture {
-        port,
-        keys,
-        accounts: accounts(),
-        server: Server::Docker(Container { id: container_id, image: image_name, _lifeline: lifeline }),
-        big_file: OnceCell::new(),
-    };
+    // The toxic variant: toxiproxy in front, on the sshd container's address.
+    let mut proxy = None;
+    if variant == Variant::Toxic {
+        let ip = container.get_bridge_ip_address().await.map_err(|e| format!("the sshd container's address: {e}"))?;
+        let (proxy_image, proxy_name, _) = build_image(docker, &TOXIPROXY).await?;
+        let ports = &[toxiproxy::LISTEN_PORT, toxiproxy::API_PORT, LIFELINE_PORT];
+        let started = container_request(proxy_image, ports, "dromon-toxiproxy: proxy sshd", keep)
+            .with_env_var("UPSTREAM", format!("{ip}:{SSH_PORT}"))
+            .start()
+            .await
+            .map_err(|e| format!("start {proxy_name}: {e}"))?;
+        port = started
+            .get_host_port_ipv4(toxiproxy::LISTEN_PORT)
+            .await
+            .map_err(|e| format!("port {}: {e}", toxiproxy::LISTEN_PORT))?;
+        let api = started.get_host_port_ipv4(toxiproxy::API_PORT).await.map_err(|e| format!("port {}: {e}", toxiproxy::API_PORT))?;
+        let api = SocketAddr::from((Ipv4Addr::LOCALHOST, api));
+        let toxi = Toxiproxy::new(api, started.id().to_owned(), lifeline_of(&started, keep).await?);
+        toxi.add_base()?;
+        proxy = Some((started, toxi));
+    }
+    let (proxy_container, toxi) = proxy.map_or((None, None), |(c, t)| (Some(c), Some(t)));
+
+    let banner = read_banner(port).await?;
+    let server = Server::Docker(Container { id: container_id, image: image_name, _lifeline: lifeline });
+    let fixture = Fixture::assemble(port, keys, accounts(), server, variant, banner, toxi);
     probe_login(&fixture).await?;
-    // From here on the lifeline (or, kept, the developer) ends the container; never run
+    // From here on the lifelines (or, kept, the developer) end the containers; never run
     // testcontainers' remove-on-drop, whose client belongs to this short-lived runtime.
     std::mem::forget(container);
+    if let Some(c) = proxy_container {
+        std::mem::forget(c);
+    }
 
     let Server::Docker(c) = &fixture.server else { unreachable!() };
-    let id = &c.id[..12.min(c.id.len())];
+    let short = |id: &str| id[..12.min(id.len())].to_owned();
+    let id = short(&c.id);
+    let (via, proxy_id) = match &fixture.toxiproxy {
+        Some(t) => (format!(" through toxiproxy {} (API {})", short(&t.container_id), t.api()), format!(" {}", short(&t.container_id))),
+        None => (String::new(), String::new()),
+    };
     note(format_args!(
-        "dromon-testkit: sshd fixture on {HOST}:{port}, container {id}, image {} ({} in {:.1} s), ready after {:.1} s",
+        "dromon-testkit: {} sshd fixture on {HOST}:{port}{via}, {}, container {id}, image {} ({} in {:.1} s), \
+         ready after {:.1} s",
+        variant.name(),
+        fixture.banner,
         c.image,
         if cached { "cached" } else { "built" },
         image_ready.as_secs_f64(),
@@ -213,7 +299,7 @@ async fn start_container(docker: &Docker) -> Result<Fixture, String> {
     if keep {
         note(format_args!(
             "dromon-testkit: {KEEP_ENV}=1: the container keeps running; log in with \
-             `ssh -F {NULL_DEVICE} -i {} -p {port} key@{HOST}`; clean up with `docker rm -f {id}; rm -r {}`",
+             `ssh -F {NULL_DEVICE} -i {} -p {port} key@{HOST}`; clean up with `docker rm -f {id}{proxy_id}; rm -r {}`",
             fixture.key().display(),
             fixture.keys.display(),
         ));
@@ -248,14 +334,15 @@ fn try_lifeline(addr: &SocketAddr) -> Result<TcpStream, String> {
     Ok(stream)
 }
 
-/// The image tag: the first 16 hex digits of SHA-1 over the build context's names and contents.
-fn context_hash() -> Result<String, String> {
+/// The image tag: the first 16 hex digits of SHA-1 over the build context's names and contents
+/// (the Dockerfile first, as `Dockerfile`).
+fn context_hash(spec: &ImageSpec) -> Result<String, String> {
     use sha1::{Digest, Sha1};
     let mut hasher = Sha1::new();
-    for file in CONTEXT_FILES {
-        let path = Path::new(CONTEXT).join(file);
+    for (src, name) in std::iter::once(&(spec.dockerfile, "Dockerfile")).chain(spec.files) {
+        let path = Path::new(CONTEXT).join(src);
         let data = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        hasher.update(file.as_bytes());
+        hasher.update(name.as_bytes());
         hasher.update([0]);
         hasher.update((data.len() as u64).to_be_bytes());
         hasher.update(&data);

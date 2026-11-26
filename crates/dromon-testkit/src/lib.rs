@@ -33,6 +33,15 @@
 //! Docker in WSL2 on `tcp://127.0.0.1:2375`; WSL forwards the published 127.0.0.1 ports to
 //! Windows). The ssh tools are the inbox OpenSSH ([`openssh`]) and the null device is `NUL`
 //! ([`NULL_DEVICE`]).
+//!
+//! **Server matrix.** Besides that default server ([`Variant::Trixie`]) the Docker backend runs
+//! other servers on request, one container (set) per variant and test process, started on first
+//! use with [`fixture_of`]: OpenSSH 8.4p1 without `copy-data` ([`Variant::Bullseye`]), Alpine's
+//! musl OpenSSH ([`Variant::Alpine`]), and the default server behind toxiproxy
+//! ([`Variant::Toxic`], [`Fixture::toxiproxy`]). Same users, keys and seed data; what a variant
+//! lacks is asked through [`Fixture::has`] / [`Fixture::supports`]. [`matrix::run`] runs one
+//! check against every variant of [`matrix::variants`]: only the default one unless
+//! `DROMON_SERVER_MATRIX=1` ([`matrix::MATRIX_ENV`]). See `tests/docker/README.md`.
 
 use std::fmt;
 use std::io::{Read as _, Write as _};
@@ -40,12 +49,16 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use dromon_core::RemotePath;
-use tokio::sync::OnceCell;
+use tokio::sync::{OnceCell, RwLock};
 
 mod docker;
+pub mod matrix;
 mod native;
 mod totp;
+pub mod toxiproxy;
 
+pub use matrix::Variant;
+pub use toxiproxy::Toxiproxy;
 pub use totp::{STEP as TOTP_STEP, totp_at, totp_now, totp_secret, wrong_totp};
 
 /// The fixture's users, by how they log in. [`Fixture::user`] names the account.
@@ -91,14 +104,23 @@ impl Role {
     }
 }
 
-/// What not every backend offers; asked through [`Fixture::supports`].
+/// What not every backend or [`Variant`] offers; asked through [`Fixture::has`] and
+/// [`Fixture::supports`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Feature {
-    /// A TOTP second factor for [`Role::Kbd`] (libpam-google-authenticator, [`totp_now`]): Docker,
-    /// and the native backend where that module is installed (macOS CI: Homebrew's
-    /// `google-authenticator-libpam`; Debian: `libpam-google-authenticator`) and sshd has
-    /// `PAMServiceName` (OpenSSH 9.8+).
+    /// A TOTP second factor for [`Role::Kbd`] (libpam-google-authenticator, [`totp_now`]): Docker
+    /// (not [`Variant::Alpine`], whose sshd has no PAM), and the native backend where that
+    /// module is installed (macOS CI: Homebrew's `google-authenticator-libpam`; Debian:
+    /// `libpam-google-authenticator`) and sshd has `PAMServiceName` (OpenSSH 9.8+).
     Totp,
+    /// sftp-server advertises `copy-data` (OpenSSH 9.0+): not [`Variant::Bullseye`].
+    CopyData,
+    /// sftp-server advertises `limits@openssh.com` (OpenSSH 8.6+): not [`Variant::Bullseye`].
+    Limits,
+    /// sftp-server advertises `posix-rename@openssh.com`: every server here.
+    PosixRename,
+    /// toxiproxy sits between the client and sshd ([`Fixture::toxiproxy`]): [`Variant::Toxic`].
+    Toxics,
 }
 
 /// Which server the fixture runs ([`BACKEND_ENV`]).
@@ -167,53 +189,118 @@ pub struct Fixture {
     /// By [`Role::index`].
     accounts: Vec<Account>,
     server: Server,
+    variant: Variant,
+    /// The server's SSH identification line, read at start.
+    banner: String,
+    /// [`Variant::Toxic`]: the proxy in front of sshd ([`Fixture::port`] is its port).
+    toxiproxy: Option<Toxiproxy>,
+    /// Held shared by [`matrix::run`] checks, exclusively by [`matrix::run_exclusive`] ones
+    /// (a toxiproxy reset ends every connection through the proxy).
+    access: RwLock<()>,
     big_file: OnceCell<Result<(), String>>,
 }
 
 impl fmt::Debug for Fixture {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Fixture")
+            .field("variant", &self.variant)
             .field("port", &self.port)
             .field("keys", &self.keys)
             .field("accounts", &self.accounts)
             .field("server", &self.server)
+            .field("toxiproxy", &self.toxiproxy)
             .finish_non_exhaustive()
     }
 }
 
 enum State {
-    Ready(Fixture),
+    Ready(Box<Fixture>),
     /// Docker doesn't answer: why.
     Unreachable(String),
-    /// The native backend can't run here: the whole reason.
+    /// The backend (or this variant on it) can't run here: the whole reason.
     Unavailable(String),
     Failed(String),
 }
 
-/// This process's fixture, started on first use. `None` (after printing a skip line naming
-/// `test`) when the backend can't run here; panics instead with `DROMON_REQUIRE_DOCKER=1`, and
-/// whenever the backend can run but the fixture doesn't start.
+/// Why a fixture isn't there and the test should skip (the skip line is already printed).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Skipped(pub(crate) String);
+
+/// This process's fixture ([`Variant::Trixie`]), started on first use. `None` (after printing a
+/// skip line naming `test`) when the backend can't run here; panics instead with
+/// `DROMON_REQUIRE_DOCKER=1`, and whenever the backend can run but the fixture doesn't start.
 pub async fn fixture(test: &str) -> Option<&'static Fixture> {
-    static STATE: OnceCell<State> = OnceCell::const_new();
-    match STATE.get_or_init(start_in_thread).await {
-        State::Ready(fixture) => Some(fixture),
+    fixture_of(Variant::Trixie, test).await
+}
+
+/// This process's fixture for `variant` (one per variant, each started on first use), as
+/// [`fixture`]. Variants other than [`Variant::Trixie`] need the Docker backend: with
+/// `DROMON_FIXTURE_BACKEND=native` they skip (or fail with `DROMON_REQUIRE_DOCKER=1`).
+pub async fn fixture_of(variant: Variant, test: &str) -> Option<&'static Fixture> {
+    try_fixture(variant, test).await.ok()
+}
+
+pub(crate) async fn try_fixture(variant: Variant, test: &str) -> Result<&'static Fixture, Skipped> {
+    static STATES: [OnceCell<State>; Variant::ALL.len()] = [const { OnceCell::const_new() }; Variant::ALL.len()];
+    match STATES[variant.index()].get_or_init(|| start_in_thread(variant)).await {
+        State::Ready(fixture) => Ok(&**fixture),
         State::Unreachable(why) if !env_flag(REQUIRE_DOCKER_ENV) => {
             note(format_args!(
                 "skipping {test}: Docker is not reachable ({why}); set {REQUIRE_DOCKER_ENV}=1 to fail instead"
             ));
-            None
+            Err(Skipped(format!("Docker is not reachable ({why})")))
         }
         State::Unreachable(why) => panic!("{test}: {REQUIRE_DOCKER_ENV}=1 but Docker is not reachable: {why}"),
         State::Unavailable(why) if !env_flag(REQUIRE_DOCKER_ENV) => {
             note(format_args!("skipping {test}: {why}; set {REQUIRE_DOCKER_ENV}=1 to fail instead"));
-            None
+            Err(Skipped(why.clone()))
         }
-        State::Unavailable(why) => panic!("{test}: {REQUIRE_DOCKER_ENV}=1 but the native sshd fixture can't run: {why}"),
-        State::Failed(why) => panic!("{test}: the sshd fixture didn't start: {why}"),
+        State::Unavailable(why) if native_backend() => {
+            panic!("{test}: {REQUIRE_DOCKER_ENV}=1 but the native sshd fixture can't run: {why}")
+        }
+        State::Unavailable(why) => panic!("{test}: {REQUIRE_DOCKER_ENV}=1 but the {} sshd fixture can't run: {why}", variant.name()),
+        State::Failed(why) => panic!("{test}: the {} sshd fixture didn't start: {why}", variant.name()),
     }
 }
 
 impl Fixture {
+    fn assemble(
+        port: u16,
+        keys: PathBuf,
+        accounts: Vec<Account>,
+        server: Server,
+        variant: Variant,
+        banner: String,
+        toxiproxy: Option<Toxiproxy>,
+    ) -> Fixture {
+        Fixture {
+            port,
+            keys,
+            accounts,
+            server,
+            variant,
+            banner,
+            toxiproxy,
+            access: RwLock::new(()),
+            big_file: OnceCell::new(),
+        }
+    }
+
+    /// Which server this is.
+    pub fn variant(&self) -> Variant {
+        self.variant
+    }
+
+    /// The server's SSH identification line, e.g. `SSH-2.0-OpenSSH_8.4p1 Debian-5+deb11u7`.
+    pub fn banner(&self) -> &str {
+        &self.banner
+    }
+
+    /// The toxiproxy in front of sshd ([`Variant::Toxic`] only, see [`Feature::Toxics`]).
+    pub fn toxiproxy(&self) -> Option<&Toxiproxy> {
+        self.toxiproxy.as_ref()
+    }
+
     /// The address sshd is reached on, `127.0.0.1`.
     pub fn host(&self) -> &'static str {
         HOST
@@ -240,18 +327,40 @@ impl Fixture {
         }
     }
 
-    /// Whether this fixture offers `feature`. When it doesn't, prints
-    /// `skipping <test>: <why> (Docker fixture only)`: the test then returns and passes. The
-    /// native backend has [`Feature::Totp`] when its start set it up (the start line says which
-    /// module, or why not).
+    /// Whether this fixture offers `feature`. When it doesn't, prints `skipping <test>: <why>`:
+    /// the test then returns and passes. The native backend has [`Feature::Totp`] when its start
+    /// set it up (the start line says which module, or why not).
     pub fn supports(&self, feature: Feature, test: &str) -> bool {
-        match (feature, &self.server) {
-            (Feature::Totp, Server::Docker(_)) => true,
-            (Feature::Totp, Server::Native(sshd)) if sshd.has_totp() => true,
-            (Feature::Totp, Server::Native(_)) => {
-                note(format_args!("skipping {test}: the native sshd has no TOTP PAM module (Docker fixture only)"));
+        match self.lacks(feature) {
+            None => true,
+            Some(why) => {
+                note(format_args!("skipping {test}: {why}"));
                 false
             }
+        }
+    }
+
+    /// Whether this fixture offers `feature`, silently (to check what a session detects).
+    pub fn has(&self, feature: Feature) -> bool {
+        self.lacks(feature).is_none()
+    }
+
+    /// Why this fixture doesn't offer `feature`, or `None` when it does.
+    pub fn lacks(&self, feature: Feature) -> Option<String> {
+        let old = || format!("OpenSSH 8.4p1 ({}) has no", self.variant.name());
+        match (feature, &self.server) {
+            (Feature::Totp, Server::Native(sshd)) if !sshd.has_totp() => {
+                Some("the native sshd has no TOTP PAM module (Docker fixture only)".into())
+            }
+            (Feature::Totp, Server::Docker(_)) if self.variant == Variant::Alpine => {
+                Some("Alpine's sshd has no PAM (no keyboard-interactive, no TOTP)".into())
+            }
+            (Feature::CopyData, _) if self.variant == Variant::Bullseye => Some(format!("{} copy-data", old())),
+            (Feature::Limits, _) if self.variant == Variant::Bullseye => Some(format!("{} limits@openssh.com", old())),
+            (Feature::Toxics, _) if self.toxiproxy.is_none() => {
+                Some(format!("no toxiproxy in front of the {} server (the toxic variant only)", self.variant.name()))
+            }
+            _ => None,
         }
     }
 
@@ -491,11 +600,11 @@ pub fn file_sha1(path: &Path) -> std::io::Result<String> {
 
 /// Starts the fixture on a thread with its own runtime: every `#[tokio::test]` has a runtime of
 /// its own, which ends with that test, and nothing of the fixture may depend on it.
-async fn start_in_thread() -> State {
+async fn start_in_thread(variant: Variant) -> State {
     let (tx, rx) = tokio::sync::oneshot::channel();
-    let spawned = std::thread::Builder::new().name("dromon-testkit".into()).spawn(move || {
+    let spawned = std::thread::Builder::new().name(format!("dromon-testkit-{}", variant.name())).spawn(move || {
         let state = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
-            Ok(runtime) => runtime.block_on(start()),
+            Ok(runtime) => runtime.block_on(start(variant)),
             Err(e) => State::Failed(format!("tokio runtime: {e}")),
         };
         let _ = tx.send(state);
@@ -506,12 +615,48 @@ async fn start_in_thread() -> State {
     rx.await.unwrap_or_else(|_| State::Failed("the fixture thread panicked (see its message above)".into()))
 }
 
-async fn start() -> State {
+async fn start(variant: Variant) -> State {
     match std::env::var(BACKEND_ENV).as_deref() {
-        Err(_) | Ok("" | "docker") => docker::start().await,
-        Ok("native") => native::start().await,
+        Err(_) | Ok("" | "docker") => docker::start(variant).await,
+        Ok("native") if variant == Variant::Trixie => native::start().await,
+        Ok("native") => State::Unavailable(format!(
+            "the {} server runs on the Docker backend only ({BACKEND_ENV}=native)",
+            variant.name()
+        )),
         Ok(other) => State::Failed(format!("{BACKEND_ENV}={other}: expected `docker` (the default) or `native`")),
     }
+}
+
+/// Whether `DROMON_FIXTURE_BACKEND` picks the native backend.
+pub(crate) fn native_backend() -> bool {
+    std::env::var(BACKEND_ENV).is_ok_and(|v| v == "native")
+}
+
+/// The SSH identification line the server at `HOST:port` sends first (`SSH-2.0-…`), retried
+/// briefly while it comes up.
+async fn read_banner(port: u16) -> Result<String, String> {
+    use tokio::io::AsyncBufReadExt as _;
+    let mut last = String::new();
+    for _ in 0..20 {
+        let attempt = async {
+            let stream = tokio::net::TcpStream::connect((HOST, port)).await.map_err(|e| e.to_string())?;
+            let mut lines = tokio::io::BufReader::new(stream).lines();
+            // Servers may send other lines before the identification (RFC 4253 §4.2).
+            while let Some(line) = lines.next_line().await.map_err(|e| e.to_string())? {
+                if line.starts_with("SSH-") {
+                    return Ok(line.trim_end().to_owned());
+                }
+            }
+            Err("closed before the identification line".to_owned())
+        };
+        match tokio::time::timeout(Duration::from_secs(10), attempt).await {
+            Ok(Ok(banner)) => return Ok(banner),
+            Ok(Err(e)) => last = e,
+            Err(_) => last = "no identification line within 10 s".into(),
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    Err(format!("SSH banner on {HOST}:{port}: {last}"))
 }
 
 /// The client keypairs in a fresh key folder: [`KEY`] and [`ENCRYPTED_KEY`].

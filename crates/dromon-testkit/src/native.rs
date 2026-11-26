@@ -39,11 +39,9 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use tokio::sync::OnceCell;
-
 use crate::{
     Account, ENCRYPTED_KEY, Fixture, HOST, KEEP_ENV, KEY, NATIVE_OK_ENV, NULL_DEVICE, PASSWORD, Role, Server, State,
-    client_keys, env_flag, note, probe_login,
+    Variant, client_keys, env_flag, note, probe_login, read_banner,
 };
 
 mod totp;
@@ -161,7 +159,7 @@ pub(crate) async fn start() -> State {
         return State::Unavailable(format!("no sftp-server at {SFTP_SERVER_CANDIDATES:?}"));
     };
     match launch(os, as_root, sshd, sftp_server).await {
-        Ok(fixture) => State::Ready(fixture),
+        Ok(fixture) => State::Ready(Box::new(fixture)),
         Err(why) => State::Failed(why),
     }
 }
@@ -477,7 +475,8 @@ async fn launch(os: Os, as_root: bool, sshd_bin: &str, sftp_server: &str) -> Res
     drop(child);
     wait_listening(&sshd).await?;
 
-    let fixture = Fixture { port, keys, accounts, server: Server::Native(sshd), big_file: OnceCell::new() };
+    let banner = read_banner(port).await?;
+    let fixture = Fixture::assemble(port, keys, accounts, Server::Native(sshd), Variant::Trixie, banner, None);
     probe_login(&fixture).await?;
     if let Server::Native(sshd @ Sshd { totp: Some(t), .. }) = &fixture.server {
         totp::probe(&fixture, sshd, t).await;
