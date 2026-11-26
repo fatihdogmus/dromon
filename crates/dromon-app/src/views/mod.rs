@@ -117,6 +117,15 @@ pub fn effect(fx: Effect, tx: &mut Tx) {
         Effect::CloseWindow => tx.close_window(),
         Effect::Copy(text) => tx.copy(text),
         Effect::ContextMenu(kind) => menu::open_at_row(kind, tx),
+        Effect::PickUpload { folder } => {
+            let options = rune::FileDialogOptions { title: format!("Upload to {folder}"), ..rune::FileDialogOptions::default() };
+            // A cancelled dialog or an error from it does nothing.
+            tx.open_files(options, |s: &mut App, picked, tx| {
+                if let Ok(Some(paths)) = picked {
+                    run(s, Action::Upload { paths, folder: None }, tx);
+                }
+            });
+        }
         Effect::ReadClipboard { as_move } => {
             tx.read_clipboard(move |s: &mut App, content: &rune::ClipboardContent, tx: &mut Tx| pasted(s, content, as_move, tx))
         }

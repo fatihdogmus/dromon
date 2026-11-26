@@ -145,7 +145,7 @@ Linux needs `libxkbcommon-dev` and `libwayland-dev`. Want to look around without
 ## ⌨️ Made for the keyboard
 
 <table>
-  <tr><td><kbd>⌘K</kbd></td><td>Command palette: hosts, folders, actions</td><td><kbd>⌘D</kbd></td><td>Download the selection</td></tr>
+  <tr><td><kbd>⌘K</kbd></td><td>Command palette: hosts, folders, actions</td><td><kbd>⌘D</kbd> · <kbd>⌘U</kbd></td><td>Download the selection · upload files</td></tr>
   <tr><td><kbd>⌘L</kbd></td><td>Go to a path</td><td><kbd>⌘C</kbd> <kbd>⌘X</kbd> <kbd>⌘V</kbd></td><td>Copy, cut, paste, also between hosts</td></tr>
   <tr><td><kbd>⌘F</kbd></td><td>Filter the folder</td><td><kbd>⌥⌘V</kbd></td><td>Move here</td></tr>
   <tr><td><kbd>⌘↑</kbd> <kbd>⌘[</kbd> <kbd>⌘]</kbd></td><td>Up, back, forward</td><td><kbd>⌘⇧N</kbd> · <kbd>F2</kbd></td><td>New folder · rename</td></tr>
