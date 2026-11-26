@@ -76,8 +76,16 @@ Tracks where implementation stands against `dromon-plan.md`. Newest first.
 - Transfer engine robustness: work cut off by drops is replayed as itself and at once on a replaced session; runs tagged so a stale Finished can't start a second copy; stress test kills sessions at varying moments (`transfers_e2e`, ignored by default).
 - M5 server matrix (`DROMON_SERVER_MATRIX=1`, CI linux): Debian trixie (OpenSSH 10), bullseye (8.4, no copy-data: streamed copies), Alpine 3.24, toxiproxy (latency, caps, reset mid-transfer → resume); 100 / 10k / 100k folders, symlink loops, unreadable folders. CI windows: the runner's own OpenSSH Server, `/C:/` paths, round trip, rename, copy, delete.
 
+- M5 performance (`scripts/perf.sh`, one table; this Linux box, release builds):
+  - First rows of a 10k folder: 14 ms over the sshd (gate 150 ms) ✅
+  - Throughput vs scp: 1 GiB 92 % down / 101 % up; 8,192 small files 153 % / 139 % ✅ (localhost, cipher-bound ~300 MB/s)
+  - 10 GiB soak: SHA-1 both ways, RSS +5.6 / +11.3 MiB ✅
+  - Scroll 100k rows, headless CPU per frame: p99 3.7 ms gentle ✅, 6.1 ms fast flick (over the 4.2 ms half-frame target, under 8.3 ms; the cost is Rune's commit and paint). The real gate (M-series Mac, 120 Hz) needs a Mac.
+  - Fixed on the way: natural sort allocations, re-sorting per streamed page (merge), per-rebuild hashing, name copies per key press (Down-key frame 20.6 → 7.2 ms in 100k), the diff's maps; and a real bug: ↓/End/Page Down didn't scroll the list (the reveal was scoped inside the viewport).
+  - Remaining hotspot (Rune): re-keying 100k virtual rows when the rows change (filter keystroke ~36 ms, refresh ~220 ms in 100k).
+
 **Next**
-1. M5 performance gates and soak, M5 accessibility pass (both in progress). (Done: S6 fallback; per-host "Verbose logging" in the connection log.)
+1. M5 accessibility pass (in progress). (Done: S6 fallback; per-host "Verbose logging"; M5 performance gates and soak.)
 2. The accent pick (user).
 3. M5: accessibility pass (AccessKit tree, full keyboard reachability), packaging dry run.
 4. A first run in a real window on a macOS and a Linux desktop (real GPU, real input, Wayland), and on Windows.
