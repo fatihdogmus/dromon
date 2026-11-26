@@ -44,7 +44,7 @@ sed "s/@VERSION@/$short/g" "$root/packaging/macos/Info.plist" > "$app/Contents/I
 plutil -lint "$app/Contents/Info.plist"
 cp "$root/packaging/icon/dromon.icns" "$app/Contents/Resources/dromon.icns"
 cp "$root/LICENSE" "$app/Contents/Resources/licenses/LICENSE.txt"
-cp "$root/assets/fonts/Inter-LICENSE.txt" "$root/assets/fonts/GeistMono-OFL.txt" "$app/Contents/Resources/licenses/"
+cp "$root/crates/dromon-app/assets/fonts/Inter-LICENSE.txt" "$root/crates/dromon-app/assets/fonts/GeistMono-OFL.txt" "$app/Contents/Resources/licenses/"
 
 codesign --force --sign - "$app"
 codesign --verify --strict --verbose=2 "$app"

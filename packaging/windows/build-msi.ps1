@@ -54,8 +54,8 @@ try {
         -d "Exe=$ExePath" `
         -d "Icon=$(Join-Path $Root 'packaging\icon\dromon.ico')" `
         -d "License=$(Join-Path $Root 'LICENSE')" `
-        -d "InterLicense=$(Join-Path $Root 'assets\fonts\Inter-LICENSE.txt')" `
-        -d "GeistMonoLicense=$(Join-Path $Root 'assets\fonts\GeistMono-OFL.txt')" `
+        -d "InterLicense=$(Join-Path $Root 'crates\dromon-app\assets\fonts\Inter-LICENSE.txt')" `
+        -d "GeistMonoLicense=$(Join-Path $Root 'crates\dromon-app\assets\fonts\GeistMono-OFL.txt')" `
         -d "RepoUrl=$RepoUrl" `
         -o (Join-Path $Scratch 'dromon.msi')
     if ($LASTEXITCODE -ne 0) { throw 'wix build failed.' }

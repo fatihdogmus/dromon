@@ -24,8 +24,9 @@ done
 install -Dm644 "$REPO_ROOT/packaging/icon/dromon.svg" "$root/usr/share/icons/hicolor/scalable/apps/dromon.svg"
 
 doc="$root/usr/share/doc/dromon"
-install -Dm644 "$REPO_ROOT/assets/fonts/Inter-LICENSE.txt" "$doc/fonts/Inter-LICENSE.txt"
-install -Dm644 "$REPO_ROOT/assets/fonts/GeistMono-OFL.txt" "$doc/fonts/GeistMono-OFL.txt"
+fonts="$REPO_ROOT/crates/dromon-app/assets/fonts"
+install -Dm644 "$fonts/Inter-LICENSE.txt" "$doc/fonts/Inter-LICENSE.txt"
+install -Dm644 "$fonts/GeistMono-OFL.txt" "$doc/fonts/GeistMono-OFL.txt"
 
 # A license text as a DEP-5 paragraph body: every line indented one space, blank lines " .".
 dep5_text() {
@@ -42,12 +43,12 @@ Files: *
 Copyright: 2026 Muhammed Fatih Doğmuş
 License: MIT
 
-Files: assets/fonts/InterVariable.ttf
+Files: crates/dromon-app/assets/fonts/InterVariable.ttf
 Copyright: 2016 The Inter Project Authors (https://github.com/rsms/inter)
 License: OFL-1.1
 Comment: Embedded in the dromon binary. Full notice: /usr/share/doc/dromon/fonts/Inter-LICENSE.txt
 
-Files: assets/fonts/GeistMonoVariable.ttf
+Files: crates/dromon-app/assets/fonts/GeistMonoVariable.ttf
 Copyright: 2026 The Geist Project Authors (https://github.com/vercel/geist-font)
 License: OFL-1.1
 Comment: Embedded in the dromon binary. Full notice: /usr/share/doc/dromon/fonts/GeistMono-OFL.txt
@@ -58,6 +59,6 @@ EOF
   dep5_text <(sed '1,/^Copyright/d' "$REPO_ROOT/LICENSE" | sed '/./,$!d')
   echo
   echo "License: OFL-1.1"
-  dep5_text <(sed -n '/^SIL OPEN FONT LICENSE/,$p' "$REPO_ROOT/assets/fonts/Inter-LICENSE.txt")
+  dep5_text <(sed -n '/^SIL OPEN FONT LICENSE/,$p' "$fonts/Inter-LICENSE.txt")
 } > "$doc/copyright"
 chmod 644 "$doc/copyright"

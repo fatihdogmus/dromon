@@ -17,10 +17,22 @@ path = "src/lib.rs"
 name = "dromon"
 path = "src/main.rs"
 
+# Live editing only (`scripts/dev.sh`): the app compiled as one crate (src/hot.rs includes the
+# same root items as lib.rs), so hot patching, which reaches only the executable's own crate,
+# covers the views.
+[[bin]]
+name = "dromon-hot"
+path = "src/hot.rs"
+required-features = ["hot"]
+
 [features]
 # Rune's headless phase clocks (`frame-profile`) for `examples/perf.rs` (`scripts/perf.sh`):
 # the scroll frames split into view, commit, layout, text and paint. Measuring builds only.
 perf = ["rune/frame-profile"]
+# Live editing (`scripts/dev.sh`, the `dromon-hot` binary): saved function-body edits under
+# src/views and src/theme patch into the running window. Development only; release builds and
+# goldens never enable it.
+hot = ["rune/hot"]
 
 [dependencies]
 dromon-core.workspace = true

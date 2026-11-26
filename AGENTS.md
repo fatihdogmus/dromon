@@ -23,6 +23,7 @@ bash scripts/goldens.sh                    # re-render tests/goldens (look at ev
 bash scripts/goldens.sh --check            # CI: render to target/goldens, compare within ±2 per channel
 bash scripts/flows.sh                      # render tests/flows/* to target/flows (strips, trees)
 bash scripts/smoke-app.sh [--window] [--connect]
+bash scripts/dev.sh [--mock] [-- APP ARGS]   # live editing: view/theme fn-body edits patch into the running app
 bash scripts/repro.sh <issue-number|issue.md>
 bash scripts/perf.sh [--gate frames,first-rows,throughput,soak|all]   # §9 performance gates: one table; exits 1 on a wide miss
 ```
