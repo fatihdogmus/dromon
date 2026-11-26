@@ -29,6 +29,8 @@ mod ui_keyboard_tests;
 #[cfg(test)]
 mod ui_menu_tests;
 #[cfg(test)]
+mod ui_mouse_tests;
+#[cfg(test)]
 mod ui_palette_tests;
 #[cfg(test)]
 mod ui_poll_tests;
