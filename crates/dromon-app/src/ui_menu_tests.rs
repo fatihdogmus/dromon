@@ -77,13 +77,23 @@ fn a_rows_menu_selects_it_and_lists_its_actions() {
     assert!(shown(&rt, "ctx-menu"));
     let c = rt.state.conn().unwrap();
     assert!(c.selection.contains("index.html") && !c.selection.contains("README.md"), "right-click selects the row");
-    assert_eq!(items(&rt), ["Open", "Download", "Copy", "Cut", "Paste", "Copy path", "Rename", "Delete"]);
+    assert_eq!(items(&rt), ["Open", "Download", "Copy", "Cut", "Paste", "Copy path", "New folder", "Rename", "Delete"]);
     // Paste without a clip is disabled: clicking it does nothing, and the menu stays.
     click(&mut rt, "ctx-paste");
     assert!(shown(&rt, "ctx-menu"));
     click(&mut rt, "ctx-rename");
     assert!(!shown(&rt, "ctx-menu"));
     assert!(shown(&rt, "edit-input"), "Rename opens the field");
+}
+
+#[test]
+fn new_folder_from_a_rows_menu_for_a_folder_with_no_empty_area() {
+    let mut rt = runtime();
+    let at_row = at(&rt, "rows/index.html");
+    right_click(&mut rt, at_row);
+    click(&mut rt, "ctx-new-folder");
+    assert!(!shown(&rt, "ctx-menu"));
+    assert!(shown(&rt, "edit-input"), "the new folder's name field opens in the folder on screen");
 }
 
 #[test]
@@ -144,7 +154,7 @@ fn while_reconnecting_the_server_changing_items_are_off() {
         s.act(Action::File(crate::state::FileAction::OpenMenu { kind: MenuKind::Row("index.html".into()), at: Some((400.0, 200.0)) }));
     });
     settle(&mut rt);
-    for k in ["ctx-delete", "ctx-rename", "ctx-paste", "ctx-download"] {
+    for k in ["ctx-delete", "ctx-rename", "ctx-new-folder", "ctx-paste", "ctx-download"] {
         click(&mut rt, k);
         assert!(shown(&rt, "ctx-menu"), "{k} is disabled");
     }
@@ -166,7 +176,7 @@ fn rect_of(rt: &Runtime<App>, key: &str) -> [f32; 4] {
 
 #[test]
 fn shift_f10_opens_the_cursor_rows_menu_at_the_row_and_the_menu_key_too() {
-    let row_items = ["Open", "Download", "Copy", "Cut", "Paste", "Copy path", "Rename", "Delete"];
+    let row_items = ["Open", "Download", "Copy", "Cut", "Paste", "Copy path", "New folder", "Rename", "Delete"];
     for (key, mods) in [(Key::Function(10), SHIFT), (Key::ContextMenu, Mods::default())] {
         let mut rt = runtime();
         click(&mut rt, "rows/index.html");
@@ -231,7 +241,7 @@ fn the_native_menu_has_the_same_items_and_shortcut_hints() {
             _ => "—".to_owned(),
         })
         .collect();
-    assert_eq!(ids, ["open", "download", "—", "copy", "cut", "paste", "copy-path", "—", "rename", "delete"]);
+    assert_eq!(ids, ["open", "download", "—", "copy", "cut", "paste", "copy-path", "—", "new-folder", "rename", "delete"]);
     let copy = menu.find("copy").unwrap();
     assert_eq!(copy.key_equivalent_shortcut().map(ToString::to_string), "mod+c".parse::<rune::Shortcut>().ok().map(|s| s.to_string()));
     assert!(!menu.find("rename").unwrap().is_enabled() || rt.state.conn().unwrap().selection.len() == 1);

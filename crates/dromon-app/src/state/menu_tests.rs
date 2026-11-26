@@ -38,11 +38,14 @@ fn a_rows_menu_and_its_disabled_items() {
             ("paste", false),
             ("copy-path", true),
             ("—", false),
+            ("new-folder", true),
             ("rename", true),
             ("delete", true)
         ],
         "no clip: Paste is off"
     );
+    // New folder from a row's menu: the field opens in the folder on screen, as from the empty area.
+    assert_eq!(s.menu_action(&row, "new-folder"), Some(Action::File(FileAction::NewFolder)));
     let delete = s.menu(&row).into_iter().filter_map(|e| e.item().cloned()).find(|i| i.id == "delete").unwrap();
     assert!(delete.danger);
     // With two selected, Rename is off; with a clip, Paste is on.
@@ -52,7 +55,7 @@ fn a_rows_menu_and_its_disabled_items() {
     assert!(!enabled(&s, "rename") && enabled(&s, "paste"));
     // Reconnecting: everything that touches the server is off; copy and copy path stay.
     s.apply(ServiceEvent::Status { host: prod(), status: ConnStatus::Reconnecting { attempt: 1 } });
-    for id in ["open", "download", "paste", "rename", "delete"] {
+    for id in ["open", "download", "paste", "new-folder", "rename", "delete"] {
         assert!(!enabled(&s, id), "{id}");
     }
     assert!(enabled(&s, "copy") && enabled(&s, "cut") && enabled(&s, "copy-path"));
