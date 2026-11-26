@@ -184,10 +184,9 @@ jobs:
           # Fail, don't skip, when the native sshd can't start.
           DROMON_REQUIRE_DOCKER: "1"
         run: cargo test --workspace --locked --no-fail-fast
-      # GitHub's macOS runners may not expose Metal to headless rendering; non-blocking until a
-      # first green run proves it.
+      # Headless rendering through Metal on GitHub's runners (Apple silicon and Intel), with the
+      # dromon the tests built (DROMON_BIN): proven in run 45867645664.
       - name: Smoke (headless)
-        continue-on-error: true
         timeout-minutes: 5
         run: cargo smoke
 
@@ -298,10 +297,10 @@ jobs:
         run: |
           docker ps -a
           docker image ls
-      # Headless rendering on Windows runners (WARP) is unproven, and so far it hangs at the
-      # first render: non-blocking and bounded until it works.
+      # Headless rendering on the runner's software adapter (WARP), with the dromon the tests
+      # built (DROMON_BIN): proven in run 45867645664. It once "hung": that was a rebuild of ~100
+      # crates running out the step's time.
       - name: Smoke (headless)
-        continue-on-error: true
         timeout-minutes: 5
         run: cargo smoke
       # Windows' own OpenSSH server as the SFTP server (crates/dromon-transfer/tests/windows_sshd.rs):
