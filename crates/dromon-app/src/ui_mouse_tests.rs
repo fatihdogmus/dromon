@@ -69,3 +69,39 @@ fn back_and_forward_buttons_walk_the_folder_history() {
     thumb(&mut rt, "status-summary", PointerButton::Other(7));
     assert_eq!(cwd(&rt), "/var/www/site/releases");
 }
+
+/// Prod opened one folder down with a step back taken, so Forward has somewhere to go; then the
+/// Settings page on top.
+fn on_the_page() -> Runtime<App> {
+    let mut rt = runtime();
+    click(&mut rt, "host-prod");
+    double_click(&mut rt, "rows/releases");
+    thumb(&mut rt, "status-summary", PointerButton::Back);
+    assert_eq!(cwd(&rt), "/var/www/site");
+    click(&mut rt, "sidebar-settings");
+    assert!(rt.state.on_settings());
+    rt
+}
+
+#[test]
+fn the_back_button_leaves_the_settings_page_and_keeps_the_folder_history() {
+    let mut rt = on_the_page();
+    let history = rt.state.conn().unwrap().history.clone();
+    assert!(history.can_forward(), "the folder view has a step forward to take");
+
+    thumb(&mut rt, "settings-back", PointerButton::Back);
+    assert!(!rt.state.on_settings(), "the page is gone");
+    assert_eq!(cwd(&rt), "/var/www/site");
+    assert_eq!(rt.state.conn().unwrap().history, history);
+}
+
+#[test]
+fn the_forward_button_does_nothing_on_the_settings_page() {
+    let mut rt = on_the_page();
+    let history = rt.state.conn().unwrap().history.clone();
+
+    thumb(&mut rt, "settings-back", PointerButton::Forward);
+    assert!(rt.state.on_settings());
+    assert_eq!(cwd(&rt), "/var/www/site");
+    assert_eq!(rt.state.conn().unwrap().history, history);
+}

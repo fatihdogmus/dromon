@@ -411,12 +411,16 @@ impl App {
     }
 
     /// Runs a row: the palette closes (the keyboard goes back to the list) and the action runs.
-    /// "Go to folder…" turns the palette to its path instead.
+    /// "Go to folder…" turns the palette to its path instead. Every row but "Settings…" is about
+    /// the folder view, so it leaves the Settings page first (`page.rs`).
     fn run_item(&mut self, action: Action, fx: &mut Vec<Effect>) {
         if let Action::Palette(a) = action {
             return self.palette_action(a, fx);
         }
         self.close_palette(fx);
+        if action != Action::OpenSettings {
+            self.leave_settings();
+        }
         fx.extend(self.act(action));
     }
 

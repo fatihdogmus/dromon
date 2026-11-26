@@ -699,4 +699,5 @@ pub const SCENES: &[Scene] = &[
     ("listing-compact", settings::listing_compact),
     ("settings", settings::settings),
     ("settings-light", settings::settings_light),
+    ("settings-transfers", settings::settings_transfers),
 ];

@@ -2,12 +2,12 @@
 //! and whether hidden files show by default.
 //!
 //! The values live in each main window's state ([`App::settings`]), the same in all of them.
-//! The Settings window is one more Rune window with its own state (`views/settings.rs`): the
-//! app tells it what to show through a [`SettingsWindow`] after every change, and it sends each
-//! change back as [`Action::Setting`](super::Action::Setting) to one main window
-//! (`settings_window.rs` carries both ways over the windows' `AppHandle`s). A change applies
-//! there at once, is remembered in `prefs.json` ([`Saved::settings`](super::Saved::settings))
-//! and reaches the other main windows as [`News::Settings`](super::News::Settings).
+//! Each main window shows them on its Settings page (`page.rs`, `views/settings.rs`), which
+//! reads them from its state and sends each change as [`Action::Setting`](super::Action::Setting).
+//! A change applies there at once, is remembered in `prefs.json`
+//! ([`Saved::settings`](super::Saved::settings)) and reaches the other main windows as
+//! [`News::Settings`](super::News::Settings), whose pages show it too. The windows' frames follow
+//! the theme through [`Peers::theme`](super::Peers::theme).
 
 use std::ops::RangeInclusive;
 use std::path::{Path, PathBuf};
@@ -98,7 +98,7 @@ impl Settings {
     }
 }
 
-/// One control of the Settings window, set to a value.
+/// One control of the Settings page, set to a value.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SettingsChange {
     Theme(Appearance),
@@ -109,7 +109,7 @@ pub enum SettingsChange {
     ShowHidden(bool),
 }
 
-/// What the Settings window shows: the settings, and the folder "default" stands for.
+/// What the Settings page shows: the settings, and the folder "default" stands for.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SettingsView {
     pub settings: Settings,
@@ -123,7 +123,7 @@ impl SettingsView {
         self.settings.download_folder.as_deref().unwrap_or(&self.default_folder)
     }
 
-    /// The download folder as the window writes it: under the home folder as `~/…`.
+    /// The download folder as the page writes it: under the home folder as `~/…`.
     pub fn folder_label(&self, home: Option<&Path>) -> String {
         let folder = self.folder();
         match home.and_then(|h| folder.strip_prefix(h).ok()) {
@@ -134,30 +134,8 @@ impl SettingsView {
     }
 }
 
-/// The Settings window as the app sees it: opened (or brought forward) on ⌘, and the menu, and
-/// told the values after every change, so it never shows anything but the app's own.
-pub trait SettingsWindow {
-    /// Open the window, or bring it forward if it's open, showing `view`.
-    fn open(&mut self, view: SettingsView);
-    /// The values changed: show `view` (whether the window is open or not).
-    fn show(&mut self, view: SettingsView);
-    /// The same Settings window, for another main window's state (there's one for the app).
-    fn another(&self) -> Box<dyn SettingsWindow>;
-}
-
-/// No window: scenes, tests and headless runs, where a second window never opens.
-pub struct NoWindow;
-
-impl SettingsWindow for NoWindow {
-    fn open(&mut self, _: SettingsView) {}
-    fn show(&mut self, _: SettingsView) {}
-    fn another(&self) -> Box<dyn SettingsWindow> {
-        Box::new(NoWindow)
-    }
-}
-
 impl App {
-    /// What the Settings window shows now.
+    /// What the Settings page shows now.
     pub fn settings_view(&self) -> SettingsView {
         SettingsView { settings: self.settings.clone(), default_folder: self.downloads.clone() }
     }
@@ -165,12 +143,6 @@ impl App {
     /// Where a download goes now: the folder chosen in Settings, else the OS Downloads folder.
     pub fn download_folder(&self) -> PathBuf {
         self.settings.download_folder.clone().unwrap_or_else(|| self.downloads.clone())
-    }
-
-    /// The real Settings window is there (the app started): it shows the settings from now on.
-    pub fn attach_settings_window(&mut self, mut window: Box<dyn SettingsWindow>) {
-        window.show(self.settings_view());
-        self.settings_window = window;
     }
 
     /// The settings remembered last time (`remember`). Prefs from before Settings existed have
@@ -185,17 +157,13 @@ impl App {
         self.apply_settings(settings, true);
     }
 
-    /// ⌘, (Ctrl+, elsewhere), the app menu's Settings…, the palette.
-    pub(super) fn open_settings(&mut self) {
-        let view = self.settings_view();
-        self.settings_window.open(view);
-    }
-
-    /// A control in the Settings window: applied at once, remembered, shown back, and told to
-    /// the other main windows (which apply it too).
+    /// A control on the Settings page: applied at once, remembered, and told to the other main
+    /// windows (which apply it too). The page reads the values back from the state.
     pub(super) fn change_setting(&mut self, change: SettingsChange) {
+        self.ui.settings_page.error = None;
         let new = self.settings.with(change);
         if new != self.settings {
+            let theme = self.settings.theme;
             self.apply_settings(new, true);
             let settings = self.settings.clone();
             self.save(|s| {
@@ -203,10 +171,12 @@ impl App {
                 // The old ⌘⇧. state is the section's now.
                 s.show_hidden = None;
             });
+            // The windows' own frames (title bars, the macOS appearance) follow the theme too.
+            if settings.theme != theme {
+                self.common.peers().theme(settings.theme);
+            }
             self.tell(super::News::Settings(settings));
         }
-        let view = self.settings_view();
-        self.settings_window.show(view);
     }
 
     /// Another window's settings change (already remembered and told to the engine there).

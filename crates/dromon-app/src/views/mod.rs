@@ -1,5 +1,6 @@
-//! The single window (§6.2): sidebar | toolbar, content, status bar. Each part is a function of
-//! `&App` and a [`Paint`]; handlers turn input into `state::Action`s and run them with [`run`].
+//! The single window (§6.2): sidebar | toolbar, content, status bar, or the Settings page in
+//! place of the last three (`settings.rs`). Each part is a function of `&App` and a [`Paint`];
+//! handlers turn input into `state::Action`s and run them with [`run`].
 
 mod add_config;
 mod conflict;
@@ -13,7 +14,7 @@ mod palette;
 mod properties;
 mod quick;
 mod quit;
-pub mod settings;
+mod settings;
 mod sheets;
 mod sidebar;
 mod states;
@@ -95,9 +96,13 @@ fn window_focus(s: &mut App, focused: bool, tx: &mut Tx) {
 }
 
 /// An extra mouse button nothing else took (the root's `on_button`): Back and Forward walk the
-/// folder history (a no-op at either end, still taken); the rest bubble on.
+/// folder history (a no-op at either end, still taken); the rest bubble on. On the Settings
+/// page Back leaves it and Forward does nothing, the hidden folder view's history untouched.
 fn mouse_button(s: &mut App, button: rune::PointerButton, tx: &mut Tx) -> bool {
+    let on_page = s.on_settings();
     let action = match button {
+        rune::PointerButton::Back if on_page => Action::LeaveSettings,
+        rune::PointerButton::Forward if on_page => return true,
         rune::PointerButton::Back => Action::Back,
         rune::PointerButton::Forward => Action::Forward,
         _ => return false,
@@ -149,6 +154,10 @@ pub fn effect(fx: Effect, tx: &mut Tx) {
 /// Finder or Explorer upload to the folder on screen (not for Move here); otherwise its text
 /// pastes the in-app clip, if it's still the clip's.
 fn pasted(s: &mut App, content: &rune::ClipboardContent, as_move: bool, tx: &mut Tx) {
+    // The folder view waits under the Settings page: nothing pastes into it.
+    if s.on_settings() {
+        return;
+    }
     if !content.files().is_empty() {
         if !as_move {
             run(s, Action::Upload { paths: content.files().to_vec(), folder: None }, tx);
@@ -173,16 +182,21 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     cx.focus_ring(2.0, 1.0, t.focus);
     let scale = cx.env().scale;
     let p = Paint { t, hair: 1.0 / scale, scale, insets: cx.chrome_insets(), reduced: access.reduce_motion, access };
+    // Under the Settings page the folder view stays mounted as it was (its scroll position and
+    // fields kept for when the page goes), drawn over, out of reach and out of readers' tree.
+    let section = s.ui.page.settings();
+    let files = |e: El| if section.is_some() { e.inert().a11y_hidden() } else { e };
     let main = col()
         .key("main")
         .grow(1.0)
         .min_w(0.0)
         .h_full()
-        .child(toolbar::view(s, p))
-        .children(states::banner(s, p))
-        .child(content(s, p))
-        .child(status::view(s, p))
-        .children(toast::layer(s, p));
+        .child(files(toolbar::view(s, p)))
+        .children(states::banner(s, p).map(files))
+        .child(files(content(s, p)))
+        .child(files(status::view(s, p)))
+        .children(toast::layer(s, p).map(files))
+        .children(section.map(|section| settings::page(s, section, p)));
     row()
         .key("window")
         .w_full()
@@ -202,7 +216,6 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         .children(palette::layer(s, p, palette::top(s, cx)))
         .children(sheets::layer(s, p))
         .children(menu::layer(s, p))
-        .children(settings::preview(s, p))
 }
 
 /// The list area: whichever state the active connection is in.

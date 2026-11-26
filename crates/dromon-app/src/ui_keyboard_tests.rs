@@ -8,8 +8,8 @@ use rune::{ElementInfo, Key, KeyEvent, KeyPlatform, Mods, Runtime};
 use crate::scenes;
 use crate::state::{Action, App, FileAction, MenuKind};
 use crate::theme::{self, Access, Appearance};
-use crate::ui_a11y_tests::{ITEMS, Node, interactive, needs_sign_in, pane_runtime, scene_runtime, settle, tree};
-use crate::views::settings::Pane;
+use crate::state::{Page, SettingsSection};
+use crate::ui_a11y_tests::{ITEMS, Node, interactive, needs_sign_in, scene, scene_runtime, settings_browsing, settle, tree};
 
 const SHIFT: Mods = Mods { shift: true, cmd: false, alt: false, ctrl: false, logo: false };
 
@@ -151,6 +151,7 @@ fn tab_walks_the_window_in_reading_order() {
     let expected = [
         "host-prod",
         "sb-quick-connect",
+        "sidebar-settings",
         "crumb-0",
         "crumb-1",
         "crumb-2",
@@ -172,7 +173,7 @@ fn tab_walks_the_window_in_reading_order() {
     assert_eq!(order[(at + 1) % order.len()], "tb-filter-clear", "{order:?}");
     assert_eq!(order[(at + order.len() - 1) % order.len()], "crumb-2", "{order:?}");
     let order = walk("welcome", scenes::welcome, None);
-    assert_eq!(order, ["host-prod", "sb-quick-connect", "tb-transfers", "tb-palette", "welcome-quick-connect"]);
+    assert_eq!(order, ["host-prod", "sb-quick-connect", "sidebar-settings", "tb-transfers", "tb-palette", "welcome-quick-connect"]);
 }
 
 #[test]
@@ -196,7 +197,7 @@ fn every_main_state_is_reachable_by_tab() {
     // A reconnect that needs the user: the banner's Sign in is a Tab stop, after the toolbar,
     // before the status bar (the dimmed list between them is inert while it reconnects).
     let order = walk("reconnect-sign-in", needs_sign_in, None);
-    assert_eq!(order, ["host-prod", "sb-quick-connect", "tb-filter", "tb-transfers", "tb-palette", "banner-sign-in", "status-conn"]);
+    assert_eq!(order, ["host-prod", "sb-quick-connect", "sidebar-settings", "tb-filter", "tb-transfers", "tb-palette", "banner-sign-in", "status-conn"]);
     let plain = walk("reconnecting", scenes::reconnecting, None);
     assert!(!plain.iter().any(|k| k == "banner-sign-in"), "a plain reconnect has no Sign in: {plain:?}");
     // A failed delete's toast can be dismissed from the keyboard.
@@ -241,17 +242,60 @@ fn popovers_menus_and_sheets_keep_tab_inside() {
 }
 
 #[test]
-fn the_settings_window_walks_by_tab_too() {
-    for light in [false, true] {
-        let mut rt: Runtime<Pane> = pane_runtime(light);
-        let nodes = tree(&rt);
-        let forward = cycle(&mut rt, false, !light, "settings-window");
-        let missed = unreached(&nodes, &forward);
-        assert!(missed.is_empty(), "settings: Tab never reaches {missed:?} (visited {forward:?})");
-        // Each segmented control is one stop, at its chosen segment.
-        let theme = if light { "theme-light" } else { "theme-system" };
-        assert_eq!(forward, [theme, "density-comfortable", "folder-choose", "transfers-fewer", "transfers-more", "hidden-toggle"]);
-    }
+fn the_settings_page_walks_by_tab_too() {
+    // The sidebar, Back, the section list (one stop, the chosen section), then its controls;
+    // each segmented control is one stop, at its chosen segment.
+    let head = ["host-prod", "sb-quick-connect", "sidebar-settings", "settings-back"];
+    let order = walk("settings", scene("settings"), None);
+    assert_eq!(order[..4], head);
+    assert_eq!(order[4..], ["settings-tab-appearance", "theme-system", "density-comfortable"]);
+    // Light, from the listing: its connected hosts come first in the sidebar.
+    let order = walk("settings-light", scene("settings-light"), None);
+    assert_eq!(order[order.len() - 3..], ["settings-tab-appearance", "theme-light", "density-compact"]);
+    let order = walk("settings-transfers", scene("settings-transfers"), None);
+    assert_eq!(order[order.len() - 4..], ["settings-tab-transfers", "folder-choose", "transfers-fewer", "transfers-more"]);
+    let order = walk("settings-browsing", settings_browsing, None);
+    assert_eq!(order[4..], ["settings-tab-browsing", "hidden-toggle"]);
+}
+
+#[test]
+fn the_settings_sections_move_by_arrows_and_tab_goes_on_to_the_controls() {
+    let mut rt = scene_runtime(scene("settings"));
+    tab_to(&mut rt, "settings-tab-appearance");
+    press(&mut rt, Key::Down, Mods::default());
+    assert_eq!(focused_key(&rt), "settings-tab-transfers");
+    assert_eq!(rt.state.ui.page, Page::Settings(SettingsSection::Transfers), "the section follows focus");
+    assert!(shows_focus(&rt, true), "with its ring");
+    press(&mut rt, Key::Down, Mods::default());
+    assert_eq!(rt.state.ui.page, Page::Settings(SettingsSection::Browsing));
+    press(&mut rt, Key::Up, Mods::default());
+    assert_eq!(rt.state.ui.page, Page::Settings(SettingsSection::Transfers));
+    // Tab goes on to the section's controls; Space presses them.
+    tab(&mut rt, false);
+    assert_eq!(focused_key(&rt), "folder-choose");
+    tab(&mut rt, false);
+    tab(&mut rt, false);
+    assert_eq!(focused_key(&rt), "transfers-more");
+    press(&mut rt, Key::Text(" ".into()), Mods::default());
+    assert_eq!(rt.state.settings.transfers_at_once, 4);
+    // Escape from a control leaves the page; the arrows and Return there never reach the list.
+    press(&mut rt, Key::Enter, Mods::default());
+    press(&mut rt, Key::Down, Mods::default());
+    assert!(rt.state.on_settings());
+    press(&mut rt, Key::Escape, Mods::default());
+    assert_eq!(rt.state.ui.page, Page::Files);
+}
+
+#[test]
+fn the_gear_takes_the_keyboard() {
+    let mut rt = listing();
+    tab_to(&mut rt, "sidebar-settings");
+    press(&mut rt, Key::Enter, Mods::default());
+    assert_eq!(rt.state.ui.page, Page::Settings(SettingsSection::Appearance), "Return presses it");
+    assert_eq!(rt.state.conn().unwrap().cwd.as_str(), "/var/www/site", "rather than opening the list's selection");
+    tab_to(&mut rt, "settings-back");
+    press(&mut rt, Key::Text(" ".into()), Mods::default());
+    assert_eq!(rt.state.ui.page, Page::Files, "Space presses Back");
 }
 
 /// Focuses `key` by Tab from where focus is.

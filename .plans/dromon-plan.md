@@ -333,7 +333,7 @@ Each proof of concept is a small throwaway binary that settles a risk before UI 
 - Connected section, multiple live connections, ⌘N new window, ⌘1–9 host switching
 - Quick connect (3 fields + More), Save, Add to SSH config with backup
 - ⌘K command palette
-- Settings window
+- Settings page
 - Light theme, accent finalization (3 mint/teal variants → pick), contrast audit, reduce-motion and reduce-transparency paths
 - Icon set complete and verified at 1× and 2×
 
@@ -479,7 +479,7 @@ Rules:
 | **⌘K palette** | 560px wide, top third of the window. Fuzzy search; groups: Hosts, Go to folder…, Actions. Each row shows its shortcut. `move` scale from centre. |
 | **Quick connect** | Popover from sidebar **+**: Host (mono), Username, Port; **More** expands alias, identity file, jump host. **Connect** / **Save**. |
 | **Add to SSH config** | Sheet: target path, the `Host` block in mono on `raised`, backup note, **Add to config** / Cancel. |
-| **Settings** | Separate small window. Sections: Appearance (System/Dark/Light, density), Transfers (download folder, transfers at once), Browsing (show hidden files by default, on by default). |
+| **Settings** | A page in the main window, in place of the toolbar, list and status bar, the sidebar beside it; opened by ⌘, (Ctrl+,), the palette, the macOS app menu and the sidebar's gear; Back or Escape returns to the folder view as it was. Sections in a list on the left: Appearance (System/Dark/Light, density), Transfers (download folder, transfers at once), Browsing (show hidden files by default, on by default). |
 | **Connection log** | Sheet or window per host: mono, timestamped, copy-all button, "Verbose logging" toggle (reconnects with `-v`). |
 
 ### 6.9 Accessibility
@@ -612,7 +612,7 @@ Rules:
 | Chrome | Custom single-piece title bar on all platforms |
 | Motion | No-bounce springs; bounce only after momentum; reduce-motion respected |
 | Context menus | Native on macOS/Windows; rune-kit on Linux |
-| Extras | ⌘K palette, per-connection log, settings window |
+| Extras | ⌘K palette, per-connection log, settings page |
 | Launch | Restore window/sidebar/last host; never auto-connect |
 
 ---

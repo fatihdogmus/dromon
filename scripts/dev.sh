@@ -5,7 +5,7 @@
 #   bash scripts/dev.sh --mock            # the built-in demo (DROMON_MOCK=1), no servers
 #   bash scripts/dev.sh -- --fixture f.json --scene listing   # any app arguments after --
 #
-# Saved edits to function bodies in src/views/**, src/theme/** and src/settings_window.rs
+# Saved edits to function bodies in src/views/** and src/theme/**
 # patch into the open window within a second or two, with the app's state kept (folder,
 # selection, connections). Any other edit (state/, service/, types, signatures, constants,
 # Cargo.toml) rebuilds and restarts the app; the first build is a full one. One exception: when
@@ -88,5 +88,5 @@ launcher="$(dirname "$rune_manifest")/../../scripts/rune-dev"
 # `dromon-hot` is the app compiled as one crate (crates/dromon-app/src/hot.rs): hot patching
 # reaches only the executable's own crate, and `dromon` links the views as a library.
 exec "$python" "$launcher" --local --manifest-path crates/dromon-app/Cargo.toml --bin dromon-hot \
-  --patch 'src/views/**/*.rs' --patch 'src/theme/**/*.rs' --patch 'src/settings_window.rs' \
+  --patch 'src/views/**/*.rs' --patch 'src/theme/**/*.rs' \
   --port "${DROMON_DEV_PORT:-18745}" -- ${app_args[@]+"${app_args[@]}"}

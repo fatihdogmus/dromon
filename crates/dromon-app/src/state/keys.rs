@@ -36,7 +36,7 @@ pub enum Shortcut {
     Host(usize),
     /// ⌘⇧J: the transfers popover.
     ShowTransfers,
-    /// ⌘, (Ctrl+, elsewhere): the Settings window.
+    /// ⌘, (Ctrl+, elsewhere): the Settings page.
     Settings,
     /// ⌘N (Ctrl+N elsewhere): another main window.
     NewWindow,
