@@ -69,8 +69,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: cargo repro "$ISSUE" "$RUNNER_TEMP/repro" --repo "$GITHUB_REPOSITORY"
+      # Also when the repro failed, but not when a newer /repro cancelled this run.
       - name: Upload outputs
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: repro-${{ github.event.issue.number }}
@@ -78,7 +79,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
       - name: Report
-        if: always()
+        if: ${{ !cancelled() }}
         env:
           GH_TOKEN: ${{ github.token }}
           OUTCOME: ${{ steps.repro.outcome }}
