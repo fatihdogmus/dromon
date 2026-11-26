@@ -47,8 +47,14 @@ for name in "${names[@]}"; do
   [[ -f "$flows/$name/script.json" ]] || { echo "flows: no flow $name (tests/flows/$name/script.json; an out dir needs a /, e.g. ./$name)" >&2; exit 2; }
 done
 
-cargo build -p dromon-app --quiet || { echo "flows: the build failed" >&2; exit 1; }
-bin="$root/target/debug/dromon"
+# DROMON_BIN: a dromon binary built already (scripts/smoke-app.sh says why).
+if [[ -n ${DROMON_BIN:-} ]]; then
+  bin=$DROMON_BIN
+  [[ $bin == /* ]] || bin="$root/$bin"
+else
+  cargo build -p dromon-app --quiet || { echo "flows: the build failed" >&2; exit 1; }
+  bin="$root/target/debug/dromon"
+fi
 mkdir -p "$out"
 have_ffmpeg=0
 command -v ffmpeg >/dev/null 2>&1 && have_ffmpeg=1

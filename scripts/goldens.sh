@@ -32,8 +32,14 @@ else
 fi
 
 cd "$root"
-cargo build -p dromon-app --quiet
-bin="$root/target/debug/dromon"
+# DROMON_BIN: a dromon binary built already (scripts/smoke-app.sh says why).
+if [[ -n ${DROMON_BIN:-} ]]; then
+  bin=$DROMON_BIN
+  [[ $bin == /* ]] || bin="$root/$bin"
+else
+  cargo build -p dromon-app --quiet
+  bin="$root/target/debug/dromon"
+fi
 mkdir -p "$out"
 
 scenes=(welcome connecting listing listing-sorted-size big-folder empty-folder permission-denied reconnecting filter light

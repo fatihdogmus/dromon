@@ -4,17 +4,20 @@ name: CI
 # - linux: clippy, the whole test suite with the Docker sshd fixture required (testcontainers),
 #   goldens unchanged, the smoke script (headless, real window under Xvfb, real connect), and the
 #   --script flows rendered as artifacts for review.
-# - macos (Apple silicon) and macos-intel: the test suite (the Docker fixture tests skip: no Linux containers there), then the
-#   sshd fixture tests (askpass, SFTP, transfer I/O, the app's e2e and transfers) against a
-#   private native sshd instead of Docker: dromon-testkit's native backend
-#   (DROMON_FIXTURE_BACKEND=native) starts Apple's sshd as root through sudo, with test users
-#   dromon_*; the TOTP tests use Homebrew's google-authenticator-libpam as dromon_kbd's second
-#   factor. Then the headless smoke.
-# - windows: the test suite, then the Docker sshd fixture tests (askpass, SFTP, transfer I/O, the
-#   app's e2e, transfers and file operations) with Windows' own OpenSSH and the named-pipe
-#   askpass, against the same Linux image: Docker runs in
-#   WSL2 (Ubuntu 24.04) and answers on tcp://127.0.0.1:2375; the ports its containers publish on
-#   127.0.0.1 reach Windows through WSL's localhost forwarding. Then the headless smoke.
+# - linux-matrix: the SFTP and transfer checks against every Docker server variant.
+# - macos (Apple silicon) and macos-intel: the whole suite once, its sshd fixture tests against a
+#   private native sshd instead of Docker (no Linux containers there): dromon-testkit's native
+#   backend (DROMON_FIXTURE_BACKEND=native) starts Apple's sshd as root through sudo, with test
+#   users dromon_*; the TOTP tests use Homebrew's google-authenticator-libpam as dromon_kbd's
+#   second factor. Then the headless smoke.
+# - windows: the whole suite once, its sshd fixture tests with Windows' own OpenSSH and the
+#   named-pipe askpass against the same Linux image as linux: Docker runs in WSL2 (Ubuntu
+#   24.04) and answers on tcp://127.0.0.1:2375; the ports its containers publish on 127.0.0.1
+#   reach Windows through WSL's localhost forwarding. Then the headless smoke, and the transfer
+#   checks against Windows' own sshd.
+# Each test job builds once: one `cargo test --workspace`, and the scripts after it run the
+# dromon it built (DROMON_BIN). A `-p` subset or `cargo build -p dromon-app` would resolve other
+# dependency features and compile about a hundred crates again.
 # - linux-package, macos-package, windows-package: each installer built with the release's
 #   scripts (unsigned) and checked the way a user would install it.
 
@@ -52,6 +55,9 @@ jobs:
       # build cache (GitHub keeps 10 GB per repository) and quicker links. Test jobs only:
       # rust-cache hashes CARGO_* into its key, and the package jobs share the release's.
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      # goldens, smoke and flows run the dromon the tests built: their own `cargo build -p
+      # dromon-app` would resolve other dependency features and compile ~100 crates again.
+      DROMON_BIN: target/debug/dromon
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -71,15 +77,6 @@ jobs:
         run: cargo lint --locked
       - name: Tests (with the Docker sshd fixture)
         run: cargo test --workspace --locked
-      # The server matrix (tests/docker/README.md): the SFTP and transfer checks again against
-      # every Docker server: Debian trixie (OpenSSH 10), bullseye (OpenSSH 8.4p1: no copy-data,
-      # no limits), Alpine (musl) and trixie behind toxiproxy (latency, bandwidth caps, a reset
-      # mid-transfer), the 100k-entry folder included. One `matrix:` line per check and server.
-      - name: Server matrix (Docker sshd variants)
-        timeout-minutes: 15
-        env:
-          DROMON_SERVER_MATRIX: "1"
-        run: cargo test --locked --no-fail-fast -p dromon-sftp -p dromon-transfer --test matrix
       # Within GOLDEN_TOLERANCE per channel: other Mesa versions round a few pixels differently.
       - name: Goldens unchanged
         run: cargo goldens --check
@@ -111,6 +108,32 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  # The server matrix (tests/docker/README.md), beside the linux job: the SFTP and transfer
+  # checks against every Docker server: Debian trixie (OpenSSH 10), bullseye (OpenSSH 8.4p1: no
+  # copy-data, no limits), Alpine (musl) and trixie behind toxiproxy (latency, bandwidth caps, a
+  # reset mid-transfer), the 100k-entry folder included. One `matrix:` line per check and server.
+  # Only dromon-sftp and dromon-transfer build here: no UI libraries, no system packages.
+  linux-matrix:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      DROMON_REQUIRE_DOCKER: "1"
+      DROMON_SERVER_MATRIX: "1"
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only # as in linux
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: linux-matrix
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Server matrix (Docker sshd variants)
+        timeout-minutes: 15
+        run: cargo test --locked --no-fail-fast -p dromon-sftp -p dromon-transfer --test matrix
+
   # Apple silicon and Intel: the release ships one universal app for both.
   macos:
     strategy:
@@ -123,10 +146,10 @@ jobs:
             runner: macos-15-intel
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
-    # The suite twice (plain, then against the native sshd).
-    timeout-minutes: 75
+    timeout-minutes: 60
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only # as in linux
+      DROMON_BIN: target/debug/dromon # as in linux
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -137,8 +160,6 @@ jobs:
         with:
           key: ${{ matrix.name }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Tests
-        run: cargo test --workspace --locked
       # The native sshd's TOTP second factor for dromon_kbd (tests/docker/README.md): a bottle,
       # so seconds. Without it the TOTP tests would skip.
       - name: TOTP PAM module (Homebrew)
@@ -151,21 +172,18 @@ jobs:
           module="$(brew --prefix google-authenticator-libpam)/lib/security/pam_google_authenticator.so"
           ls -lL "$module"
           codesign -dv "$module" 2>&1 || true
-      # No Docker on macOS runners (no nested virtualisation): the sshd fixture tests
-      # again, against dromon-testkit's native backend (Apple's /usr/sbin/sshd as root through
+      # The whole suite once. No Docker on macOS runners (no nested virtualisation): the sshd
+      # fixture tests use dromon-testkit's native backend (Apple's /usr/sbin/sshd as root through
       # the runner's passwordless sudo, users dromon_*; tests/docker/README.md). The TOTP tests
       # run there too: dromon_kbd's PAM service adds the module above to Apple's sshd policy.
-      # Both commands run; the step fails if either does.
+      # One `--workspace` run: a `-p` subset resolves other dependency features and recompiles
+      # about a hundred crates. --no-fail-fast: every failing test binary, not just the first.
       - name: Tests (native sshd)
         env:
           DROMON_FIXTURE_BACKEND: native
           # Fail, don't skip, when the native sshd can't start.
           DROMON_REQUIRE_DOCKER: "1"
-        run: |
-          status=0
-          cargo test --locked --no-fail-fast -p dromon-testkit -p dromon-ssh -p dromon-sftp -p dromon-transfer || status=1
-          cargo test --locked --no-fail-fast -p dromon-app --test e2e --test transfers_e2e --test fileops_e2e --test poll_e2e --test quick_e2e --test windows_e2e --test wake_e2e || status=1
-          exit "$status"
+        run: cargo test --workspace --locked --no-fail-fast
       # GitHub's macOS runners may not expose Metal to headless rendering; non-blocking until a
       # first green run proves it.
       - name: Smoke (headless)
@@ -175,10 +193,10 @@ jobs:
 
   windows:
     runs-on: windows-2025
-    # The suite twice (plain, then with the WSL2 Docker fixture) and the WSL setup in between.
-    timeout-minutes: 75
+    timeout-minutes: 60
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only # as in linux
+      DROMON_BIN: target/debug/dromon # as in linux
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -189,10 +207,8 @@ jobs:
         with:
           key: windows
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      # The regular suite first; its Docker fixture tests skip here (the runner's own Docker runs
-      # Windows containers only). The next steps give them a Linux Docker in WSL2.
-      - name: Tests
-        run: cargo test --workspace --locked
+      # A Linux Docker for the sshd fixture (the runner's own Docker runs Windows containers
+      # only): Ubuntu in WSL2, then the whole suite once against it.
       - uses: Vampire/setup-wsl@4c48163d9f981914dd8caa0fc335fe19cca5bff4 # v7.2.0
         with:
           distribution: Ubuntu-24.04
@@ -262,24 +278,20 @@ jobs:
             if ((Get-Date) -gt $deadline) { throw 'no Linux Docker on http://127.0.0.1:2375 after 60 s' }
             Start-Sleep -Seconds 2
           }
-      # The library crates' fixture tests, then dromon-app's end-to-end tests (the app's service
-      # thread, and in e2e the headless UI without rendering, with dromon.exe as ssh's askpass
-      # helper). Both commands run; the step fails if either does.
+      # The whole suite once, the fixture tests against the Docker sshd in WSL2 with Windows' own
+      # OpenSSH client (dromon.exe as ssh's askpass helper in the end-to-end tests). One
+      # `--workspace` run: a `-p` subset resolves other dependency features and recompiles about
+      # a hundred crates. --no-fail-fast: every failing test binary, not just the first.
+      # --skip: WSL's localhost relay into Docker now and then drops a connection busy both
+      # ways, which a streamed same-session copy is (ConnectionLost even with a 60 s timeout:
+      # runs 45752298056, 45753756067, 45778453075). The native sshd step below streams the same
+      # copy five times against Windows' own sshd (windows_sshd.rs), so Windows keeps that coverage.
       - name: Tests (Docker sshd fixture in WSL2, Windows' OpenSSH)
         env:
           DOCKER_HOST: tcp://127.0.0.1:2375
           # Fail, don't skip, when the sshd fixture can't start.
           DROMON_REQUIRE_DOCKER: "1"
-        # --no-fail-fast: one run shows every failing test binary, not just the first.
-        # --skip: WSL's localhost relay into Docker now and then drops a connection busy both
-        # ways, which a streamed same-session copy is (ConnectionLost even with a 60 s timeout:
-        # runs 45752298056, 45753756067, 45778453075). The native sshd step below streams the same
-        # copy five times against Windows' own sshd (windows_sshd.rs), so Windows keeps that coverage.
-        run: |
-          status=0
-          cargo test --locked --no-fail-fast -p dromon-testkit -p dromon-ssh -p dromon-sftp -p dromon-transfer -- --skip same_host_copy_streams_when_told_and_resumes_from_the_part || status=1
-          cargo test --locked --no-fail-fast -p dromon-app --test e2e --test transfers_e2e --test fileops_e2e --test poll_e2e --test quick_e2e --test windows_e2e --test wake_e2e || status=1
-          exit "$status"
+        run: cargo test --workspace --locked --no-fail-fast -- --skip same_host_copy_streams_when_told_and_resumes_from_the_part
       - name: Docker state
         if: failure()
         shell: wsl-bash {0}

@@ -20,7 +20,8 @@
 #              its `fixture` folder in a real window under Xvfb: the trace must show
 #              Connecting → Ready → Opened and two finished listings, and no prompt.
 #
-# Env: DROMON_SMOKE_SECONDS (window mode, 8), DROMON_SMOKE_CONNECT_SECONDS (connect mode, 10),
+# Env: DROMON_BIN (a dromon built already, instead of `cargo build -p dromon-app`; CI: the one
+# `cargo test --workspace` built), DROMON_SMOKE_SECONDS (window mode, 8), DROMON_SMOKE_CONNECT_SECONDS (connect mode, 10),
 # VK_ICD_FILENAMES (lavapipe's ICD on Linux), DROMON_SMOKE_KEEP=1 keeps the work folder.
 # Prints `smoke: OK` and exits 0 when every mode passed; prints `smoke: FAILED: <why>` and exits
 # 1 otherwise (2 on bad arguments). Removes its temporary folders and containers either way.
@@ -59,9 +60,17 @@ cleanup() {
 }
 trap cleanup EXIT
 
-note "building"
-cargo build -p dromon-app --quiet || fail "the build failed"
-bin="$root/target/debug/dromon"
+# DROMON_BIN: a dromon binary built already (CI: the one `cargo test --workspace` builds, which a
+# `cargo build -p dromon-app` would rebuild with other dependency features, ~100 crates again).
+if [[ -n ${DROMON_BIN:-} ]]; then
+  bin=$DROMON_BIN
+  [[ $bin == /* || $bin == [A-Za-z]:* ]] || bin="$root/$bin"
+  note "using $bin"
+else
+  note "building"
+  cargo build -p dromon-app --quiet || fail "the build failed"
+  bin="$root/target/debug/dromon"
+fi
 [[ -x "$bin.exe" ]] && bin="$bin.exe"
 [[ -x "$bin" ]] || fail "no binary at $bin"
 icd="${VK_ICD_FILENAMES:-/usr/share/vulkan/icd.d/lvp_icd.json}"
