@@ -34,13 +34,28 @@ fn the_pill_says_what_and_where() {
 #[test]
 fn drops_move_or_copy_within_the_host_and_copy_to_another() {
     let d = drag(&["a"], over(DragTarget::Crumb(RemotePath::new("/var/www")), false, "prod", "/var/www", "www"));
-    assert_eq!(d.request(), Some(JobRequest::Move { host: host("prod"), items: d.items.clone(), into: RemotePath::new("/var/www") }));
+    assert_eq!(
+        d.request(),
+        Some(JobRequest::Move { host: host("prod"), items: d.items.clone(), into: RemotePath::new("/var/www") })
+    );
     let d = drag(&["a"], over(DragTarget::Folder("uploads".into()), true, "prod", "/var/www/site/uploads", "uploads"));
-    assert_eq!(d.request(), Some(JobRequest::RemoteCopy { host: host("prod"), items: d.items.clone(), into: RemotePath::new("/var/www/site/uploads") }));
+    assert_eq!(
+        d.request(),
+        Some(JobRequest::RemoteCopy {
+            host: host("prod"),
+            items: d.items.clone(),
+            into: RemotePath::new("/var/www/site/uploads")
+        })
+    );
     let d = drag(&["a"], over(DragTarget::Host(host("nas")), true, "nas", "/volume1", "nas"));
     assert_eq!(
         d.request(),
-        Some(JobRequest::CrossHostCopy { from: host("prod"), items: d.items.clone(), to: host("nas"), into: RemotePath::new("/volume1") })
+        Some(JobRequest::CrossHostCopy {
+            from: host("prod"),
+            items: d.items.clone(),
+            to: host("nas"),
+            into: RemotePath::new("/volume1")
+        })
     );
     assert_eq!(drag(&["a"], None).request(), None);
 }

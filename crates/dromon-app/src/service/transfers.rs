@@ -61,20 +61,60 @@ type Used = Vec<(HostId, Sftp)>;
 enum Outcome {
     /// [`Action::Name`] of a download: the item's free local name (or an error, e.g. the
     /// Downloads folder can't be made).
-    Named { job: JobId, item: usize, dst: Result<PathBuf, Error> },
+    Named {
+        job: JobId,
+        item: usize,
+        dst: Result<PathBuf, Error>,
+    },
     /// [`Action::FreeRemoteName`] (Keep both): a free name in the destination folder.
-    FreeName { job: JobId, item: usize, dst: Result<ItemDst, Error>, used: Used },
+    FreeName {
+        job: JobId,
+        item: usize,
+        dst: Result<ItemDst, Error>,
+        used: Used,
+    },
     /// [`Action::Name`] of an upload, copy, move: what is at `into/name` on the destination.
     /// `incoming` is what the item to transfer looks like (for the conflict sheet).
-    Exists { job: JobId, item: usize, existing: Result<Option<Existing>, Error>, incoming: Side, used: Used },
-    ScanProgress { job: JobId, item: usize, found: u64 },
+    Exists {
+        job: JobId,
+        item: usize,
+        existing: Result<Option<Existing>, Error>,
+        incoming: Side,
+        used: Used,
+    },
+    ScanProgress {
+        job: JobId,
+        item: usize,
+        found: u64,
+    },
     /// [`Action::Scan`] into `dst`.
-    Scanned { job: JobId, item: usize, dst: ItemDst, scan: Result<Scan, Error>, used: Used },
+    Scanned {
+        job: JobId,
+        item: usize,
+        dst: ItemDst,
+        scan: Result<Scan, Error>,
+        used: Used,
+    },
     /// From run `run` of the file ([`Engine::running`]); a run aborted since is ignored.
-    Progress { job: JobId, file: FileId, run: u64, done: u64 },
-    Finished { job: JobId, file: FileId, run: u64, result: Result<(), Error> },
+    Progress {
+        job: JobId,
+        file: FileId,
+        run: u64,
+        done: u64,
+    },
+    Finished {
+        job: JobId,
+        file: FileId,
+        run: u64,
+        result: Result<(), Error>,
+    },
     /// Cross-host move: the item's empty source folders were removed.
-    Tidied { job: JobId, item: usize, result: Result<(), Error>, used: Used },
+    Tidied {
+        job: JobId,
+        item: usize,
+        result: Result<(), Error>,
+        used: Used,
+    },
 }
 
 /// A file copy in flight.
@@ -313,7 +353,8 @@ impl<S: Sink> Engine<S> {
         if !self.deferred.iter().any(|d| d.due <= now) {
             return false;
         }
-        let (due, wait): (Vec<Deferred>, Vec<Deferred>) = std::mem::take(&mut self.deferred).into_iter().partition(|d| d.due <= now);
+        let (due, wait): (Vec<Deferred>, Vec<Deferred>) =
+            std::mem::take(&mut self.deferred).into_iter().partition(|d| d.due <= now);
         self.deferred = wait;
         self.replay(due);
         true
@@ -421,14 +462,17 @@ impl<S: Sink> Engine<S> {
                     req => req.remote_items().and_then(|i| i.get(item)).map(|i| Src::Remote(i.path.clone())),
                 };
                 let Some(src) = src else { return };
-                let Some((from, to)) = self.sessions_for(&req, Action::Scan { job, item, dst: dst.clone() }) else { return };
+                let Some((from, to)) = self.sessions_for(&req, Action::Scan { job, item, dst: dst.clone() }) else {
+                    return;
+                };
                 let hosts = (req.source_host().clone(), req.host().clone());
                 tokio::spawn(async move {
                     let progress = |found| {
                         let _ = tx.send(Outcome::ScanProgress { job, item, found });
                     };
                     let scan = scan(&from, &to, src, dst.clone(), progress).await;
-                    let _ = tx.send(Outcome::Scanned { job, item, dst, scan, used: vec![(hosts.0, from), (hosts.1, to)] });
+                    let _ =
+                        tx.send(Outcome::Scanned { job, item, dst, scan, used: vec![(hosts.0, from), (hosts.1, to)] });
                 });
             }
             Action::Start { job, file, plan } => {
@@ -575,13 +619,21 @@ async fn scan(from: &Sftp, to: &Sftp, src: Src, dst: ItemDst, found: impl FnMut(
 
 /// Copies (or moves) one file of a job of `kind`: downloads, uploads, same-host copies and
 /// moves on `to` (the job's one session), copies and moves between hosts from `from` to `to`.
-async fn run_file(from: &Sftp, to: &Sftp, kind: JobKind, plan: &FilePlan, progress: impl FnMut(u64) + Send) -> Result<(), Error> {
+async fn run_file(
+    from: &Sftp,
+    to: &Sftp,
+    kind: JobKind,
+    plan: &FilePlan,
+    progress: impl FnMut(u64) + Send,
+) -> Result<(), Error> {
     let opts = CopyOptions::default();
     match (plan, kind) {
         (FilePlan::Download { .. }, _) => io::download(to, plan, opts, progress).await.map(drop),
         (FilePlan::Upload { .. }, _) => io::upload(to, plan, opts, progress).await.map(drop),
         (FilePlan::Copy { .. }, JobKind::RemoteCopy) => io::copy_remote(to, plan, opts, progress).await.map(drop),
-        (FilePlan::Copy { .. }, JobKind::CrossHostMove) => io::move_between(from, to, plan, opts, progress).await.map(drop),
+        (FilePlan::Copy { .. }, JobKind::CrossHostMove) => {
+            io::move_between(from, to, plan, opts, progress).await.map(drop)
+        }
         (FilePlan::Copy { .. }, _) => io::copy_between(from, to, plan, opts, progress).await.map(drop),
         (FilePlan::Move { .. }, _) => io::move_remote(to, plan).await.map(drop),
     }

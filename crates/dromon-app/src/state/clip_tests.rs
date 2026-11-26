@@ -14,7 +14,11 @@ fn item(path: &str, kind: EntryKind) -> RemoteItem {
 }
 
 fn clip(cut: bool) -> Clip {
-    Clip::new(host("prod"), vec![item("/var/www/site/index.html", EntryKind::File), item("/var/www/site/assets", EntryKind::Dir)], cut)
+    Clip::new(
+        host("prod"),
+        vec![item("/var/www/site/index.html", EntryKind::File), item("/var/www/site/assets", EntryKind::Dir)],
+        cut,
+    )
 }
 
 #[test]
@@ -46,12 +50,25 @@ fn cut_rows_are_the_cut_items_on_their_host() {
 fn each_paste_makes_its_job() {
     let into = RemotePath::new("/srv");
     let items = clip(false).items;
-    assert_eq!(clip(false).paste(&host("prod"), into.clone(), false), JobRequest::RemoteCopy { host: host("prod"), items: items.clone(), into: into.clone() });
-    assert_eq!(clip(true).paste(&host("prod"), into.clone(), false), JobRequest::Move { host: host("prod"), items: items.clone(), into: into.clone() });
-    assert_eq!(clip(false).paste(&host("prod"), into.clone(), true), JobRequest::Move { host: host("prod"), items: items.clone(), into: into.clone() }, "Move here");
+    assert_eq!(
+        clip(false).paste(&host("prod"), into.clone(), false),
+        JobRequest::RemoteCopy { host: host("prod"), items: items.clone(), into: into.clone() }
+    );
+    assert_eq!(
+        clip(true).paste(&host("prod"), into.clone(), false),
+        JobRequest::Move { host: host("prod"), items: items.clone(), into: into.clone() }
+    );
+    assert_eq!(
+        clip(false).paste(&host("prod"), into.clone(), true),
+        JobRequest::Move { host: host("prod"), items: items.clone(), into: into.clone() },
+        "Move here"
+    );
     assert_eq!(
         clip(false).paste(&host("nas"), into.clone(), false),
         JobRequest::CrossHostCopy { from: host("prod"), items: items.clone(), to: host("nas"), into: into.clone() }
     );
-    assert_eq!(clip(true).paste(&host("nas"), into.clone(), false), JobRequest::CrossHostMove { from: host("prod"), items, to: host("nas"), into });
+    assert_eq!(
+        clip(true).paste(&host("nas"), into.clone(), false),
+        JobRequest::CrossHostMove { from: host("prod"), items, to: host("nas"), into }
+    );
 }

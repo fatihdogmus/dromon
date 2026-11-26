@@ -50,14 +50,20 @@ fn clash() -> ConflictView {
 fn the_badge_counts_active_jobs_and_the_bar_says_how_they_go() {
     use JobKind::{Download, Upload};
     assert_eq!(dock(&[], false), Dock { count: 0, bar: Bar::None });
-    let finished = [job(1, Download, TaskState::Done), job(2, Upload, failed("x")), job(3, Download, TaskState::Cancelled)];
+    let finished =
+        [job(1, Download, TaskState::Done), job(2, Upload, failed("x")), job(3, Download, TaskState::Cancelled)];
     assert_eq!(dock(&finished, false), Dock { count: 0, bar: Bar::None }, "finished jobs don't count");
 
-    let running = [job(1, Download, TaskState::Running), job(2, Upload, TaskState::Queued), job(3, Download, TaskState::Preparing { files_found: 4 })];
+    let running = [
+        job(1, Download, TaskState::Running),
+        job(2, Upload, TaskState::Queued),
+        job(3, Download, TaskState::Preparing { files_found: 4 }),
+    ];
     assert_eq!(dock(&running, false), Dock { count: 3, bar: Bar::Busy });
 
     // Paused while another runs: still busy. Everything left waiting: paused.
-    let mixed = [job(1, Download, TaskState::Running), job(2, Download, TaskState::Paused), job(3, Download, TaskState::Done)];
+    let mixed =
+        [job(1, Download, TaskState::Running), job(2, Download, TaskState::Paused), job(3, Download, TaskState::Done)];
     assert_eq!(dock(&mixed, false), Dock { count: 2, bar: Bar::Busy });
     let mut offline = job(2, Download, TaskState::Running);
     offline.waiting_for_connection = true;

@@ -47,7 +47,10 @@ fn view(s: &App) -> &PropertiesView {
 }
 
 fn sizes_sent(rec: &Recorder) -> Vec<Command> {
-    rec.sent().into_iter().filter(|c| matches!(c, Command::FolderSize { .. } | Command::CancelFolderSize { .. })).collect()
+    rec.sent()
+        .into_iter()
+        .filter(|c| matches!(c, Command::FolderSize { .. } | Command::CancelFolderSize { .. }))
+        .collect()
 }
 
 fn total(bytes: u64, files: u64, folders: u64, unreadable: u64) -> SizeTotal {
@@ -82,7 +85,10 @@ fn entry(kind: EntryKind, mode: Option<u32>) -> Entry {
 fn kinds_read_as_words() {
     assert_eq!(kind_text(&entry(EntryKind::Dir, None)), "Folder");
     assert_eq!(kind_text(&entry(EntryKind::File, None)), "File");
-    assert_eq!(kind_text(&entry(EntryKind::Symlink { target: Some(LinkTarget::Dir) }, None)), "Symbolic link to a folder");
+    assert_eq!(
+        kind_text(&entry(EntryKind::Symlink { target: Some(LinkTarget::Dir) }, None)),
+        "Symbolic link to a folder"
+    );
     assert_eq!(kind_text(&entry(EntryKind::Symlink { target: None }, None)), "Symbolic link (target missing)");
     assert_eq!(kind_text(&entry(EntryKind::Other, Some(0o140_755))), "Socket");
     assert_eq!(kind_text(&entry(EntryKind::Other, Some(0o010_644))), "Named pipe");
@@ -160,7 +166,10 @@ fn calculate_shows_progress_then_the_total() {
     file(&mut s, FileAction::Calculate);
     let id = view(&s).walking().expect("walking");
     assert_eq!(id.0 >> 32, u64::from(s.window.0), "numbered in this window's own range");
-    assert_eq!(sizes_sent(&rec), [Command::FolderSize { id, host: prod(), path: RemotePath::new("/var/www/site/releases") }]);
+    assert_eq!(
+        sizes_sent(&rec),
+        [Command::FolderSize { id, host: prod(), path: RemotePath::new("/var/www/site/releases") }]
+    );
     assert!(!s.can_calculate(), "not twice at once");
     file(&mut s, FileAction::Calculate);
     assert_eq!(sizes_sent(&rec).len(), 1);
@@ -175,7 +184,12 @@ fn calculate_shows_progress_then_the_total() {
     file(&mut s, FileAction::Calculate);
     let again = view(&s).walking().expect("walking again");
     assert_ne!(again, id);
-    s.apply(ServiceEvent::FolderSizeFailed { id: again, host: prod(), total: total(9, 1, 0, 0), error: Error::ConnectionLost });
+    s.apply(ServiceEvent::FolderSizeFailed {
+        id: again,
+        host: prod(),
+        total: total(9, 1, 0, 0),
+        error: Error::ConnectionLost,
+    });
     assert_eq!(view(&s).size, SizePhase::Failed { total: total(9, 1, 0, 0), error: Error::ConnectionLost });
     s.act(Action::DismissSheet);
     assert_eq!(sizes_sent(&rec).len(), 2, "nothing to cancel: {:?}", sizes_sent(&rec));
@@ -256,5 +270,9 @@ fn the_fixture_walks_the_folder_at_once() {
     s.act(Action::GoTo(RemotePath::new("/var")));
     opened(&mut s, "lib");
     file(&mut s, FileAction::Calculate);
-    assert!(matches!(view(&s).size, SizePhase::Done { total: SizeTotal { unreadable: 1, folders: 1, .. } }), "{:?}", view(&s).size);
+    assert!(
+        matches!(view(&s).size, SizePhase::Done { total: SizeTotal { unreadable: 1, folders: 1, .. } }),
+        "{:?}",
+        view(&s).size
+    );
 }

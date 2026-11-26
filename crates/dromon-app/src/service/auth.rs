@@ -112,7 +112,8 @@ impl AttemptPrompts {
             AuthDecision::AskUser { error } => {
                 let id = self.ids.issue(&self.host);
                 let needs_user = kind != PromptKind::Notice;
-                let prompt = Prompt { id, host: self.host.clone(), kind: kind.clone(), text: req.prompt.clone(), error };
+                let prompt =
+                    Prompt { id, host: self.host.clone(), kind: kind.clone(), text: req.prompt.clone(), error };
                 self.open.push(Open { id, kind, text: req.prompt, reply: req.reply });
                 Routed::Asked { prompt, needs_user }
             }
@@ -188,7 +189,10 @@ mod tests {
 
     fn request(prompt: &str, hint: Option<&str>) -> (AskpassRequest, oneshot::Receiver<PromptAnswer>) {
         let (reply, rx) = oneshot::channel();
-        (AskpassRequest { host: HostId("prod".into()), prompt: prompt.into(), hint: hint.map(str::to_owned), reply }, rx)
+        (
+            AskpassRequest { host: HostId("prod".into()), prompt: prompt.into(), hint: hint.map(str::to_owned), reply },
+            rx,
+        )
     }
 
     fn asked(r: Routed) -> Prompt {

@@ -191,7 +191,10 @@ fn delete_asks_then_deletes_with_a_toast_until_done() {
     assert!(file_ops(&rec).is_empty(), "nothing until it's confirmed");
     file(&mut s, FileAction::ConfirmDelete);
     assert!(!s.ui.sheets.is_open());
-    assert_eq!(file_ops(&rec), [FileOp::Delete { paths: vec![p("/var/www/site/assets"), p("/var/www/site/README.md")] }]);
+    assert_eq!(
+        file_ops(&rec),
+        [FileOp::Delete { paths: vec![p("/var/www/site/assets"), p("/var/www/site/README.md")] }]
+    );
     let id = s.ops.ops.last().unwrap().id;
     let texts = |s: &App| s.toasts().into_iter().map(|t| t.text).collect::<Vec<_>>();
     assert_eq!(texts(&s), ["Deleting 2 items…"]);
@@ -211,7 +214,11 @@ fn a_failed_delete_keeps_its_toast_until_dismissed_and_several_stack() {
     }
     let ids: Vec<OpId> = s.ops.ops.iter().map(|o| o.id).collect();
     assert_eq!(s.toasts().len(), 2, "they stack");
-    s.apply(ServiceEvent::FileOpFailed { id: ids[0], host: host("prod"), error: Error::PermissionDenied(p("/var/www/site/assets/x")) });
+    s.apply(ServiceEvent::FileOpFailed {
+        id: ids[0],
+        host: host("prod"),
+        error: Error::PermissionDenied(p("/var/www/site/assets/x")),
+    });
     let t = s.toasts();
     assert_eq!(t[0].text, "Couldn't delete ‘assets’: You don't have access to /var/www/site/assets/x");
     assert_eq!(t[1].text, "Deleting ‘uploads’…");
@@ -260,7 +267,10 @@ fn paste_on_the_same_host_copies_or_moves_and_a_cut_empties_the_clip() {
     file(&mut s, FileAction::Copy);
     file(&mut s, FileAction::Paste { text: text.clone(), as_move: false });
     let index = item("/var/www/site/index.html", EntryKind::File, 14_812);
-    assert_eq!(started(&rec), [JobRequest::RemoteCopy { host: host("prod"), items: vec![index.clone()], into: p(SITE) }]);
+    assert_eq!(
+        started(&rec),
+        [JobRequest::RemoteCopy { host: host("prod"), items: vec![index.clone()], into: p(SITE) }]
+    );
     assert!(s.clip().is_some(), "a copy pastes again");
 
     file(&mut s, FileAction::Cut);
@@ -284,12 +294,23 @@ fn paste_on_another_host_streams_across() {
     assert_eq!(s.conn().unwrap().cwd, p("/volume1"));
     file(&mut s, FileAction::Paste { text: "/var/www/site/index.html".into(), as_move: false });
     let index = item("/var/www/site/index.html", EntryKind::File, 14_812);
-    assert_eq!(started(&rec), [JobRequest::CrossHostCopy { from: host("prod"), items: vec![index.clone()], to: host("nas"), into: p("/volume1") }]);
+    assert_eq!(
+        started(&rec),
+        [JobRequest::CrossHostCopy {
+            from: host("prod"),
+            items: vec![index.clone()],
+            to: host("nas"),
+            into: p("/volume1")
+        }]
+    );
     s.act(Action::SelectHost(host("prod")));
     file(&mut s, FileAction::Cut);
     s.act(Action::SelectHost(host("nas")));
     file(&mut s, FileAction::Paste { text: "/var/www/site/index.html".into(), as_move: false });
-    assert_eq!(started(&rec)[1], JobRequest::CrossHostMove { from: host("prod"), items: vec![index], to: host("nas"), into: p("/volume1") });
+    assert_eq!(
+        started(&rec)[1],
+        JobRequest::CrossHostMove { from: host("prod"), items: vec![index], to: host("nas"), into: p("/volume1") }
+    );
 }
 
 #[test]
@@ -346,7 +367,10 @@ fn dragging_an_unselected_row_selects_it_and_folders_take_it() {
     assert_eq!(s.files.drag.as_ref().unwrap().pill().as_deref(), Some("Move 1 item to uploads"));
     file(&mut s, FileAction::DragDrop);
     let index = item("/var/www/site/index.html", EntryKind::File, 14_812);
-    assert_eq!(started(&rec), [JobRequest::Move { host: host("prod"), items: vec![index.clone()], into: p("/var/www/site/uploads") }]);
+    assert_eq!(
+        started(&rec),
+        [JobRequest::Move { host: host("prod"), items: vec![index.clone()], into: p("/var/www/site/uploads") }]
+    );
     assert_eq!(s.files.drag, None);
 
     // A dragged selected row takes the whole selection; ⌥ copies.
@@ -357,7 +381,9 @@ fn dragging_an_unselected_row_selects_it_and_folders_take_it() {
     file(&mut s, FileAction::DragOver { target: Some(DragTarget::Crumb(p("/var/www"))), copy: true });
     assert_eq!(s.files.drag.as_ref().unwrap().pill().as_deref(), Some("Copy 2 items to www"));
     file(&mut s, FileAction::DragDrop);
-    assert!(matches!(&started(&rec)[1], JobRequest::RemoteCopy { into, items, .. } if *into == p("/var/www") && items.len() == 2));
+    assert!(
+        matches!(&started(&rec)[1], JobRequest::RemoteCopy { into, items, .. } if *into == p("/var/www") && items.len() == 2)
+    );
 }
 
 #[test]
@@ -388,7 +414,10 @@ fn a_drag_onto_another_host_copies_into_its_folder_on_screen() {
     assert_eq!(s.files.drag.as_ref().unwrap().pill().as_deref(), Some("Copy 1 item to nas"));
     file(&mut s, FileAction::DragDrop);
     let assets = item("/var/www/site/assets", EntryKind::Dir, 4096);
-    assert_eq!(started(&rec), [JobRequest::CrossHostCopy { from: host("prod"), items: vec![assets], to: host("nas"), into: p("/volume1") }]);
+    assert_eq!(
+        started(&rec),
+        [JobRequest::CrossHostCopy { from: host("prod"), items: vec![assets], to: host("nas"), into: p("/volume1") }]
+    );
     // Cancelled, nothing.
     file(&mut s, FileAction::DragStart("assets".into()));
     file(&mut s, FileAction::DragOver { target: Some(DragTarget::Folder("uploads".into())), copy: false });

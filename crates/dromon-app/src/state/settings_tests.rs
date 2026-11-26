@@ -12,7 +12,9 @@ use super::*;
 use crate::fixture;
 use crate::state::frames::Frame;
 use crate::state::page::{self, PageEvent};
-use crate::state::{Action, News, Page, PaletteAction, Peers, Recorder, Saved, SettingsSection, Shortcut, Store, WindowId};
+use crate::state::{
+    Action, News, Page, PaletteAction, Peers, Recorder, Saved, SettingsSection, Shortcut, Store, WindowId,
+};
 
 /// A store that keeps every snapshot it was handed.
 #[derive(Clone, Default)]
@@ -72,7 +74,9 @@ fn values_out_of_range_are_put_back() {
     let wild = Settings { transfers_at_once: 0, download_folder: Some(PathBuf::from("")), ..Settings::default() };
     let c = wild.clamped();
     assert_eq!((c.transfers_at_once, c.download_folder), (1, None));
-    let c = Settings { transfers_at_once: 99, download_folder: Some(PathBuf::from("relative/dir")), ..Settings::default() }.clamped();
+    let c =
+        Settings { transfers_at_once: 99, download_folder: Some(PathBuf::from("relative/dir")), ..Settings::default() }
+            .clamped();
     assert_eq!((c.transfers_at_once, c.download_folder), (8, None));
     let s = Settings::default();
     assert_eq!(s.with(SettingsChange::TransfersAtOnce(9)).transfers_at_once, 8);
@@ -159,7 +163,9 @@ fn new_downloads_go_to_the_chosen_folder_and_reset_goes_back() {
     s.act(Action::SelectHost(HostId("prod".into())));
     s.backend = Box::new(sent.clone());
     let into = |sent: &Recorder| match sent.sent().last() {
-        Some(Command::Transfer(TransferCommand::Start(dromon_transfer::JobRequest::Download { into, .. }))) => into.clone(),
+        Some(Command::Transfer(TransferCommand::Start(dromon_transfer::JobRequest::Download { into, .. }))) => {
+            into.clone()
+        }
         other => panic!("no download: {other:?}"),
     };
     set(&mut s, SettingsChange::DownloadFolder(Some(folder("chosen"))));
@@ -331,7 +337,10 @@ fn back_and_escape_leave_the_page_for_the_folder_view_as_it_was() {
 #[test]
 fn upload_shortcut_does_nothing_on_the_page() {
     let mut s = browsing();
-    assert!(s.shortcut(Shortcut::Upload, 0.0).iter().any(|e| matches!(e, crate::state::Effect::PickUpload { .. })), "⌘U picks on the folder view");
+    assert!(
+        s.shortcut(Shortcut::Upload, 0.0).iter().any(|e| matches!(e, crate::state::Effect::PickUpload { .. })),
+        "⌘U picks on the folder view"
+    );
     s.act(Action::OpenSettings);
     assert!(s.shortcut(Shortcut::Upload, 0.0).is_empty(), "no picker on the page");
     assert!(s.on_settings());

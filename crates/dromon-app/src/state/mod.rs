@@ -47,9 +47,9 @@ pub use conn::{ConnView, Filter, ListError, Listing, Nav, Sort};
 pub use drag::DragTarget as RowTarget;
 pub use files::{FileAction, FileState};
 pub use hostbook::HostAction;
-pub use menu::MenuKind;
 pub use hosts::{HostDirectory, Section};
 pub use keys::Shortcut;
+pub use menu::MenuKind;
 pub use ops::{OpView, Ops};
 pub use page::{Page, SettingsSection};
 pub use palette::PaletteAction;
@@ -57,7 +57,10 @@ pub use prefs::{NoStore, Saved, Store};
 pub use selection::{Selection, TypeSelect};
 #[cfg(test)]
 pub use service::Recorder;
-pub use service::{Backend, Command, FileOp, FileOpKind, HostBookCommand, HostBookEvent, OpId, ServiceEvent, Silent, SizeId, SizeTotal, TransferCommand, WindowId};
+pub use service::{
+    Backend, Command, FileOp, FileOpKind, HostBookCommand, HostBookEvent, OpId, ServiceEvent, Silent, SizeId,
+    SizeTotal, TransferCommand, WindowId,
+};
 pub use settings::{Density, Settings, SettingsChange, SettingsView};
 pub use sheets::{Sheet, Sheets};
 pub use transfers::{DropHover, DropTarget, Tab, Transfers};
@@ -172,12 +175,25 @@ pub enum Action {
     Forward,
     GoTo(RemotePath),
     /// A click on a row; `extend` is Shift, `toggle` is ⌘ (Ctrl elsewhere).
-    Click { name: String, extend: bool, toggle: bool },
-    Move { delta: isize, extend: bool },
-    End { last: bool, extend: bool },
+    Click {
+        name: String,
+        extend: bool,
+        toggle: bool,
+    },
+    Move {
+        delta: isize,
+        extend: bool,
+    },
+    End {
+        last: bool,
+        extend: bool,
+    },
     SelectAll,
     /// Type-to-select: `text` typed at `now` (seconds, any monotonic clock).
-    Type { text: String, now: f64 },
+    Type {
+        text: String,
+        now: f64,
+    },
     Sort(SortKey),
     ToggleHidden,
     OpenFilter,
@@ -202,12 +218,18 @@ pub enum Action {
     /// Close a connection and forget its remembered secrets.
     Disconnect(HostId),
     /// The log's "Verbose logging" switch: ssh with `-v` or without, reconnecting a live host.
-    Verbose { host: HostId, on: bool },
+    Verbose {
+        host: HostId,
+        on: bool,
+    },
     /// ⌘D or the context menu: download the selected rows (or the cursor's).
     Download,
     /// Files dropped or pasted from Finder/Explorer: upload them into the folder on screen, or
     /// into its subfolder `folder` (dropped on a folder row).
-    Upload { paths: Vec<PathBuf>, folder: Option<String> },
+    Upload {
+        paths: Vec<PathBuf>,
+        folder: Option<String>,
+    },
     /// The toolbar's Upload button, ⌘U, the palette: ask for the native file picker
     /// ([`Effect::PickUpload`]); what it picks goes to [`Action::Upload`].
     PickUpload,
@@ -225,7 +247,11 @@ pub enum Action {
     RevealTransfer(JobId),
     /// A file drag from another app came onto a drop target (`over`) or left it; `count` is
     /// how many items it carries.
-    DropHover { target: DropTarget, over: bool, count: usize },
+    DropHover {
+        target: DropTarget,
+        over: bool,
+        count: usize,
+    },
     /// The quit sheet's Quit: close the window although transfers run.
     QuitAnyway,
     /// The quit sheet's Cancel (or Escape): keep going.
@@ -404,7 +430,10 @@ impl App {
                         c.fallback = None;
                     }
                     let seq = c.fresh.seq;
-                    if c.apply_page(&path, entries, first, done) && c.filter.is_on() && self.active.as_ref() == Some(&host) {
+                    if c.apply_page(&path, entries, first, done)
+                        && c.filter.is_on()
+                        && self.active.as_ref() == Some(&host)
+                    {
                         c.set_filter(Filter::On(self.ui.filter_edit.text.clone()));
                     }
                     if c.fresh.seq != seq {
@@ -458,7 +487,9 @@ impl App {
             ServiceEvent::FileOpProgress { id, host, done, total } => self.ops.progress(id, &host, done, total),
             ServiceEvent::FileOpDone { id, host } => self.ops.done(id, &host),
             ServiceEvent::FileOpFailed { id, host, error } => self.ops.failed(id, &host, error),
-            ev @ (ServiceEvent::FolderSizeProgress { .. } | ServiceEvent::FolderSizeDone { .. } | ServiceEvent::FolderSizeFailed { .. }) => self.size_event(ev),
+            ev @ (ServiceEvent::FolderSizeProgress { .. }
+            | ServiceEvent::FolderSizeDone { .. }
+            | ServiceEvent::FolderSizeFailed { .. }) => self.size_event(ev),
         }
     }
 
@@ -618,13 +649,19 @@ impl App {
             Shortcut::Filter => Action::OpenFilter,
             Shortcut::Escape => Action::Escape,
             Shortcut::Move { delta, extend } => Action::Move { delta, extend },
-            Shortcut::Page { down, extend } => Action::Move { delta: if down { keys::PAGE_ROWS } else { -keys::PAGE_ROWS }, extend },
+            Shortcut::Page { down, extend } => {
+                Action::Move { delta: if down { keys::PAGE_ROWS } else { -keys::PAGE_ROWS }, extend }
+            }
             Shortcut::End { last, extend } => Action::End { last, extend },
             Shortcut::Type(text) => Action::Type { text, now },
             // Shift+F10 and the Menu key: the cursor row's menu, else the empty list's.
             Shortcut::ContextMenu => return self.context_menu_key(),
             // A focused text field keeps its keys (§7): these are the list's.
-            Shortcut::File(_) | Shortcut::GoToPath | Shortcut::Host(_) | Shortcut::ShowTransfers if self.text_focused() => return Vec::new(),
+            Shortcut::File(_) | Shortcut::GoToPath | Shortcut::Host(_) | Shortcut::ShowTransfers
+                if self.text_focused() =>
+            {
+                return Vec::new();
+            }
             Shortcut::File(k) => Action::File(k.action()),
             Shortcut::GoToPath => Action::Palette(PaletteAction::OpenPath),
             Shortcut::Host(n) => match n.checked_sub(1).and_then(|i| self.sidebar_order().get(i).cloned()) {

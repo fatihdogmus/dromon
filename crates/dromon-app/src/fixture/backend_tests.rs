@@ -61,7 +61,9 @@ fn asked(evs: &[ServiceEvent]) -> Prompt {
 }
 
 fn statuses(evs: &[ServiceEvent]) -> Vec<ConnStatus> {
-    evs.iter().filter_map(|e| if let ServiceEvent::Status { status, .. } = e { Some(status.clone()) } else { None }).collect()
+    evs.iter()
+        .filter_map(|e| if let ServiceEvent::Status { status, .. } = e { Some(status.clone()) } else { None })
+        .collect()
 }
 
 fn logs(evs: &[ServiceEvent]) -> Vec<String> {
@@ -100,16 +102,28 @@ fn without_auth_it_connects_at_once_with_the_services_events() {
 
 #[test]
 fn a_host_key_is_trusted_once_and_remembered() {
-    let mut b = backend(r#"[{"host-key": {"key_type": "ED25519", "fingerprint": "SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU"}}]"#);
+    let mut b = backend(
+        r#"[{"host-key": {"key_type": "ED25519", "fingerprint": "SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU"}}]"#,
+    );
     let evs = connect(&mut b);
     let p = asked(&evs);
     assert_eq!(p.kind, PromptKind::HostKey { key_type: Some("ED25519".into()), fingerprint: Some(FP.into()) });
-    assert!(p.text.starts_with("The authenticity of host 'prod.example.com' can't be established.\nED25519 key fingerprint is SHA256:"));
+    assert!(p.text.starts_with(
+        "The authenticity of host 'prod.example.com' can't be established.\nED25519 key fingerprint is SHA256:"
+    ));
     assert_eq!(statuses(&evs), [ConnStatus::Connecting, ConnStatus::NeedsInput]);
-    assert!(logs(&evs).contains(&"ssh asks “The authenticity of host 'prod.example.com' can't be established.”".to_owned()));
+    assert!(
+        logs(&evs).contains(&"ssh asks “The authenticity of host 'prod.example.com' can't be established.”".to_owned())
+    );
     let evs = reply(&mut b, p.id, "yes");
     assert_eq!(statuses(&evs), [ConnStatus::Connecting, ConnStatus::Ready]);
-    assert_eq!(logs(&evs)[..2], ["Answered ssh's prompt.", "Warning: Permanently added 'prod.example.com' (ED25519) to the list of known hosts."]);
+    assert_eq!(
+        logs(&evs)[..2],
+        [
+            "Answered ssh's prompt.",
+            "Warning: Permanently added 'prod.example.com' (ED25519) to the list of known hosts."
+        ]
+    );
     assert!(opened(&evs));
     // Known now: the next connection doesn't ask.
     b.send(Command::Disconnect { host: prod() });
@@ -135,7 +149,10 @@ fn a_host_key_cancelled_or_declined_fails() {
 fn a_wrong_password_asks_again_with_the_services_error() {
     let mut b = backend(r#"[{"password": {"accept": "hunter2"}}]"#);
     let p = asked(&connect(&mut b));
-    assert_eq!((p.kind.clone(), p.text.as_str(), p.error.clone()), (PromptKind::Password, "deploy@prod.example.com's password: ", None));
+    assert_eq!(
+        (p.kind.clone(), p.text.as_str(), p.error.clone()),
+        (PromptKind::Password, "deploy@prod.example.com's password: ", None)
+    );
     let evs = reply(&mut b, p.id, "wrong");
     let retry = asked(&evs);
     assert_ne!(retry.id, p.id);
@@ -194,7 +211,10 @@ fn a_code_after_a_password_starts_the_round_over_when_wrong() {
     let mut b = backend(r#"[{"password": {"accept": "pw"}}, {"code": {"accept": "123456"}}]"#);
     let p = asked(&connect(&mut b));
     let code = asked(&reply(&mut b, p.id, "pw"));
-    assert_eq!((code.kind.clone(), code.text.as_str()), (PromptKind::Other, "(deploy@prod.example.com) Verification code: "));
+    assert_eq!(
+        (code.kind.clone(), code.text.as_str()),
+        (PromptKind::Other, "(deploy@prod.example.com) Verification code: ")
+    );
     // A wrong code: the server asks for both again, and we can't tell which was wrong.
     let again = asked(&reply(&mut b, code.id, "000000"));
     assert_eq!((again.kind.clone(), again.error.as_deref()), (PromptKind::Password, Some(WRONG_SIGN_IN)));
@@ -229,7 +249,9 @@ fn confirm_yes_no_and_cancel() {
 
 #[test]
 fn a_notice_shows_until_the_connection_settles() {
-    let mut b = backend(r#"[{"notice": {"text": "Confirm user presence for key ED25519-SK SHA256:abc"}}, {"password": {"accept": "pw"}}]"#);
+    let mut b = backend(
+        r#"[{"notice": {"text": "Confirm user presence for key ED25519-SK SHA256:abc"}}, {"password": {"accept": "pw"}}]"#,
+    );
     let evs = connect(&mut b);
     let ps = prompts(&evs);
     assert_eq!(ps.iter().map(|p| p.kind.clone()).collect::<Vec<_>>(), [PromptKind::Notice, PromptKind::Password]);
@@ -242,7 +264,10 @@ fn a_notice_shows_until_the_connection_settles() {
 
 #[test]
 fn a_failing_server_keeps_the_password_for_the_next_try() {
-    let mut b = FixtureBackend::new(fixture(r#"[{"password": {"accept": "pw"}}]"#, Some("Connection closed by 203.0.113.10 port 22")));
+    let mut b = FixtureBackend::new(fixture(
+        r#"[{"password": {"accept": "pw"}}]"#,
+        Some("Connection closed by 203.0.113.10 port 22"),
+    ));
     let p = asked(&connect(&mut b));
     let evs = reply(&mut b, p.id, "pw");
     assert_eq!(failed(&evs).as_deref(), Some("Connection closed by 203.0.113.10 port 22"));
@@ -295,14 +320,18 @@ fn listings_stream_in_pages_of_512() {
     let shape: Vec<(usize, bool, bool)> = evs
         .iter()
         .map(|e| match e {
-            ServiceEvent::ListingPage { entries, first, done, path, .. } if path.as_str() == "/home/deploy/big" => (entries.len(), *first, *done),
+            ServiceEvent::ListingPage { entries, first, done, path, .. } if path.as_str() == "/home/deploy/big" => {
+                (entries.len(), *first, *done)
+            }
             other => panic!("{other:?}"),
         })
         .collect();
     assert_eq!(shape, [(PAGE, true, false), (PAGE, false, false), (1200 - 2 * PAGE, false, false), (0, false, true)]);
     // A small folder is one page, then the last; an empty one is just the last.
     assert_eq!(list(&mut b, "/home/deploy").len(), 2);
-    assert!(matches!(&list(&mut b, "/home/deploy/empty")[..], [ServiceEvent::ListingPage { first: true, done: true, entries, .. }] if entries.is_empty()));
+    assert!(
+        matches!(&list(&mut b, "/home/deploy/empty")[..], [ServiceEvent::ListingPage { first: true, done: true, entries, .. }] if entries.is_empty())
+    );
     let evs = list(&mut b, "/home/deploy/locked");
     assert!(matches!(&evs[..], [ServiceEvent::ListFailed { error: Error::PermissionDenied(_), .. }]));
     let evs = list(&mut b, "/home/deploy/x");
@@ -349,7 +378,8 @@ fn the_app_signs_in_through_its_sheet() {
 #[test]
 fn the_docs_example() {
     let doc = include_str!("../../../../docs/fixtures.md");
-    let start = doc.find("## A complete example").and_then(|at| doc[at..].find("```json\n").map(|i| at + i + 8)).unwrap();
+    let start =
+        doc.find("## A complete example").and_then(|at| doc[at..].find("```json\n").map(|i| at + i + 8)).unwrap();
     let end = start + doc[start..].find("\n```").unwrap();
     let fx = Arc::new(parse(&doc[start..end]).unwrap_or_else(|e| panic!("docs/fixtures.md: {e}")));
     let mut b = FixtureBackend::new(fx.clone());
@@ -357,7 +387,10 @@ fn the_docs_example() {
     // lab: a notice, then passphrase, confirm, password and code; then the server hangs up.
     let evs = b.send(Command::Connect { host: lab.clone() });
     let kinds: Vec<PromptKind> = prompts(&evs).into_iter().map(|p| p.kind).collect();
-    assert_eq!(kinds, [PromptKind::Notice, PromptKind::Passphrase { key_path: Some("/home/me/.ssh/id_ed25519_sk".into()) }]);
+    assert_eq!(
+        kinds,
+        [PromptKind::Notice, PromptKind::Passphrase { key_path: Some("/home/me/.ssh/id_ed25519_sk".into()) }]
+    );
     let mut p = prompts(&evs)[1].clone();
     for answer in ["open sesame", "yes", "pw"] {
         p = asked(&reply(&mut b, p.id, answer));
@@ -371,7 +404,10 @@ fn the_docs_example() {
     let prod = fx.server("prod").unwrap();
     assert_eq!(prod.list(&RemotePath::new("/var/www/site/assets")).unwrap().len(), 600);
     assert!(matches!(prod.list(&RemotePath::new("/var/log")), Err(Error::PermissionDenied(_))));
-    assert_eq!(prod.list(&RemotePath::new("/var")).unwrap().iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["log", "www"]);
+    assert_eq!(
+        prod.list(&RemotePath::new("/var")).unwrap().iter().map(|e| e.name.as_str()).collect::<Vec<_>>(),
+        ["log", "www"]
+    );
 }
 
 /// The backend never asks the store for anything but what `AuthAttempt` does: a backend with
@@ -405,17 +441,27 @@ fn verbose_logging_reconnects_with_dash_v_and_without() {
     assert!(run.ends_with(" -v -s prod sftp"), "{run}");
     assert!(lines.contains(&"debug1: Connecting to prod.example.com port 22.".to_owned()), "{lines:#?}");
     assert!(lines.contains(&"ssh asked “deploy@prod.example.com's password:”: answered from memory.".to_owned()));
-    assert!(evs.iter().any(|e| matches!(e, ServiceEvent::ListingPage { path, done: true, .. } if path.as_str() == "/home/deploy")));
+    assert!(
+        evs.iter().any(
+            |e| matches!(e, ServiceEvent::ListingPage { path, done: true, .. } if path.as_str() == "/home/deploy")
+        )
+    );
     // Connecting again from another window says it's on.
     assert!(connect(&mut b).contains(&ServiceEvent::Verbose { host: prod(), on: true }));
 
     let evs = b.send(Command::Verbose { host: prod(), on: false });
     let lines = logs(&evs);
-    assert!(lines.iter().any(|l| l.starts_with("Running ssh") && l.ends_with(" -s prod sftp") && !l.contains(" -v ")), "{lines:#?}");
+    assert!(
+        lines.iter().any(|l| l.starts_with("Running ssh") && l.ends_with(" -s prod sftp") && !l.contains(" -v ")),
+        "{lines:#?}"
+    );
     assert!(!lines.iter().any(|l| l.starts_with("debug1:")));
     assert_eq!(statuses(&evs), [ConnStatus::Reconnecting { attempt: 1 }, ConnStatus::Ready]);
     // The same again: said, nothing else.
-    assert_eq!(b.send(Command::Verbose { host: prod(), on: false }), [ServiceEvent::Verbose { host: prod(), on: false }]);
+    assert_eq!(
+        b.send(Command::Verbose { host: prod(), on: false }),
+        [ServiceEvent::Verbose { host: prod(), on: false }]
+    );
     // A host that isn't connected takes it at its next connect.
     let mut b = backend("[]");
     let evs = b.send(Command::Verbose { host: prod(), on: true });

@@ -20,7 +20,10 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use rune::{App as RuneApp, AppHandle, ColorScheme, Display, MenuItem, Titlebar, Tx, WindowHandle, WindowOptions, WindowPlacement, WindowSpec};
+use rune::{
+    App as RuneApp, AppHandle, ColorScheme, Display, MenuItem, Titlebar, Tx, WindowHandle, WindowOptions,
+    WindowPlacement, WindowSpec,
+};
 
 use crate::service::RuneSink;
 use crate::state::frames::{self, Area, CASCADE, Frame};
@@ -173,7 +176,9 @@ fn main_window(fleet: &Fleet, id: WindowId, app: RuneApp<App>) -> RuneApp<App> {
     let windows = fleet.clone();
     app.titlebar(Titlebar::new(theme::size::TOOLBAR))
         // Closing the last window with transfers running asks first (the quit sheet).
-        .on_close_request(|s, _tx| if s.close_requested() { rune::CloseResponse::Close } else { rune::CloseResponse::Defer })
+        .on_close_request(
+            |s, _tx| if s.close_requested() { rune::CloseResponse::Close } else { rune::CloseResponse::Defer },
+        )
         .on_close(|s, _tx| s.window_closed())
         .on_quit(|s, _tx| s.quitting())
         // Nothing polls while the window is off screen (§4.5).

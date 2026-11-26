@@ -52,7 +52,11 @@ impl Book {
             return Some(spec.alias.clone());
         }
         let hostname = spec.hostname.as_deref()?;
-        let host = self.fixture.hosts.iter().find(|h| h.hostname.as_deref() == Some(hostname) && self.fixture.server(&h.alias).is_some())?;
+        let host = self
+            .fixture
+            .hosts
+            .iter()
+            .find(|h| h.hostname.as_deref() == Some(hostname) && self.fixture.server(&h.alias).is_some())?;
         Some(host.alias.clone())
     }
 
@@ -67,13 +71,20 @@ impl Book {
     fn next_backup(&self) -> String {
         let stamp = self.stamp();
         (1..)
-            .map(|n| if n == 1 { format!("{TARGET}.dromon-backup-{stamp}") } else { format!("{TARGET}.dromon-backup-{stamp}-{n}") })
+            .map(|n| {
+                if n == 1 {
+                    format!("{TARGET}.dromon-backup-{stamp}")
+                } else {
+                    format!("{TARGET}.dromon-backup-{stamp}-{n}")
+                }
+            })
             .find(|b| !self.backups.contains(b))
             .unwrap_or_default()
     }
 
     fn preview(&self, id: &HostId) -> Result<ConfigPreview, String> {
-        let spec = self.saved.iter().find(|h| &h.id == id).ok_or_else(|| format!("“{id}” isn't a saved host any more."))?;
+        let spec =
+            self.saved.iter().find(|h| &h.id == id).ok_or_else(|| format!("“{id}” isn't a saved host any more."))?;
         let block = dromon_ssh::host_block(spec).map_err(|e| format!("Its settings can't go in an ssh config: {e}"))?;
         Ok(ConfigPreview { target: TARGET.into(), backup: Some(self.next_backup()), block })
     }

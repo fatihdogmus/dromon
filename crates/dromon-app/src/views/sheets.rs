@@ -103,7 +103,10 @@ pub(super) fn button(p: Paint, key: &'static str, label: &str, primary: bool, ac
     if primary {
         b.fill(t.accent).default_button().child(text(label.to_owned()).font(type_::BODY_STRONG).color(t.on_accent))
     } else {
-        b.border(p.hair, t.border).hover(t.hover).press(t.press).child(text(label.to_owned()).font(type_::BODY).color(t.text))
+        b.border(p.hair, t.border)
+            .hover(t.hover)
+            .press(t.press)
+            .child(text(label.to_owned()).font(type_::BODY).color(t.text))
     }
 }
 
@@ -133,7 +136,9 @@ pub(super) fn buttons(children: Vec<El>) -> El {
 fn prompt_sheet(s: &App, prompt: &Prompt, sent: bool, p: Paint) -> El {
     let host = host_name(s, &prompt.host);
     match &prompt.kind {
-        PromptKind::HostKey { key_type, fingerprint } => host_key(p, &host, prompt, key_type.as_deref(), fingerprint.as_deref(), sent),
+        PromptKind::HostKey { key_type, fingerprint } => {
+            host_key(p, &host, prompt, key_type.as_deref(), fingerprint.as_deref(), sent)
+        }
         PromptKind::Confirm => confirm(p, &host, prompt, sent),
         _ => sign_in(s, p, &host, prompt, sent),
     }
@@ -142,8 +147,14 @@ fn prompt_sheet(s: &App, prompt: &Prompt, sent: bool, p: Paint) -> El {
 /// Password, key passphrase, or anything else the server asks (2FA, OTP).
 fn sign_in(s: &App, p: Paint, host: &str, prompt: &Prompt, sent: bool) -> El {
     let t = p.t;
-    let mut panel = panel(p, "sheet", format!("Sign in to {host}"), WIDTH)
-        .child(text(prompt.text.trim().to_owned()).key("sheet-prompt").font(type_::BODY).color(t.text_2).w_full().wrap_anywhere());
+    let mut panel = panel(p, "sheet", format!("Sign in to {host}"), WIDTH).child(
+        text(prompt.text.trim().to_owned())
+            .key("sheet-prompt")
+            .font(type_::BODY)
+            .color(t.text_2)
+            .w_full()
+            .wrap_anywhere(),
+    );
     if takes_text(&prompt.kind) {
         let mut input = text_input(s.ui.sheets.field(), type_::BODY)
             .key("sheet-input")
@@ -188,7 +199,14 @@ fn sign_in(s: &App, p: Paint, host: &str, prompt: &Prompt, sent: bool) -> El {
     panel.child(buttons(vec![button(p, "sheet-cancel", "Cancel", false, Action::DismissSheet), primary]))
 }
 
-fn host_key(p: Paint, host: &str, prompt: &Prompt, key_type: Option<&str>, fingerprint: Option<&str>, sent: bool) -> El {
+fn host_key(
+    p: Paint,
+    host: &str,
+    prompt: &Prompt,
+    key_type: Option<&str>,
+    fingerprint: Option<&str>,
+    sent: bool,
+) -> El {
     let t = p.t;
     let explain = format!(
         "This computer hasn't connected to {host} before, so ssh can't yet tell that it's the right server. \
@@ -199,12 +217,28 @@ fn host_key(p: Paint, host: &str, prompt: &Prompt, key_type: Option<&str>, finge
         Some(fp) => col()
             .gap(space::S1)
             .child(text(format!("{} key fingerprint", key_type.unwrap_or("Host"))).font(type_::META).color(t.text_3))
-            .child(text(fp.to_owned()).key("sheet-fingerprint").font(type_::MONO).color(t.text).w_full().wrap_anywhere()),
+            .child(
+                text(fp.to_owned()).key("sheet-fingerprint").font(type_::MONO).color(t.text).w_full().wrap_anywhere(),
+            ),
         // ssh didn't print one we recognise: show what it said.
-        None => col().child(text(prompt.text.trim().to_owned()).key("sheet-fingerprint").font(type_::MONO).color(t.text).w_full().wrap_anywhere()),
+        None => col().child(
+            text(prompt.text.trim().to_owned())
+                .key("sheet-fingerprint")
+                .font(type_::MONO)
+                .color(t.text)
+                .w_full()
+                .wrap_anywhere(),
+        ),
     };
-    let block = block.key("sheet-key").w_full().padding(space::S3).radius(radius::ROW).fill(t.raised).border(p.hair, t.border_subtle);
-    let primary = if sent { busy(p) } else { button(p, "sheet-submit", "Trust and connect", true, Action::SubmitPrompt) };
+    let block = block
+        .key("sheet-key")
+        .w_full()
+        .padding(space::S3)
+        .radius(radius::ROW)
+        .fill(t.raised)
+        .border(p.hair, t.border_subtle);
+    let primary =
+        if sent { busy(p) } else { button(p, "sheet-submit", "Trust and connect", true, Action::SubmitPrompt) };
     panel(p, "sheet", format!("First connection to {host}"), WIDTH)
         .child(text(explain).key("sheet-prompt").font(type_::BODY).color(t.text_2).w_full().wrap_anywhere())
         .child(block)
@@ -215,7 +249,14 @@ fn confirm(p: Paint, host: &str, prompt: &Prompt, sent: bool) -> El {
     let t = p.t;
     let primary = if sent { busy(p) } else { button(p, "sheet-submit", "Yes", true, Action::SubmitPrompt) };
     panel(p, "sheet", format!("{host} asks"), WIDTH)
-        .child(text(prompt.text.trim().to_owned()).key("sheet-prompt").font(type_::BODY).color(t.text_2).w_full().wrap_anywhere())
+        .child(
+            text(prompt.text.trim().to_owned())
+                .key("sheet-prompt")
+                .font(type_::BODY)
+                .color(t.text_2)
+                .w_full()
+                .wrap_anywhere(),
+        )
         .child(buttons(vec![button(p, "sheet-no", "No", false, Action::DeclinePrompt), primary]))
 }
 
@@ -224,7 +265,13 @@ fn log_sheet(s: &App, host: &dromon_core::HostId, p: Paint) -> El {
     let name = host_name(s, host);
     let c = s.conns.get(host);
     let body = match c.map(|c| &c.log).filter(|l| !l.is_empty()) {
-        Some(log) => text(log.to_text()).key("log-lines").font(type_::MONO).color(t.text_2).w_full().wrap_anywhere().selectable(true),
+        Some(log) => text(log.to_text())
+            .key("log-lines")
+            .font(type_::MONO)
+            .color(t.text_2)
+            .w_full()
+            .wrap_anywhere()
+            .selectable(true),
         None => text("Nothing logged yet.").key("log-lines").font(type_::BODY).color(t.text_3),
     };
     let lines = col()
@@ -274,7 +321,11 @@ fn log_sheet(s: &App, host: &dromon_core::HostId, p: Paint) -> El {
 /// `-v` (or without). The whole row presses.
 fn verbose(p: Paint, host: &dromon_core::HostId, on: bool) -> El {
     let t = p.t;
-    let knob = rune::el().size(14.0, 14.0).radius(7.0).fill(if on { t.on_accent } else { t.text_2 }).offset(if on { 14.0 } else { 0.0 }, 0.0);
+    let knob = rune::el()
+        .size(14.0, 14.0)
+        .radius(7.0)
+        .fill(if on { t.on_accent } else { t.text_2 })
+        .offset(if on { 14.0 } else { 0.0 }, 0.0);
     let track = row()
         .key("log-verbose-track")
         .w(32.0)

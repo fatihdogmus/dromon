@@ -120,7 +120,9 @@ fn entry(e: &MenuEntry, i: usize, kind: &MenuKind, p: Paint) -> El {
         t.text
     };
     let mark = el().size(size::ICON, size::ICON).center().children(
-        item.checked.filter(|on| *on).map(|_| icon(icons::CHECK.at(p.scale), size::ICON).color(if item.enabled { t.text_2 } else { t.text_3 })),
+        item.checked
+            .filter(|on| *on)
+            .map(|_| icon(icons::CHECK.at(p.scale), size::ICON).color(if item.enabled { t.text_2 } else { t.text_3 })),
     );
     let mut r = row()
         .key(format!("ctx-{}", item.id))
@@ -146,9 +148,9 @@ fn entry(e: &MenuEntry, i: usize, kind: &MenuKind, p: Paint) -> El {
     let (kind, id) = (kind.clone(), item.id.to_owned());
     // ↑ ↓ move the highlight (the menu is a focus group), Return or Space picks. The highlight
     // is the keyboard's focus too, so it's the selection's accent wash, not the 4% hover.
-    r.focusable(true)
-        .focus_highlight(t.selection)
-        .hover(t.hover)
-        .press(t.press)
-        .on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, Action::File(FileAction::Pick { kind: kind.clone(), id: id.clone() }), tx))
+    r.focusable(true).focus_highlight(t.selection).hover(t.hover).press(t.press).on_press_tx(
+        move |s: &mut App, tx: &mut Tx| {
+            run(s, Action::File(FileAction::Pick { kind: kind.clone(), id: id.clone() }), tx)
+        },
+    )
 }

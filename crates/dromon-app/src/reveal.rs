@@ -82,7 +82,10 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn file_uris_escape_everything_but_plain_names() {
-        assert_eq!(file_uri(Path::new("/home/u/Downloads/a b,c (1).txt")), "file:///home/u/Downloads/a%20b%2Cc%20%281%29.txt");
+        assert_eq!(
+            file_uri(Path::new("/home/u/Downloads/a b,c (1).txt")),
+            "file:///home/u/Downloads/a%20b%2Cc%20%281%29.txt"
+        );
         assert_eq!(file_uri(Path::new("/tmp/ğ")), "file:///tmp/%C4%9F");
     }
 }

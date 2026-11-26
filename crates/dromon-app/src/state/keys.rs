@@ -19,9 +19,18 @@ pub enum Shortcut {
     Upload,
     /// Escape: close the filter, else clear the selection.
     Escape,
-    Move { delta: isize, extend: bool },
-    Page { down: bool, extend: bool },
-    End { last: bool, extend: bool },
+    Move {
+        delta: isize,
+        extend: bool,
+    },
+    Page {
+        down: bool,
+        extend: bool,
+    },
+    End {
+        last: bool,
+        extend: bool,
+    },
     /// Printable text with no command modifier: type-to-select.
     Type(String),
     /// File operations (§7). Never while a text field has focus.

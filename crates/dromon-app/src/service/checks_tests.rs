@@ -143,7 +143,9 @@ async fn verbose_logging_reconnects_with_dash_v_and_without() {
     // A window that connects to it now hears it's on.
     const B: WindowId = WindowId(1);
     fx.send_from(B, Command::Connect { host: host("pw") });
-    let to = fx.until_for("Verbose for B", |to, ev| matches!(ev, ServiceEvent::Verbose { on: true, .. }).then_some(to)).await;
+    let to = fx
+        .until_for("Verbose for B", |to, ev| matches!(ev, ServiceEvent::Verbose { on: true, .. }).then_some(to))
+        .await;
     assert_eq!(to, Some(B));
 
     // Off: back without it.

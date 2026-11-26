@@ -185,7 +185,11 @@ impl Fixture {
     }
 
     /// [`Fixture::until`], with the window each event is for (`None`: every window).
-    pub(super) async fn until_for<T>(&mut self, what: &str, mut pick: impl FnMut(Option<WindowId>, &ServiceEvent) -> Option<T>) -> T {
+    pub(super) async fn until_for<T>(
+        &mut self,
+        what: &str,
+        mut pick: impl FnMut(Option<WindowId>, &ServiceEvent) -> Option<T>,
+    ) -> T {
         let deadline = tokio::time::Instant::now() + WAIT;
         loop {
             match tokio::time::timeout_at(deadline, self.events.recv()).await {
@@ -225,7 +229,9 @@ impl Fixture {
         loop {
             let (entries, done) = self
                 .until("a listing page", |ev| match ev {
-                    ServiceEvent::ListingPage { path: p, entries, done, .. } if p == path => Some((entries.clone(), *done)),
+                    ServiceEvent::ListingPage { path: p, entries, done, .. } if p == path => {
+                        Some((entries.clone(), *done))
+                    }
                     _ => None,
                 })
                 .await;
@@ -390,7 +396,8 @@ async fn a_connection_dropped_mid_delete_fails_it_with_connection_lost() {
     let start = fx.sign_in().await;
     fx.op(1, FileOp::Delete { paths: vec![start.join("big")] });
     // Once removing has begun, the network drops.
-    fx.until("removal progress", |ev| matches!(ev, ServiceEvent::FileOpProgress { total: Some(_), .. }).then_some(())).await;
+    fx.until("removal progress", |ev| matches!(ev, ServiceEvent::FileOpProgress { total: Some(_), .. }).then_some(()))
+        .await;
     // (Here the whole delete takes about a second; the drop ends it within ~0.1 s.)
     std::fs::write(fx.dir.path().join("drop"), "").unwrap();
     assert_eq!(fx.op_end(1).await, Err(Error::ConnectionLost));
@@ -429,7 +436,8 @@ async fn password_sign_in_listing_silent_reconnect_and_disconnect() {
     assert_eq!(fx.listing(&start).await, [".hidden", "a.txt", "sub"]);
     let missing = start.join("nope");
     fx.send(Command::List { host: host("pw"), path: missing.clone() });
-    fx.until("ListFailed", |ev| matches!(ev, ServiceEvent::ListFailed { path, .. } if *path == missing).then_some(())).await;
+    fx.until("ListFailed", |ev| matches!(ev, ServiceEvent::ListFailed { path, .. } if *path == missing).then_some(()))
+        .await;
     let sub = start.join("sub");
     fx.send(Command::List { host: host("pw"), path: sub.clone() });
     assert_eq!(fx.listing(&sub).await, Vec::<String>::new());
@@ -442,13 +450,19 @@ async fn password_sign_in_listing_silent_reconnect_and_disconnect() {
     fx.status("pw", ConnStatus::Ready).await;
     let relisted = fx
         .until("the folder listed again", |ev| match ev {
-            ServiceEvent::ListingPage { path, first: true, .. } if *path == missing || *path == sub || *path == start => Some(path.clone()),
+            ServiceEvent::ListingPage { path, first: true, .. }
+                if *path == missing || *path == sub || *path == start =>
+            {
+                Some(path.clone())
+            }
             _ => None,
         })
         .await;
     assert_eq!(relisted, sub, "the last folder asked for is listed again");
     assert!(!fx.saw_since(mark, |ev| matches!(ev, ServiceEvent::Prompt(_))), "a reconnect doesn't ask again");
-    assert!(fx.saw_since(mark, |ev| matches!(ev, ServiceEvent::Log { line, .. } if line.contains("answered from memory"))));
+    assert!(
+        fx.saw_since(mark, |ev| matches!(ev, ServiceEvent::Log { line, .. } if line.contains("answered from memory")))
+    );
 
     // Disconnect forgets the password: connecting again asks, and a cancel fails for good.
     fx.send(Command::Disconnect { host: host("pw") });
@@ -490,7 +504,8 @@ async fn a_prompt_closes_when_ssh_exits_without_its_answer() {
     assert_eq!(p.kind, PromptKind::Other);
     std::fs::write(fx.dir.path().join("go"), "").unwrap();
     let id = p.id;
-    fx.until("PromptClosed", |ev| matches!(ev, ServiceEvent::PromptClosed(closed) if *closed == id).then_some(())).await;
+    fx.until("PromptClosed", |ev| matches!(ev, ServiceEvent::PromptClosed(closed) if *closed == id).then_some(()))
+        .await;
     fx.status("vanish", ConnStatus::Failed("Connection closed by 127.0.0.1 port 22".into())).await;
     // A late answer to it goes nowhere.
     fx.answer(&p, "123456");
@@ -505,9 +520,7 @@ async fn the_folder_on_screen_is_polled_only_while_shown_and_not_while_reconnect
     fx.send(Command::List { host: host("pw"), path: start.clone() });
     fx.listing(&start).await;
     let root = fx.root();
-    let about_start = |ev: &ServiceEvent| {
-        matches!(ev, ServiceEvent::ListingPage { path, .. } | ServiceEvent::Refreshed { path, .. } | ServiceEvent::ListFailed { path, .. } if path.starts_with(&root))
-    };
+    let about_start = |ev: &ServiceEvent| matches!(ev, ServiceEvent::ListingPage { path, .. } | ServiceEvent::Refreshed { path, .. } | ServiceEvent::ListFailed { path, .. } if path.starts_with(&root));
 
     // Until the window says it shows, nothing polls.
     std::fs::write(fx.local("early.txt"), "").unwrap();
@@ -517,7 +530,9 @@ async fn the_folder_on_screen_is_polled_only_while_shown_and_not_while_reconnect
     fx.send(Command::Window { visible: true, focused: true });
     let names = fx
         .until("a refresh", |ev| match ev {
-            ServiceEvent::Refreshed { path, entries, .. } if *path == start => Some(entries.iter().map(|e| e.name.clone()).collect::<Vec<_>>()),
+            ServiceEvent::Refreshed { path, entries, .. } if *path == start => {
+                Some(entries.iter().map(|e| e.name.clone()).collect::<Vec<_>>())
+            }
             _ => None,
         })
         .await;
@@ -533,8 +548,15 @@ async fn the_folder_on_screen_is_polled_only_while_shown_and_not_while_reconnect
     fx.status("pw", ConnStatus::Ready).await;
     let between = fx.seen[mark..].iter().filter(|ev| matches!(ev, ServiceEvent::Refreshed { .. })).count();
     assert_eq!(between, 0, "no polls while reconnecting");
-    assert_eq!(fx.listing(&start).await.iter().filter(|n| *n == "while-away.txt").count(), 1, "relisted once after the reconnect");
-    assert!(fx.none_for(Duration::from_millis(2500), about_start).await, "and not again: the next polls find nothing new");
+    assert_eq!(
+        fx.listing(&start).await.iter().filter(|n| *n == "while-away.txt").count(),
+        1,
+        "relisted once after the reconnect"
+    );
+    assert!(
+        fx.none_for(Duration::from_millis(2500), about_start).await,
+        "and not again: the next polls find nothing new"
+    );
 
     // Hidden: changes wait until it shows again.
     fx.send(Command::Window { visible: false, focused: false });

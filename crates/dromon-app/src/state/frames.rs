@@ -77,7 +77,8 @@ pub fn fit(frame: Frame, displays: &[Area]) -> Option<Frame> {
     if frame.width == 0 || frame.height == 0 {
         return None;
     }
-    let best = displays.iter().map(|a| (frame.overlap(a), a)).filter(|(n, _)| *n > 0).max_by_key(|(n, _)| *n).map(|(_, a)| a);
+    let best =
+        displays.iter().map(|a| (frame.overlap(a), a)).filter(|(n, _)| *n > 0).max_by_key(|(n, _)| *n).map(|(_, a)| a);
     best.or(displays.first()).map(|a| within(frame, a))
 }
 
@@ -85,10 +86,13 @@ pub fn fit(frame: Frame, displays: &[Area]) -> Option<Frame> {
 /// `from` is on; past that display's right or bottom edge it starts again at its top-left.
 pub fn cascade(from: Frame, step: i32, displays: &[Area]) -> Frame {
     let next = Frame { x: from.x.saturating_add(step), y: from.y.saturating_add(step), maximized: false, ..from };
-    let Some(home) = fit(from, displays).and_then(|f| displays.iter().find(|a| f.overlap(a) > 0).copied()) else { return next };
+    let Some(home) = fit(from, displays).and_then(|f| displays.iter().find(|a| f.overlap(a) > 0).copied()) else {
+        return next;
+    };
     let right = i64::from(home.x) + i64::from(home.width);
     let bottom = i64::from(home.y) + i64::from(home.height);
-    let fits = i64::from(next.x) + i64::from(next.width) <= right && i64::from(next.y) + i64::from(next.height) <= bottom;
+    let fits =
+        i64::from(next.x) + i64::from(next.width) <= right && i64::from(next.y) + i64::from(next.height) <= bottom;
     let at = if fits { next } else { Frame { x: home.x.saturating_add(step), y: home.y.saturating_add(step), ..next } };
     within(at, &home)
 }

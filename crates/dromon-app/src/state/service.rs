@@ -173,7 +173,8 @@ impl FileOp {
     /// (or lies inside one) — except after a success that removed it (it, or an ancestor, was
     /// deleted or renamed away): a path that's gone isn't listed, and the UI moves away from it.
     pub fn relists(&self, on_screen: &RemotePath, ok: bool) -> bool {
-        let touched = self.affected().iter().any(|a| a.parent().as_ref() == Some(on_screen) || on_screen.starts_with(a));
+        let touched =
+            self.affected().iter().any(|a| a.parent().as_ref() == Some(on_screen) || on_screen.starts_with(a));
         let gone = ok && self.removed().iter().any(|r| on_screen.starts_with(r));
         touched && !gone
     }
@@ -188,7 +189,11 @@ pub enum TransferCommand {
     Cancel(JobId),
     Retry(JobId),
     /// The answer to the job's name clash (`JobView::conflict`).
-    Resolve { job: JobId, choice: ConflictChoice, apply_all: bool },
+    Resolve {
+        job: JobId,
+        choice: ConflictChoice,
+        apply_all: bool,
+    },
     /// Forget finished, failed and cancelled jobs.
     ClearFinished,
     /// Settings' "Transfers at once": how many files may run at once per host (§8), for the
@@ -201,50 +206,105 @@ pub enum TransferCommand {
 pub enum ServiceEvent {
     /// The hosts in the user's ssh config: replaces the sidebar's SSH Config section.
     Hosts(Vec<HostSpec>),
-    Status { host: HostId, status: ConnStatus },
+    Status {
+        host: HostId,
+        status: ConnStatus,
+    },
     /// The session is up and its starting folder resolved (home, or the last folder used).
-    Opened { host: HostId, start: RemotePath },
+    Opened {
+        host: HostId,
+        start: RemotePath,
+    },
     /// A whole folder at once (tests that build listings by hand).
-    Listing { host: HostId, path: RemotePath, entries: Vec<Entry> },
+    Listing {
+        host: HostId,
+        path: RemotePath,
+        entries: Vec<Entry>,
+    },
     /// One page of a folder as it streams in. `first` starts a new listing of `path` (it
     /// replaces what was there); later pages add to it; `done` marks the last one (its
     /// `entries` may be empty).
-    ListingPage { host: HostId, path: RemotePath, entries: Vec<Entry>, first: bool, done: bool },
-    ListFailed { host: HostId, path: RemotePath, error: Error },
+    ListingPage {
+        host: HostId,
+        path: RemotePath,
+        entries: Vec<Entry>,
+        first: bool,
+        done: bool,
+    },
+    ListFailed {
+        host: HostId,
+        path: RemotePath,
+        error: Error,
+    },
     /// A poll found the folder on screen changed (§4.5): its whole listing now. Always a
     /// refresh of a folder already listed, never a navigation; polls that find nothing new
     /// send nothing.
-    Refreshed { host: HostId, path: RemotePath, entries: Vec<Entry> },
+    Refreshed {
+        host: HostId,
+        path: RemotePath,
+        entries: Vec<Entry>,
+    },
     /// ssh asks something only the user can answer: show a sheet (or, for a notice, a toast).
     Prompt(Prompt),
     /// The prompt went away without an answer from here (ssh hung up, a notice ended).
     PromptClosed(PromptId),
     /// One line for the host's connection log: ssh's stderr or our own lifecycle notes.
     /// Never contains secrets.
-    Log { host: HostId, line: String },
+    Log {
+        host: HostId,
+        line: String,
+    },
     /// Every transfer job, newest first: replaces the list. Sent when something changed, at
     /// most about ten times a second while bytes move.
     Transfers(Vec<JobView>),
     /// How far a delete got, at most about ten times a second: while it counts what's there,
     /// `done` is the entries found so far and `total` is `None`; while it removes them, `done`
     /// is the entries removed and `total` all of them.
-    FileOpProgress { id: OpId, host: HostId, done: u64, total: Option<u64> },
+    FileOpProgress {
+        id: OpId,
+        host: HostId,
+        done: u64,
+        total: Option<u64>,
+    },
     /// The operation succeeded.
-    FileOpDone { id: OpId, host: HostId },
+    FileOpDone {
+        id: OpId,
+        host: HostId,
+    },
     /// The operation stopped at its first error (a delete may have removed some entries).
-    FileOpFailed { id: OpId, host: HostId, error: Error },
+    FileOpFailed {
+        id: OpId,
+        host: HostId,
+        error: Error,
+    },
     /// Saved hosts and the ssh config (`state/hostbook.rs`).
     HostBook(HostBookEvent),
     /// Whether ssh for `host` runs with `-v` (the log's "Verbose logging"): after a
     /// `Command::Verbose` from any window, and to a window that connects while it's on.
-    Verbose { host: HostId, on: bool },
+    Verbose {
+        host: HostId,
+        on: bool,
+    },
     /// How far the walk `id` got (`Command::FolderSize`).
-    FolderSizeProgress { id: SizeId, host: HostId, total: SizeTotal },
+    FolderSizeProgress {
+        id: SizeId,
+        host: HostId,
+        total: SizeTotal,
+    },
     /// The walk `id` went through the whole folder; folders it couldn't read are counted in
     /// `total.unreadable` and left out of the rest.
-    FolderSizeDone { id: SizeId, host: HostId, total: SizeTotal },
+    FolderSizeDone {
+        id: SizeId,
+        host: HostId,
+        total: SizeTotal,
+    },
     /// The walk `id` stopped (the connection was lost): `total` is what it had counted.
-    FolderSizeFailed { id: SizeId, host: HostId, total: SizeTotal, error: Error },
+    FolderSizeFailed {
+        id: SizeId,
+        host: HostId,
+        total: SizeTotal,
+        error: Error,
+    },
 }
 
 /// Set to `1` to have [`super::App::apply`] write one [`trace_line`] per event to stderr.
@@ -372,7 +432,11 @@ mod tests {
             ServiceEvent::Status { host: host.clone(), status: ConnStatus::Failed("secret reason".into()) },
             ServiceEvent::Status { host: host.clone(), status: ConnStatus::Reconnecting { attempt: 2 } },
             ServiceEvent::Opened { host: host.clone(), start: RemotePath::new("/secret/home") },
-            ServiceEvent::ListFailed { host: host.clone(), path: RemotePath::new("/secret"), error: Error::Other("secret".into()) },
+            ServiceEvent::ListFailed {
+                host: host.clone(),
+                path: RemotePath::new("/secret"),
+                error: Error::Other("secret".into()),
+            },
             ServiceEvent::Prompt(Prompt {
                 id: PromptId(7),
                 host: host.clone(),
@@ -407,10 +471,17 @@ mod tests {
         let events = [
             ServiceEvent::FileOpProgress { id: OpId(3), host: host.clone(), done: 12, total: Some(40) },
             ServiceEvent::FileOpDone { id: OpId(3), host: host.clone() },
-            ServiceEvent::FileOpFailed { id: OpId(4), host, error: Error::PermissionDenied(RemotePath::new("/secret/dir")) },
+            ServiceEvent::FileOpFailed {
+                id: OpId(4),
+                host,
+                error: Error::PermissionDenied(RemotePath::new("/secret/dir")),
+            },
         ];
         let lines: Vec<String> = events.iter().map(trace_line).collect();
-        assert_eq!(lines, ["FileOpProgress host=prod id=3", "FileOpDone host=prod id=3", "FileOpFailed host=prod id=4"]);
+        assert_eq!(
+            lines,
+            ["FileOpProgress host=prod id=3", "FileOpDone host=prod id=3", "FileOpFailed host=prod id=4"]
+        );
     }
 
     #[test]
@@ -420,17 +491,37 @@ mod tests {
         let events = [
             ServiceEvent::FolderSizeProgress { id: SizeId(5), host: host.clone(), total },
             ServiceEvent::FolderSizeDone { id: SizeId(5), host: host.clone(), total },
-            ServiceEvent::FolderSizeFailed { id: SizeId(6), host, total, error: Error::PermissionDenied(RemotePath::new("/secret")) },
+            ServiceEvent::FolderSizeFailed {
+                id: SizeId(6),
+                host,
+                total,
+                error: Error::PermissionDenied(RemotePath::new("/secret")),
+            },
         ];
         let lines: Vec<String> = events.iter().map(trace_line).collect();
-        assert_eq!(lines, ["FolderSizeProgress host=prod id=5", "FolderSizeDone host=prod id=5", "FolderSizeFailed host=prod id=6"]);
+        assert_eq!(
+            lines,
+            ["FolderSizeProgress host=prod id=5", "FolderSizeDone host=prod id=5", "FolderSizeFailed host=prod id=6"]
+        );
         assert_eq!(total.items(), 3);
     }
 
     #[test]
     fn a_refresh_trace_line_counts_entries_and_names_none() {
-        let entry = Entry { name: "secret.txt".into(), kind: dromon_core::EntryKind::File, size: 1, mtime: None, mode: None, owner: None, group: None };
-        let ev = ServiceEvent::Refreshed { host: HostId("prod".into()), path: RemotePath::new("/secret"), entries: vec![entry] };
+        let entry = Entry {
+            name: "secret.txt".into(),
+            kind: dromon_core::EntryKind::File,
+            size: 1,
+            mtime: None,
+            mode: None,
+            owner: None,
+            group: None,
+        };
+        let ev = ServiceEvent::Refreshed {
+            host: HostId("prod".into()),
+            path: RemotePath::new("/secret"),
+            entries: vec![entry],
+        };
         assert_eq!(trace_line(&ev), "Refreshed host=prod entries=1");
     }
 
@@ -443,7 +534,10 @@ mod tests {
         let mk = FileOp::Mkdir { path: p("/a/new") };
         assert_eq!((mk.kind(), mk.affected(), mk.removed()), (FileOpKind::Mkdir, vec![&p("/a/new")], vec![]));
         let mv = FileOp::Rename { from: p("/a/x"), to: p("/a/y") };
-        assert_eq!((mv.kind(), mv.affected(), mv.removed()), (FileOpKind::Rename, vec![&p("/a/x"), &p("/a/y")], vec![&p("/a/x")]));
+        assert_eq!(
+            (mv.kind(), mv.affected(), mv.removed()),
+            (FileOpKind::Rename, vec![&p("/a/x"), &p("/a/y")], vec![&p("/a/x")])
+        );
         assert!(FileOp::Rename { from: p("/a/x"), to: p("/a/x") }.removed().is_empty());
         let rm = FileOp::Delete { paths: vec![p("/a/x"), p("/b")] };
         assert_eq!((rm.kind(), rm.removed()), (FileOpKind::Delete, vec![&p("/a/x"), &p("/b")]));

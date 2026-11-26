@@ -63,7 +63,10 @@ fn poll(rt: &mut Runtime<App>) {
 /// The drawn opacity of refresh `seq`'s wash on row `name`, if it's there.
 fn wash(rt: &Runtime<App>, seq: u64, name: &str) -> Option<f32> {
     let key = format!("fresh-{seq}");
-    rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key.as_str()) && e.path.contains(name)).map(|e| e.opacity)
+    rt.elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some(key.as_str()) && e.path.contains(name))
+        .map(|e| e.opacity)
 }
 
 fn row_y(rt: &Runtime<App>, name: &str) -> f32 {

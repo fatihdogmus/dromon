@@ -59,7 +59,15 @@ pub fn toast(toast: &Toast, p: Paint) -> El {
         .transition(Transition::offset(0.0, 8.0).combined(Transition::opacity()))
         .transition_motion(motion::MOVE, motion::MOVE)
         .child(lead)
-        .child(text(toast.text.clone()).key(format!("{key}-text")).font(type_::BODY).color(t.text).grow(1.0).min_w(0.0).wrap());
+        .child(
+            text(toast.text.clone())
+                .key(format!("{key}-text"))
+                .font(type_::BODY)
+                .color(t.text)
+                .grow(1.0)
+                .min_w(0.0)
+                .wrap(),
+        );
     if toast.dismissible() {
         let id = toast.id;
         e = e.child(

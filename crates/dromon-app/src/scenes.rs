@@ -11,7 +11,10 @@ use rune::TextEdit;
 
 use crate::fixture;
 use crate::state::log::LogBuffer;
-use crate::state::{Action, App, DropTarget, Effect, FileAction, HostAction, MenuKind, PaletteAction, RowTarget, ServiceEvent, Silent, Tab};
+use crate::state::{
+    Action, App, DropTarget, Effect, FileAction, HostAction, MenuKind, PaletteAction, RowTarget, ServiceEvent, Silent,
+    Tab,
+};
 use crate::theme::Appearance;
 
 #[path = "scenes_settings.rs"]
@@ -223,7 +226,8 @@ fn job(id: u64, kind: JobKind, host: &str, title: &str, state: TaskState, done: 
 fn transfer_jobs(clash: bool) -> Vec<JobView> {
     use JobKind::{Download, Upload};
     let mut releases = job(9, Download, "prod", "releases", TaskState::Running, 12_400_000, 80_000_000);
-    (releases.speed, releases.eta, releases.files_done, releases.files_total) = (Some(8_100_000.0), Some(Duration::from_secs(9)), 14, 128);
+    (releases.speed, releases.eta, releases.files_done, releases.files_total) =
+        (Some(8_100_000.0), Some(Duration::from_secs(9)), 14, 128);
     let mut hero = job(8, Upload, "prod", "hero.png", TaskState::Running, 3_100_000, 4_600_000);
     (hero.speed, hero.eta) = (Some(640_000.0), Some(Duration::from_secs(3)));
     let mut site = job(7, Upload, "prod", "2 items", TaskState::Preparing { files_found: 1 }, 0, 0);
@@ -242,7 +246,8 @@ fn transfer_jobs(clash: bool) -> Vec<JobView> {
     let backup = job(5, Download, "prod", "backup-2026-11-01.tar.gz", TaskState::Paused, 7_300_000, 18_204_116);
     let mut photos = job(4, Download, "nas", "photos", TaskState::Running, 410_000_000, 1_020_000_000);
     photos.waiting_for_connection = true;
-    let mut syslog = job(3, Download, "prod", "syslog", TaskState::Failed { error: "1 file failed".into() }, 0, 2_210_000);
+    let mut syslog =
+        job(3, Download, "prod", "syslog", TaskState::Failed { error: "1 file failed".into() }, 0, 2_210_000);
     syslog.errors = vec!["syslog: You don't have access to /var/log/syslog".into()];
     let mut robots = job(2, Upload, "prod", "robots.txt", TaskState::Done, 68, 68);
     robots.reveal = Some(Reveal::Remote(HostId("prod".into()), RemotePath::new("/var/www/site/robots.txt")));
@@ -500,7 +505,15 @@ pub fn poll_added(s: &mut App) {
     listing(s);
     let at = s.now - 20;
     polled(s, |entries| {
-        let file = |name: &str, size| dromon_core::Entry { name: name.into(), kind: dromon_core::EntryKind::File, size, mtime: Some(at), mode: Some(0o100_644), owner: None, group: None };
+        let file = |name: &str, size| dromon_core::Entry {
+            name: name.into(),
+            kind: dromon_core::EntryKind::File,
+            size,
+            mtime: Some(at),
+            mode: Some(0o100_644),
+            owner: None,
+            group: None,
+        };
         entries.retain(|e| e.name != "favicon.ico");
         entries.extend([file("deploy.log", 2_412), file("notes.md", 860)]);
         if let Some(log) = entries.iter_mut().find(|e| e.name == "server.log") {
@@ -523,7 +536,8 @@ pub fn folder_vanished(s: &mut App) {
     let gone = RemotePath::new("/var/www/site/releases");
     s.apply(ServiceEvent::ListFailed { host: prod(), path: gone.clone(), error: dromon_core::Error::NotFound(gone) });
     let Some(c) = s.conn() else { return };
-    let (path, mut entries) = (c.cwd.clone(), fixture::active().server("prod").and_then(|srv| srv.list(&c.cwd).ok()).unwrap_or_default());
+    let (path, mut entries) =
+        (c.cwd.clone(), fixture::active().server("prod").and_then(|srv| srv.list(&c.cwd).ok()).unwrap_or_default());
     entries.retain(|e| e.name != "releases");
     s.apply(ServiceEvent::Listing { host: prod(), path, entries });
 }

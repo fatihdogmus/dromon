@@ -44,9 +44,9 @@ pub(crate) mod windows;
 
 // A shell-script fake ssh and OpenSSH's sftp-server: Unix only.
 #[cfg(all(test, unix))]
-mod tests;
-#[cfg(all(test, unix))]
 mod checks_tests;
+#[cfg(all(test, unix))]
+mod tests;
 #[cfg(all(test, unix))]
 mod windows_e2e_tests;
 
@@ -153,7 +153,8 @@ impl ChannelBackend {
 impl Backend for ChannelBackend {
     fn send(&mut self, cmd: Command) -> Vec<ServiceEvent> {
         // A service that's gone (it only stops when the app quits) has nothing to answer.
-        if let Err(mpsc::error::SendError((_, Command::AnswerPrompt { answer, .. }))) = self.tx.send((self.window, cmd)) {
+        if let Err(mpsc::error::SendError((_, Command::AnswerPrompt { answer, .. }))) = self.tx.send((self.window, cmd))
+        {
             auth::wipe(answer);
         }
         Vec::new()
@@ -206,7 +207,8 @@ impl Config {
             verbose: false,
             config_file: None,
             discover: Some(ConfigSources::default_for_platform()),
-            hosts_file: rune::dirs::AppDirs::new(crate::persist::APP_ID).map(|d| d.config().join(dromon_ssh::HOSTS_CONF)),
+            hosts_file: rune::dirs::AppDirs::new(crate::persist::APP_ID)
+                .map(|d| d.config().join(dromon_ssh::HOSTS_CONF)),
             hosts: Vec::new(),
             without_env: Vec::new(),
         }
@@ -217,7 +219,8 @@ impl Config {
 /// app drops its backend.
 pub fn start<S: Sink>(commands: Commands, sink: S, cfg: Config) -> std::io::Result<()> {
     std::thread::Builder::new().name("dromon-service".into()).spawn(move || {
-        let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).thread_name("dromon-io").enable_all().build();
+        let rt =
+            tokio::runtime::Builder::new_multi_thread().worker_threads(2).thread_name("dromon-io").enable_all().build();
         match rt {
             Ok(rt) => rt.block_on(run(commands, sink, cfg)),
             Err(e) => eprintln!("dromon: couldn't start the network runtime: {e}"),
@@ -333,7 +336,9 @@ fn dispatch<S: Sink>(
             let conn = shared.ids.owner(id).and_then(|host| conns.get(&host));
             match conn {
                 Some(c) => {
-                    if let Err(mpsc::error::SendError(ConnCmd::Answer(_, _, answer))) = c.cmds.send(ConnCmd::Answer(from, id, answer)) {
+                    if let Err(mpsc::error::SendError(ConnCmd::Answer(_, _, answer))) =
+                        c.cmds.send(ConnCmd::Answer(from, id, answer))
+                    {
                         auth::wipe(answer);
                     }
                 }
@@ -368,10 +373,14 @@ fn dispatch<S: Sink>(
         }
         Command::FolderSize { id, host, path } => {
             // The host's task walks it; a host without one isn't connected.
-            let unsent = conns.get(&host).is_none_or(|c| c.cmds.send(ConnCmd::Size(from, SizeCmd::Start { id, path })).is_err());
+            let unsent =
+                conns.get(&host).is_none_or(|c| c.cmds.send(ConnCmd::Size(from, SizeCmd::Start { id, path })).is_err());
             if unsent {
                 let total = crate::state::SizeTotal::default();
-                sink.emit_to(from, ServiceEvent::FolderSizeFailed { id, host, total, error: dromon_core::Error::ConnectionLost });
+                sink.emit_to(
+                    from,
+                    ServiceEvent::FolderSizeFailed { id, host, total, error: dromon_core::Error::ConnectionLost },
+                );
             }
         }
         Command::CancelFolderSize { id, host } => {

@@ -167,7 +167,11 @@ fn settings_and_recent_hosts_reach_every_window() {
     assert_eq!(b.settings.theme, Appearance::Light);
     assert_eq!(b.ui.appearance, Appearance::Light);
     assert_eq!(b.settings.transfers_at_once, 5);
-    assert_eq!(store.0.borrow().last().and_then(|s| s.settings.clone()), Some(a.settings.clone()), "remembered once, shared");
+    assert_eq!(
+        store.0.borrow().last().and_then(|s| s.settings.clone()),
+        Some(a.settings.clone()),
+        "remembered once, shared"
+    );
 
     // A quick connect in b is a recent host in a too.
     b.act(Action::QuickConnect);
@@ -260,7 +264,10 @@ fn the_last_window_closing_keeps_its_frame() {
     peers.0.borrow_mut().frames.insert(b.window, Frame { x: 50, y: 60, width: 1000, height: 700, maximized: true });
     a.window_closed();
     b.window_closed();
-    assert_eq!(store.0.borrow().last().map(|s| s.frames.clone()), Some(vec![Frame { x: 50, y: 60, width: 1000, height: 700, maximized: true }]));
+    assert_eq!(
+        store.0.borrow().last().map(|s| s.frames.clone()),
+        Some(vec![Frame { x: 50, y: 60, width: 1000, height: 700, maximized: true }])
+    );
     b.quitting();
 }
 

@@ -6,7 +6,8 @@ use std::borrow::Cow;
 
 use dromon_core::{ConnStatus, Entry, SortDir, SortKey};
 use rune::{
-    Align, Anim, AnimExt, Color, Curve, Easing, El, GrowthSpec, KeyEvent, KeyPlatform, ScrollSpec, Transition, Tx, col, el, icon, oklch, row, text,
+    Align, Anim, AnimExt, Color, Curve, Easing, El, GrowthSpec, KeyEvent, KeyPlatform, ScrollSpec, Transition, Tx, col,
+    el, icon, oklch, row, text,
 };
 
 use super::widgets::Keyboard;
@@ -24,21 +25,33 @@ pub const GRID: &str = "file-grid";
 /// The list as a reader meets it: a grid of the header row and `rows` entries (all of them,
 /// built or not), three columns.
 fn grid(rows: usize) -> El {
-    col().key(GRID).role("grid").label("Files").multiselectable(true).row_count(rows + 1).column_count(3).w_full().h_full()
+    col()
+        .key(GRID)
+        .role("grid")
+        .label("Files")
+        .multiselectable(true)
+        .row_count(rows + 1)
+        .column_count(3)
+        .w_full()
+        .h_full()
 }
 
 pub fn view(s: &App, c: &ConnView, p: Paint) -> El {
     match &c.listing {
         Listing::Loading => grid(0).busy(true).child(header(c, p)).child(states::skeleton(p, s.settings.density.row())),
         Listing::Failed(ListError::PermissionDenied) => states::denied(p, c),
-        Listing::Failed(ListError::NotFound) => states::message(p, "This folder no longer exists", c.cwd.as_str(), true),
+        Listing::Failed(ListError::NotFound) => {
+            states::message(p, "This folder no longer exists", c.cwd.as_str(), true)
+        }
         Listing::Failed(ListError::Other(e)) => states::message(p, "Couldn't open this folder", e, true),
         // A new folder in an empty one: its row, under the header.
         Listing::Ready(entries) if entries.is_empty() => match edit::new_folder_row(s, c, p) {
             Some(new) => grid(1).child(header(c, p)).child(col().w_full().py(space::S1).child(new)),
             None => empty_area(states::empty(p)),
         },
-        Listing::Ready(_) if c.row_count() == 0 && c.filter.is_on() => grid(0).child(header(c, p)).child(states::no_matches(p, c.filter.query())),
+        Listing::Ready(_) if c.row_count() == 0 && c.filter.is_on() => {
+            grid(0).child(header(c, p)).child(states::no_matches(p, c.filter.query()))
+        }
         Listing::Ready(_) => {
             let rows = rows(s, c, p);
             let dimmed = !matches!(c.status, ConnStatus::Ready);
@@ -54,11 +67,18 @@ pub fn view(s: &App, c: &ConnView, p: Paint) -> El {
 
 /// The three columns. Name takes what's left; the cell paddings match the rows'.
 fn columns(name: El, size_cell: El, modified: El) -> El {
-    row()
-        .w_full()
-        .h_full()
-        .px(space::S1)
-        .child(row().w_full().h_full().pl(space::S2).pr(space::S3).gap(space::S2).center_y().child(name).child(size_cell).child(modified))
+    row().w_full().h_full().px(space::S1).child(
+        row()
+            .w_full()
+            .h_full()
+            .pl(space::S2)
+            .pr(space::S3)
+            .gap(space::S2)
+            .center_y()
+            .child(name)
+            .child(size_cell)
+            .child(modified),
+    )
 }
 
 fn header(c: &ConnView, p: Paint) -> El {
@@ -101,9 +121,11 @@ fn header(c: &ConnView, p: Paint) -> El {
         }
     };
     // Name lines up with the row text: past the row inset, its padding and the icon.
-    let name = row().grow(1.0).min_w(0.0).pl(size::ICON + space::S2 - space::S1).child(cell(SortKey::Name, "Name", false));
+    let name =
+        row().grow(1.0).min_w(0.0).pl(size::ICON + space::S2 - space::S1).child(cell(SortKey::Name, "Name", false));
     let size_cell = row().w(size::COL_SIZE).justify_end().child(cell(SortKey::Size, "Size", true)).mr(-space::S1);
-    let modified = row().w(size::COL_MODIFIED).pl(space::S4 - space::S1).child(cell(SortKey::Modified, "Modified", false));
+    let modified =
+        row().w(size::COL_MODIFIED).pl(space::S4 - space::S1).child(cell(SortKey::Modified, "Modified", false));
     el().key("list-header")
         .role("row")
         .row_index(1)
@@ -150,12 +172,15 @@ fn rows(s: &App, c: &ConnView, p: Paint) -> El {
     let mut content = col().w_full().py(space::S1).children(edit::new_folder_row(s, c, p)).child(stack);
     if let Some((n, name)) = s.files.scroll.clone() {
         // The folder just made or the item just renamed: brought into view once it lists.
-        content = content.child(el().key(format!("scroll-req-{n}")).absolute(0.0, 0.0).size(0.0, 0.0).on_mount(move |s: &mut App, tx: &mut Tx| {
-            tx.scroll_into_view_in(LIST, format!("{ROWS}/{name}"));
-            run(s, Action::File(FileAction::Scrolled(n)), tx);
-        }));
+        content = content.child(el().key(format!("scroll-req-{n}")).absolute(0.0, 0.0).size(0.0, 0.0).on_mount(
+            move |s: &mut App, tx: &mut Tx| {
+                tx.scroll_into_view_in(LIST, format!("{ROWS}/{name}"));
+                run(s, Action::File(FileAction::Scrolled(n)), tx);
+            },
+        ));
     }
-    let mut viewport = empty_area(col().key(LIST).w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec::default()).child(content));
+    let mut viewport =
+        empty_area(col().key(LIST).w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec::default()).child(content));
     if let Some(name) = s.ui.center_on_mount.clone() {
         viewport = viewport.on_mount(move |s: &mut App, tx: &mut Tx| {
             s.ui.center_on_mount = None;
@@ -192,14 +217,26 @@ fn file_row(s: &App, c: &ConnView, i: usize, p: Paint) -> El {
     let (n1, n2, n3) = (e.name.clone(), e.name.clone(), e.name.clone());
     let name = match edit::renaming(s, c, e) {
         Some(f) => edit::field(f, s.files.edit.is_sending(), p),
-        None => text(e.name.clone()).font(if selected { type_::BODY_STRONG } else { type_::BODY }).color(name_color).truncate().grow(1.0).min_w(0.0),
+        None => text(e.name.clone())
+            .font(if selected { type_::BODY_STRONG } else { type_::BODY })
+            .color(name_color)
+            .truncate()
+            .grow(1.0)
+            .min_w(0.0),
     };
     // Each column a cell, as it reads on screen; the exact size and the whole date besides.
     let name = name.role("gridcell").label(e.name.clone()).column_index(1);
     // Cut rows stay dimmed until they're pasted or the clip changes.
     let cut = s.clip().as_ref().is_some_and(|k| k.is_cut(&c.host, &c.cwd.join(&e.name)));
     let size_text = fmt::entry_size(e);
-    let mut size_cell = text(size_text.clone()).font(type_::META).color(meta_color).w(size::COL_SIZE).align(Align::End).role("gridcell").label(size_text).column_index(2);
+    let mut size_cell = text(size_text.clone())
+        .font(type_::META)
+        .color(meta_color)
+        .w(size::COL_SIZE)
+        .align(Align::End)
+        .role("gridcell")
+        .label(size_text)
+        .column_index(2);
     if !open {
         size_cell = size_cell.description(format!("{} bytes", fmt::thousands(e.size)));
     }
@@ -273,7 +310,9 @@ fn file_row(s: &App, c: &ConnView, i: usize, p: Paint) -> El {
     if fresh {
         // A row a refresh brought slides and fades in as its space opens (§4.5); under
         // Reduce Motion Rune makes that a short fade.
-        r = r.transition(Transition::offset(0.0, 8.0).combined(Transition::opacity())).transition_motion(motion::MOVE, motion::MOVE);
+        r = r
+            .transition(Transition::offset(0.0, 8.0).combined(Transition::opacity()))
+            .transition_motion(motion::MOVE, motion::MOVE);
     }
     if edit::renaming(s, c, e).is_none() {
         r = drag::row(r, &e.name);

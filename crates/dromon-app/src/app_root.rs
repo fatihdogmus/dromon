@@ -59,9 +59,7 @@ const SIZE: (f32, f32) = (1080.0, 680.0);
 const MIN_SIZE: (f32, f32) = (720.0, 420.0);
 
 fn now_secs() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(fixture::DEMO_NOW, |d| d.as_secs() as i64)
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(fixture::DEMO_NOW, |d| d.as_secs() as i64)
 }
 
 /// The app on the active fixture (the demo unless `--fixture` chose one).
@@ -245,7 +243,9 @@ pub fn run() {
     // stops the service (connections close, secrets are wiped), and the settings are written.
     match frame {
         // The displays are known only once the event loop runs: the window fits on one of them.
-        Some(frame) => rune::run_windows(move |displays| [WindowSpec::from_app("main", windows::at_frame(app, Some(frame), displays))]),
+        Some(frame) => rune::run_windows(move |displays| {
+            [WindowSpec::from_app("main", windows::at_frame(app, Some(frame), displays))]
+        }),
         None => app.run(),
     }
 }

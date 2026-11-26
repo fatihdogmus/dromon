@@ -36,10 +36,15 @@ pub enum Phase {
     Idle,
     /// ssh runs and SFTP isn't up yet. `attempt` 0 is the first connection, `n ≥ 1` the nth
     /// reconnect; `prompts` counts the open prompts waiting for the user.
-    Starting { attempt: u32, prompts: u32 },
+    Starting {
+        attempt: u32,
+        prompts: u32,
+    },
     Ready,
     /// The connection dropped; reconnect `attempt` starts when its backoff is over.
-    Waiting { attempt: u32 },
+    Waiting {
+        attempt: u32,
+    },
     Failed(String),
     Disconnected,
 }
@@ -55,11 +60,16 @@ pub enum Event {
     Up,
     /// ssh exited. `stderr` is what it printed last (for the reason), `error` our own note
     /// (SFTP didn't start, say).
-    Exited { stderr: Vec<String>, error: Option<String> },
+    Exited {
+        stderr: Vec<String>,
+        error: Option<String>,
+    },
     /// An SFTP request found the connection gone while ssh still runs.
     Lost,
     /// The backoff before reconnect `attempt` is over.
-    RetryDue { attempt: u32 },
+    RetryDue {
+        attempt: u32,
+    },
     Disconnect,
     /// The computer slept and woke (`wake.rs`).
     Wake,
@@ -83,7 +93,10 @@ pub enum Effect {
     /// Up again after a reconnect: refresh the folder on screen.
     Reopened,
     /// Wake with `RetryDue { attempt }` after `after`.
-    Retry { attempt: u32, after: Duration },
+    Retry {
+        attempt: u32,
+        after: Duration,
+    },
     /// ssh gave up on authentication: forget the password it was given (`on_auth_failed`).
     AuthFailed,
     /// Disconnect: forget the host's remembered passwords and passphrases.
@@ -138,9 +151,9 @@ pub fn exit_reason(stderr: &[String], error: Option<&str>) -> ExitReason {
     let has = |needle: &str| lines.iter().any(|l| l.to_ascii_lowercase().contains(&needle.to_ascii_lowercase()));
     if has("Host key verification failed") {
         if has("REMOTE HOST IDENTIFICATION HAS CHANGED") || has("host key for") && has("has changed") {
-            let offending = lines
-                .iter()
-                .find_map(|l| l.split_once(" key in ").filter(|_| l.starts_with("Offending")).map(|(_, at)| at.trim().to_owned()));
+            let offending = lines.iter().find_map(|l| {
+                l.split_once(" key in ").filter(|_| l.starts_with("Offending")).map(|(_, at)| at.trim().to_owned())
+            });
             let mut msg = "The server's host key has changed since you last connected, so ssh refused to connect. \
                            If the server was reinstalled or its keys rotated, remove the old key"
                 .to_owned();
@@ -277,7 +290,11 @@ fn retry_now(m: &mut Lifecycle) -> Vec<Effect> {
     m.backoff.next_delay();
     let attempt = m.backoff.attempt();
     m.phase = Phase::Starting { attempt, prompts: 0 };
-    vec![Effect::Status(ConnStatus::Reconnecting { attempt }), Effect::Log(format!("Reconnecting (attempt {attempt})…")), Effect::Spawn]
+    vec![
+        Effect::Status(ConnStatus::Reconnecting { attempt }),
+        Effect::Log(format!("Reconnecting (attempt {attempt})…")),
+        Effect::Spawn,
+    ]
 }
 
 /// Waits out the next backoff step before reconnecting.
@@ -358,7 +375,14 @@ mod tests {
         assert_eq!(quiet(step(&mut m, Event::Up)), [Effect::Status(ConnStatus::Ready), Effect::Reopened]);
         // The schedule starts over once it's back.
         let fx = quiet(step(&mut m, Event::Lost));
-        assert_eq!(fx, [Effect::Kill, Effect::Status(ConnStatus::Reconnecting { attempt: 1 }), Effect::Retry { attempt: 1, after: secs(1) }]);
+        assert_eq!(
+            fx,
+            [
+                Effect::Kill,
+                Effect::Status(ConnStatus::Reconnecting { attempt: 1 }),
+                Effect::Retry { attempt: 1, after: secs(1) }
+            ]
+        );
         assert!(step(&mut m, exited(&[])).is_empty(), "the exit of the ssh we killed");
     }
 
@@ -386,7 +410,10 @@ mod tests {
         let mut m = Lifecycle::default();
         step(&mut m, Event::Connect);
         let fx = quiet(step(&mut m, exited(&["ssh: Could not resolve hostname nope: Name or service not known"])));
-        assert_eq!(fx, [Effect::Status(ConnStatus::Failed("Could not resolve hostname nope: Name or service not known".into()))]);
+        assert_eq!(
+            fx,
+            [Effect::Status(ConnStatus::Failed("Could not resolve hostname nope: Name or service not known".into()))]
+        );
     }
 
     #[test]
@@ -430,7 +457,10 @@ mod tests {
         assert!(step(&mut m, Event::RetryDue { attempt: 4 }).is_empty(), "the old timer is stale");
         // It fails: the next wait is the new outage's second step.
         let fx = quiet(step(&mut m, exited(&[])));
-        assert_eq!(fx, [Effect::Status(ConnStatus::Reconnecting { attempt: 2 }), Effect::Retry { attempt: 2, after: secs(2) }]);
+        assert_eq!(
+            fx,
+            [Effect::Status(ConnStatus::Reconnecting { attempt: 2 }), Effect::Retry { attempt: 2, after: secs(2) }]
+        );
         // While an attempt runs: only the log line.
         step(&mut m, Event::RetryDue { attempt: 2 });
         assert_eq!(step(&mut m, Event::Wake), [Effect::Log(WOKE.into())]);
@@ -448,12 +478,18 @@ mod tests {
     #[test]
     fn a_restart_reconnects_a_live_connection_at_once() {
         let mut m = up();
-        assert_eq!(quiet(step(&mut m, Event::Restart)), [Effect::Kill, Effect::Status(ConnStatus::Reconnecting { attempt: 1 }), Effect::Spawn]);
+        assert_eq!(
+            quiet(step(&mut m, Event::Restart)),
+            [Effect::Kill, Effect::Status(ConnStatus::Reconnecting { attempt: 1 }), Effect::Spawn]
+        );
         // Back up: the folders on screen list again (no Opened), the schedule starts over.
         assert_eq!(quiet(step(&mut m, Event::Up)), [Effect::Status(ConnStatus::Ready), Effect::Reopened]);
         // Waiting: no wait.
         step(&mut m, Event::Lost);
-        assert_eq!(quiet(step(&mut m, Event::Restart)), [Effect::Status(ConnStatus::Reconnecting { attempt: 1 }), Effect::Spawn]);
+        assert_eq!(
+            quiet(step(&mut m, Event::Restart)),
+            [Effect::Status(ConnStatus::Reconnecting { attempt: 1 }), Effect::Spawn]
+        );
         // An attempt under way, or no connection: the next attempt takes the change.
         assert!(step(&mut m, Event::Restart).is_empty());
         for m in [&mut Lifecycle::default(), &mut up()] {
@@ -474,9 +510,15 @@ mod tests {
             "Host key verification failed.",
         ]);
         let r = exit_reason(&changed, None);
-        assert!(matches!(&r, ExitReason::HostKey(m) if m.contains("/home/u/.ssh/known_hosts:3") && m.contains("changed")), "{r:?}");
+        assert!(
+            matches!(&r, ExitReason::HostKey(m) if m.contains("/home/u/.ssh/known_hosts:3") && m.contains("changed")),
+            "{r:?}"
+        );
         assert!(r.is_refusal());
-        assert_eq!(exit_reason(&s(&["Host key verification failed."]), None), ExitReason::HostKey("Host key verification failed.".into()));
+        assert_eq!(
+            exit_reason(&s(&["Host key verification failed."]), None),
+            ExitReason::HostKey("Host key verification failed.".into())
+        );
         assert_eq!(
             exit_reason(&s(&["debug1: x", "Connection closed by 10.0.0.4 port 22", "debug1: y"]), None),
             ExitReason::Other("Connection closed by 10.0.0.4 port 22".into())

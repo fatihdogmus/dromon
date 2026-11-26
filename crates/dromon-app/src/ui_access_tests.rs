@@ -49,7 +49,10 @@ fn get(rt: &Runtime<App>, k: &str) -> ElementInfo {
         Some(prefix) => key.starts_with(prefix),
         None => key == k,
     };
-    rt.elements().into_iter().find(|e| e.key.as_deref().is_some_and(hit) && !e.exiting).unwrap_or_else(|| panic!("no element {k:?}"))
+    rt.elements()
+        .into_iter()
+        .find(|e| e.key.as_deref().is_some_and(hit) && !e.exiting)
+        .unwrap_or_else(|| panic!("no element {k:?}"))
 }
 
 /// How far `e` is drawn from where it lands, in points.
@@ -72,7 +75,10 @@ fn early(motion: Motion, start: fn(&mut App), change: impl FnOnce(&mut App) + 's
     let seen = (off(&e), e.scale, e.opacity);
     settle(&mut rt);
     let e = get(&rt, k);
-    assert!(off(&e) < 0.01 && (e.scale - 1.0).abs() < 1e-3 && e.opacity > 0.999, "{k} lands where it belongs ({motion:?})");
+    assert!(
+        off(&e) < 0.01 && (e.scale - 1.0).abs() < 1e-3 && e.opacity > 0.999,
+        "{k} lands where it belongs ({motion:?})"
+    );
     seen
 }
 
@@ -118,7 +124,9 @@ fn the_transfers_popover_fades_in_instead_of_growing() {
 
 #[test]
 fn the_drawn_menu_fades_in_instead_of_growing() {
-    let open = |s: &mut App| drop(s.act(Action::File(FileAction::OpenMenu { kind: MenuKind::Empty, at: Some((640.0, 560.0)) })));
+    let open = |s: &mut App| {
+        drop(s.act(Action::File(FileAction::OpenMenu { kind: MenuKind::Empty, at: Some((640.0, 560.0)) })))
+    };
     only_fades(scenes::listing, open, "ctx-menu");
 }
 
@@ -153,7 +161,10 @@ fn the_drop_pill_fades_in_instead_of_rising() {
 fn the_drag_pill_fades_in_instead_of_rising() {
     let over = |s: &mut App| {
         s.act(Action::File(FileAction::DragStart("index.html".into())));
-        s.act(Action::File(FileAction::DragOver { target: Some(crate::state::RowTarget::Folder("uploads".into())), copy: false }));
+        s.act(Action::File(FileAction::DragOver {
+            target: Some(crate::state::RowTarget::Folder("uploads".into())),
+            copy: false,
+        }));
     };
     fades_in_place(scenes::listing, over, "drop-pill-row");
 }

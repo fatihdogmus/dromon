@@ -37,7 +37,14 @@ pub(super) struct ListRun {
 
 impl ListRun {
     pub(super) fn new(sftp: &Sftp, path: RemotePath, poll: bool) -> ListRun {
-        ListRun { pages: sftp.list_paged(&path, PAGE), path, first: true, poll, started: Instant::now(), got: Collector::default() }
+        ListRun {
+            pages: sftp.list_paged(&path, PAGE),
+            path,
+            first: true,
+            poll,
+            started: Instant::now(),
+            got: Collector::default(),
+        }
     }
 }
 
@@ -108,7 +115,9 @@ impl Session {
         let cfg = &shared.cfg;
         let (env, askpass) = match &shared.askpass {
             Some(server) => {
-                let env = server.register(spec.id.clone(), &cfg.helper_exe).map_err(|e| format!("Couldn't set up sign-in prompts: {e}"))?;
+                let env = server
+                    .register(spec.id.clone(), &cfg.helper_exe)
+                    .map_err(|e| format!("Couldn't set up sign-in prompts: {e}"))?;
                 (env, Some(server.clone()))
             }
             // No askpass endpoint: ssh's prompts are cancelled, keys and agents still work.

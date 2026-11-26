@@ -190,7 +190,13 @@ impl Poller {
 
     /// A poll of `path` ended with `result` after `took`: what to tell the UI. A connection
     /// lost is the caller's (the session ends).
-    pub fn polled(&mut self, path: &RemotePath, result: Result<Collector, Error>, took: Duration, now: Instant) -> Outcome {
+    pub fn polled(
+        &mut self,
+        path: &RemotePath,
+        result: Result<Collector, Error>,
+        took: Duration,
+        now: Instant,
+    ) -> Outcome {
         if self.path.as_ref() != Some(path) {
             return Outcome::Quiet;
         }

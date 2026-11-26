@@ -117,7 +117,11 @@ impl Engine {
 
     /// Carries out `cmd` and everything it leads to with `up` the connected hosts. Returns the
     /// one `Transfers` snapshot to send, and the folders finished transfers changed.
-    pub fn command(&mut self, cmd: TransferCommand, up: &BTreeSet<HostId>) -> (ServiceEvent, Vec<(HostId, RemotePath)>) {
+    pub fn command(
+        &mut self,
+        cmd: TransferCommand,
+        up: &BTreeSet<HostId>,
+    ) -> (ServiceEvent, Vec<(HostId, RemotePath)>) {
         // Folders file operations changed since the last command: the backend relisted those.
         self.tree.take_touched();
         let now = self.now();
@@ -299,7 +303,15 @@ impl Engine {
     /// Plans a remote folder's download or copy into `dst`, depth first, names in natural
     /// order. Subfolders that can't be listed are left out with their error; only the item
     /// itself failing to list fails it.
-    fn walk(&self, host: &HostId, src: &RemotePath, dst: &To, rel: &str, depth: usize, scan: &mut Scan) -> Result<(), Error> {
+    fn walk(
+        &self,
+        host: &HostId,
+        src: &RemotePath,
+        dst: &To,
+        rel: &str,
+        depth: usize,
+        scan: &mut Scan,
+    ) -> Result<(), Error> {
         scan.dirs.push(dst.dir());
         let mut entries = self.tree.list(host, src)?;
         entries.sort_by(|a, b| natural_cmp(&a.name, &b.name));
@@ -316,7 +328,9 @@ impl Engine {
                         scan.skipped.push(format!("{shown}: {err}"));
                     }
                 }
-                EntryKind::Symlink { target: Some(LinkTarget::Dir) } => scan.skipped.push(format!("{shown}: a link to a folder")),
+                EntryKind::Symlink { target: Some(LinkTarget::Dir) } => {
+                    scan.skipped.push(format!("{shown}: a link to a folder"))
+                }
                 EntryKind::Symlink { .. } => scan.skipped.push(format!("{shown}: a broken link")),
                 EntryKind::Other => scan.skipped.push(format!("{shown}: not a regular file")),
             }
@@ -333,12 +347,14 @@ impl Engine {
                 Ok(())
             }
             FilePlan::Upload { dst, size, .. } => self.tree.put_file(req.host(), dst, *size, self.mtime),
-            FilePlan::Copy { src, dst, size, mtime, .. } => self.tree.put_file(req.host(), dst, *size, *mtime).map(|()| {
-                if req.kind() == JobKind::CrossHostMove {
-                    // A source that's gone already stays gone.
-                    let _ = self.tree.remove(req.source_host(), src);
-                }
-            }),
+            FilePlan::Copy { src, dst, size, mtime, .. } => {
+                self.tree.put_file(req.host(), dst, *size, *mtime).map(|()| {
+                    if req.kind() == JobKind::CrossHostMove {
+                        // A source that's gone already stays gone.
+                        let _ = self.tree.remove(req.source_host(), src);
+                    }
+                })
+            }
             FilePlan::Move { src, dst, overwrite, .. } => self.tree.move_to(req.host(), src, dst, *overwrite),
         };
         match result {

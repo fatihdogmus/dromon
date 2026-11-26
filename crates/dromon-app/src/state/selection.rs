@@ -149,7 +149,12 @@ impl Selection {
         let few = self.items.len() <= 16;
         let on: HashSet<&str> = {
             let held: Vec<&str> = if few {
-                self.items.iter().map(String::as_str).chain(self.cursor.as_deref()).chain(self.anchor.as_deref()).collect()
+                self.items
+                    .iter()
+                    .map(String::as_str)
+                    .chain(self.cursor.as_deref())
+                    .chain(self.anchor.as_deref())
+                    .collect()
             } else {
                 Vec::new()
             };

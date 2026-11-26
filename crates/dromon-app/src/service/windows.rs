@@ -47,7 +47,10 @@ impl Watch {
     /// How the windows showing `path` show, at best.
     fn seen_as(&self, path: &RemotePath) -> Visibility {
         let showing = self.shown.iter().filter(|(_, p)| *p == path);
-        showing.map(|(w, _)| self.vis.get(w).copied().unwrap_or(Visibility::Hidden)).max_by_key(|v| rank(*v)).unwrap_or(Visibility::Hidden)
+        showing
+            .map(|(w, _)| self.vis.get(w).copied().unwrap_or(Visibility::Hidden))
+            .max_by_key(|v| rank(*v))
+            .unwrap_or(Visibility::Hidden)
     }
 
     /// Drops the pollers of folders no window shows; gives each other one the visibility of
@@ -149,7 +152,13 @@ impl Watch {
     }
 
     /// A poll of `path` ended: what to tell the windows (nothing for a folder none shows).
-    pub fn polled(&mut self, path: &RemotePath, result: Result<Collector, Error>, took: Duration, now: Instant) -> Outcome {
+    pub fn polled(
+        &mut self,
+        path: &RemotePath,
+        result: Result<Collector, Error>,
+        took: Duration,
+        now: Instant,
+    ) -> Outcome {
         match self.polls.get_mut(path) {
             Some(p) => p.polled(path, result, took, now),
             None => Outcome::Quiet,

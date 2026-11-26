@@ -116,8 +116,15 @@ fn category(dark: bool, hue: f32) -> Color {
 }
 
 /// The category hues `icons::for_file` hands out.
-const HUES: [(&str, f32); 7] =
-    [("code", 250.0), ("image", 320.0), ("archive", 70.0), ("audio", 150.0), ("video", 200.0), ("pdf", 355.0), ("binary", 20.0)];
+const HUES: [(&str, f32); 7] = [
+    ("code", 250.0),
+    ("image", 320.0),
+    ("archive", 70.0),
+    ("audio", 150.0),
+    ("video", 200.0),
+    ("pdf", 355.0),
+    ("binary", 20.0),
+];
 
 /// Every pair the views draw with `t`, by where it is.
 fn pairs(t: &Tokens) -> Vec<Pair> {
@@ -240,7 +247,9 @@ fn banner_and_states_pairs(a: &mut Audit, t: &Tokens) {
     a.hovers(Text, "banner: Sign in (text)", t.text, &banner, hv);
     a.add(Text, "status bar: summary (text-2)", t.text_2, &[t.surface]);
     a.add(Tertiary, "status bar: Not connected (text-3)", t.text_3, &[t.surface]);
-    for (dot, color) in [("connected", t.accent), ("reconnecting", t.warning), ("failed", t.danger), ("connecting", t.text_3)] {
+    for (dot, color) in
+        [("connected", t.accent), ("reconnecting", t.warning), ("failed", t.danger), ("connecting", t.text_3)]
+    {
         a.add(Graphic, format!("status bar: {dot} dot"), color, &[t.surface]);
     }
 
@@ -365,7 +374,9 @@ fn focus_ring_pairs(a: &mut Audit, t: &Tokens) {
 fn design_exception(what: &str) -> Option<&'static str> {
     let on_accent_fill = what.contains("selected") || what.contains("drop");
     if what.starts_with("transfers button: idle glyph") {
-        Some("the idle transfers glyph is drawn as quiet as a disabled button on purpose (§6.8), though it opens the popover")
+        Some(
+            "the idle transfers glyph is drawn as quiet as a disabled button on purpose (§6.8), though it opens the popover",
+        )
     } else if what.contains("Resolve…") && (what.ends_with("· hover") || what.ends_with("· press")) {
         Some("accent text on its own accent wash: Resolve… would need a neutral or filled hover")
     } else if what.contains("folder icon") && on_accent_fill && !what.contains("hidden") {
@@ -406,7 +417,17 @@ fn cases() -> Vec<Case> {
 
 fn row(case: &Case, rule: &str, r: f32, p: &Pair) -> String {
     let theme = if case.dark { "dark" } else { "light" };
-    format!("{:<10} {:<6} {:<20} {:<11} {:>6.2}  {} ({} on {})", case.accent.name, theme, case.mode, rule, r, p.what, p.fg.hex(), p.backdrop().hex())
+    format!(
+        "{:<10} {:<6} {:<20} {:<11} {:>6.2}  {} ({} on {})",
+        case.accent.name,
+        theme,
+        case.mode,
+        rule,
+        r,
+        p.what,
+        p.fg.hex(),
+        p.backdrop().hex()
+    )
 }
 
 #[test]
@@ -418,7 +439,12 @@ fn every_pair_meets_its_contrast_rule_in_every_theme_accent_and_mode() {
         let held = |p: &&Pair| p.rule == Rule::Info || design_exception(&p.what).is_none();
         // The worst pair of each rule that the audit holds to it (info: of everything reported).
         for rule in Rule::ALL {
-            let worst = pairs.iter().filter(held).filter(|p| p.rule == rule).map(|p| (p.ratio(), p)).min_by(|a, b| a.0.total_cmp(&b.0));
+            let worst = pairs
+                .iter()
+                .filter(held)
+                .filter(|p| p.rule == rule)
+                .map(|p| (p.ratio(), p))
+                .min_by(|a, b| a.0.total_cmp(&b.0));
             if let Some((r, p)) = worst {
                 summary.push(row(&case, rule.name(), r, p));
             }
@@ -426,7 +452,9 @@ fn every_pair_meets_its_contrast_rule_in_every_theme_accent_and_mode() {
         for p in pairs.iter().filter(|p| p.rule != Rule::Info) {
             let r = p.ratio();
             match design_exception(&p.what) {
-                Some(why) if r < p.rule.min() => exceptions.push(format!("{}\n    {why}", row(&case, p.rule.name(), r, p))),
+                Some(why) if r < p.rule.min() => {
+                    exceptions.push(format!("{}\n    {why}", row(&case, p.rule.name(), r, p)))
+                }
                 Some(_) => {}
                 None if r < p.rule.min() => failures.push(row(&case, p.rule.name(), r, p)),
                 None => {}

@@ -73,24 +73,46 @@ fn changes_parse_as_steps_of_one_or_several() {
     let steps = &fx.server("prod").unwrap().changes;
     assert_eq!(steps.len(), 2);
     let Change::Add { path, entry } = &steps[0][0] else { panic!("{steps:?}") };
-    assert_eq!((path.as_str(), entry.name.as_str(), entry.kind, entry.size), ("/w/new.txt", "new.txt", EntryKind::File, 5));
-    assert_eq!(steps[1], [Change::Remove { path: p("/w/a.txt") }, Change::Modify { path: p("/w/sub"), size: None, mtime: Some(7) }]);
+    assert_eq!(
+        (path.as_str(), entry.name.as_str(), entry.kind, entry.size),
+        ("/w/new.txt", "new.txt", EntryKind::File, 5)
+    );
+    assert_eq!(
+        steps[1],
+        [Change::Remove { path: p("/w/a.txt") }, Change::Modify { path: p("/w/sub"), size: None, mtime: Some(7) }]
+    );
 }
 
 #[test]
 fn change_errors_name_their_place() {
     assert_eq!(error(r#"[{"remove": "w"}]"#), r#"servers.h.changes: step 1: remove: "w" is not an absolute path"#);
     assert_eq!(error(r#"[{"remove": "/"}]"#), "servers.h.changes: step 1: remove: the root can't change");
-    assert_eq!(error(r#"[{"rename": "/a"}]"#), r#"servers.h.changes: step 1: a change is {"add": path, …}, {"remove": path} or {"modify": path, …}"#);
-    assert_eq!(error(r#"[[{"remove": "/a"}, {"modify": "/a"}]]"#), "servers.h.changes: step 1: change 2: a modify changes a size, an mtime or both");
+    assert_eq!(
+        error(r#"[{"rename": "/a"}]"#),
+        r#"servers.h.changes: step 1: a change is {"add": path, …}, {"remove": path} or {"modify": path, …}"#
+    );
+    assert_eq!(
+        error(r#"[[{"remove": "/a"}, {"modify": "/a"}]]"#),
+        "servers.h.changes: step 1: change 2: a modify changes a size, an mtime or both"
+    );
     assert_eq!(error(r#"[{"add": "/a"}]"#), "servers.h.changes: step 1: kind: missing");
-    assert_eq!(error(r#"[{"add": "/a", "name": "b", "kind": "file"}]"#), "servers.h.changes: step 1: an added entry takes its name from its path, and can't be a generator");
-    assert_eq!(error(r#"[{"remove": "/a", "size": 1}]"#), r#"servers.h.changes: step 1: unknown field "size" (expected remove)"#);
+    assert_eq!(
+        error(r#"[{"add": "/a", "name": "b", "kind": "file"}]"#),
+        "servers.h.changes: step 1: an added entry takes its name from its path, and can't be a generator"
+    );
+    assert_eq!(
+        error(r#"[{"remove": "/a", "size": 1}]"#),
+        r#"servers.h.changes: step 1: unknown field "size" (expected remove)"#
+    );
 }
 
 #[test]
 fn a_poll_takes_the_next_step_and_says_only_what_changed() {
-    let mut b = connected(fixture(r#"[{"add": "/w/new.txt", "kind": "file", "size": 5}, [], {"modify": "/w/a.txt", "size": 11}]"#, 1), "/w", true);
+    let mut b = connected(
+        fixture(r#"[{"add": "/w/new.txt", "kind": "file", "size": 5}, [], {"modify": "/w/a.txt", "size": 11}]"#, 1),
+        "/w",
+        true,
+    );
     assert_eq!(refreshed(&poll(&mut b)).unwrap(), ["a.txt", "big", "new.txt", "sub"]);
     // An empty step: nothing changed, nothing sent.
     assert!(poll(&mut b).is_empty());
@@ -116,7 +138,11 @@ fn a_refresh_of_the_folder_on_screen_takes_the_next_step_too() {
     // Navigating elsewhere doesn't.
     b.send(Command::List { host: prod(), path: p("/w/sub") });
     let evs = b.send(Command::List { host: prod(), path: p("/w") });
-    assert!(evs.iter().any(|e| matches!(e, ServiceEvent::ListingPage { entries, .. } if entries.iter().any(|e| e.name == "a.txt"))));
+    assert!(
+        evs.iter().any(
+            |e| matches!(e, ServiceEvent::ListingPage { entries, .. } if entries.iter().any(|e| e.name == "a.txt"))
+        )
+    );
     // ⌘R on /w does: a.txt is gone.
     let evs = b.send(Command::List { host: prod(), path: p("/w") });
     let ServiceEvent::ListingPage { entries, .. } = &evs[0] else { panic!("{evs:?}") };
@@ -127,7 +153,10 @@ fn a_refresh_of_the_folder_on_screen_takes_the_next_step_too() {
 fn the_folder_on_screen_deleted_elsewhere_fails_once() {
     let mut b = connected(fixture(r#"[{"remove": "/w/sub"}]"#, 1), "/w/sub", true);
     let evs = poll(&mut b);
-    assert_eq!(evs, [ServiceEvent::ListFailed { host: prod(), path: p("/w/sub"), error: Error::NotFound(p("/w/sub")) }]);
+    assert_eq!(
+        evs,
+        [ServiceEvent::ListFailed { host: prod(), path: p("/w/sub"), error: Error::NotFound(p("/w/sub")) }]
+    );
     assert!(poll(&mut b).is_empty(), "not polled again");
     // Its parent lists without it.
     let evs = b.send(Command::List { host: prod(), path: p("/w") });
@@ -141,6 +170,7 @@ fn a_folder_over_twenty_thousand_entries_is_never_polled() {
     assert!(poll(&mut b).is_empty());
     // ⌘R still lists it, with the change.
     let evs = b.send(Command::List { host: prod(), path: p("/w/big") });
-    let n: usize = evs.iter().map(|e| if let ServiceEvent::ListingPage { entries, .. } = e { entries.len() } else { 0 }).sum();
+    let n: usize =
+        evs.iter().map(|e| if let ServiceEvent::ListingPage { entries, .. } = e { entries.len() } else { 0 }).sum();
     assert_eq!(n, 20_002);
 }

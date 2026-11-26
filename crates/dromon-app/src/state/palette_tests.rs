@@ -134,7 +134,9 @@ fn actions_that_cant_run_now_are_hidden() {
     s.apply(ServiceEvent::Status { host: host("prod"), status: ConnStatus::Reconnecting { attempt: 1 } });
     type_in(&mut s, "");
     let a = actions(&s);
-    for gone in ["pal-go-to-folder", "pal-filter", "pal-refresh", "pal-new-folder", "pal-download", "pal-rename", "pal-delete"] {
+    for gone in
+        ["pal-go-to-folder", "pal-filter", "pal-refresh", "pal-new-folder", "pal-download", "pal-rename", "pal-delete"]
+    {
         assert!(!a.iter().any(|x| x == gone), "{gone} in {a:?}");
     }
     assert!(a.iter().any(|x| x == "pal-copy-path") && a.iter().any(|x| x == "pal-disconnect"), "{a:?}");
@@ -159,7 +161,11 @@ fn typing_ranks_within_groups() {
     assert_eq!(items[0].hits, [(0, 1), (4, 5)]);
     type_in(&mut s, "sta");
     assert_eq!(keys(&s)[0], "pal-host-staging");
-    assert_eq!(s.palette_items()[0].shortcut, Some("mod+2"), "its ⌘ number is the sidebar's (prod is Connected, first)");
+    assert_eq!(
+        s.palette_items()[0].shortcut,
+        Some("mod+2"),
+        "its ⌘ number is the sidebar's (prod is Connected, first)"
+    );
     type_in(&mut s, "zzz");
     assert!(s.palette_items().is_empty());
     pal(&mut s, PaletteAction::Run);

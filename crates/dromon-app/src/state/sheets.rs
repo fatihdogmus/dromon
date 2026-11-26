@@ -127,7 +127,9 @@ impl Sheets {
         // A question from ssh comes before the log, a delete still being asked about (whose
         // host can't take it while it signs in anyway) or a row's properties.
         let replaces = match &self.open {
-            None | Some(Sheet::Log { .. } | Sheet::Delete { .. } | Sheet::AddToConfig(_) | Sheet::Properties(_)) => true,
+            None | Some(Sheet::Log { .. } | Sheet::Delete { .. } | Sheet::AddToConfig(_) | Sheet::Properties(_)) => {
+                true
+            }
             Some(Sheet::Sent { prompt }) => prompt.host == p.host,
             Some(Sheet::Ask { .. }) => false,
         };
@@ -213,7 +215,13 @@ impl Sheets {
     pub fn cancel(&mut self) -> Option<(PromptId, PromptAnswer)> {
         let id = match &self.open {
             Some(Sheet::Ask { prompt, .. }) => Some(prompt.id),
-            Some(Sheet::Sent { .. } | Sheet::Log { .. } | Sheet::Delete { .. } | Sheet::AddToConfig(_) | Sheet::Properties(_)) => None,
+            Some(
+                Sheet::Sent { .. }
+                | Sheet::Log { .. }
+                | Sheet::Delete { .. }
+                | Sheet::AddToConfig(_)
+                | Sheet::Properties(_),
+            ) => None,
             None => return None,
         };
         self.close_and_advance();

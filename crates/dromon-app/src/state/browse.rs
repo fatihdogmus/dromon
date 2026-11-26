@@ -136,7 +136,13 @@ impl App {
 
     /// [`App::navigate`], selecting the row `select` once the folder lists. Set before the
     /// listing is asked for, since a backend may answer at once.
-    pub(super) fn navigate_selecting(&mut self, path: RemotePath, how: Nav, select: Option<&str>, fx: &mut Vec<Effect>) {
+    pub(super) fn navigate_selecting(
+        &mut self,
+        path: RemotePath,
+        how: Nav,
+        select: Option<&str>,
+        fx: &mut Vec<Effect>,
+    ) {
         let Some(c) = self.conn_mut() else { return };
         if !c.interactive() || !c.go(path, how) {
             return;

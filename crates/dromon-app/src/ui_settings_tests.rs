@@ -35,7 +35,11 @@ fn text_of(rt: &Runtime<App>, key: &str) -> String {
 }
 
 fn fill_of(rt: &Runtime<App>, key: &str) -> rune::Color {
-    rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key)).map(|e| e.fill).unwrap_or_else(|| panic!("no element {key:?}"))
+    rt.elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some(key))
+        .map(|e| e.fill)
+        .unwrap_or_else(|| panic!("no element {key:?}"))
 }
 
 fn folder(name: &str) -> PathBuf {
@@ -58,7 +62,15 @@ fn the_gear_shows_the_page_in_place_of_the_folder_view_beside_the_sidebar() {
     let mut rt = scene_runtime(scenes::listing);
     click(&mut rt, "sidebar-settings");
     assert_eq!(rt.state.ui.page, Page::Settings(SettingsSection::Appearance));
-    for key in ["settings-back", "settings-title", "settings-tab-appearance", "settings-tab-transfers", "settings-tab-browsing", "theme-system", "density-comfortable"] {
+    for key in [
+        "settings-back",
+        "settings-title",
+        "settings-tab-appearance",
+        "settings-tab-transfers",
+        "settings-tab-browsing",
+        "theme-system",
+        "density-comfortable",
+    ] {
         assert!(rt.find(key).is_some(), "{key}");
     }
     assert_eq!(text_of(&rt, "settings-title"), "Settings");

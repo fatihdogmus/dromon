@@ -49,7 +49,13 @@ fn rename_selects_a_files_stem_and_a_whole_folder() {
 fn return_sends_mkdir_then_done_finishes_with_the_name() {
     let mut e = started(Field::new_folder(prod(), site(), "New folder"));
     let fx = step(&mut e, EditEvent::Submit);
-    assert_eq!(fx, Some(EditEffect::Send { host: prod(), op: FileOp::Mkdir { path: RemotePath::new("/var/www/site/New folder") } }));
+    assert_eq!(
+        fx,
+        Some(EditEffect::Send {
+            host: prod(),
+            op: FileOp::Mkdir { path: RemotePath::new("/var/www/site/New folder") }
+        })
+    );
     assert!(e.is_sending());
     // Return and focus changes do nothing while it runs.
     assert_eq!(step(&mut e, EditEvent::Submit), None);
@@ -91,7 +97,10 @@ fn already_exists_comes_back_as_an_inline_error_and_the_field_stays() {
     let error = Error::AlreadyExists(RemotePath::new("/var/www/site/assets"));
     assert_eq!(step(&mut e, EditEvent::Failed(OpId(1), error)), None);
     let f = e.field().unwrap();
-    assert_eq!((f.error.as_deref(), f.shakes, f.edit.text.as_str()), (Some("‘assets’ already exists here"), 1, "assets"));
+    assert_eq!(
+        (f.error.as_deref(), f.shakes, f.edit.text.as_str()),
+        (Some("‘assets’ already exists here"), 1, "assets")
+    );
     assert!(matches!(e, Edit::Editing(_)), "editable again");
     // Other refusals say what the server said.
     let denied = Error::PermissionDenied(RemotePath::new("/var/www/site/x"));
@@ -107,7 +116,10 @@ fn rename_to_the_same_name_cancels_and_another_name_renames_a_sibling() {
     let mut e = started(Field::rename(prod(), site(), "index.html", false));
     type_in(&mut e, "home.html");
     let fx = step(&mut e, EditEvent::Submit);
-    let op = FileOp::Rename { from: RemotePath::new("/var/www/site/index.html"), to: RemotePath::new("/var/www/site/home.html") };
+    let op = FileOp::Rename {
+        from: RemotePath::new("/var/www/site/index.html"),
+        to: RemotePath::new("/var/www/site/home.html"),
+    };
     assert_eq!(fx, Some(EditEffect::Send { host: prod(), op }));
 }
 

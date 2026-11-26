@@ -55,7 +55,11 @@ fn primary() -> Mods {
 
 /// The toolbar's Upload button: whether it's a Tab stop (enabled) or dimmed and inert.
 fn upload_button_enabled(rt: &Runtime<App>) -> bool {
-    let b = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("tb-upload") && !e.exiting).expect("the Upload button");
+    let b = rt
+        .elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some("tb-upload") && !e.exiting)
+        .expect("the Upload button");
     assert_eq!(b.label.as_deref(), Some("Upload"));
     b.focusable
 }
@@ -65,7 +69,9 @@ fn uploads(rec: &Recorder) -> Vec<(Vec<PathBuf>, String)> {
     rec.sent()
         .into_iter()
         .filter_map(|c| match c {
-            Command::Transfer(TransferCommand::Start(JobRequest::Upload { items, into, .. })) => Some((items, into.to_string())),
+            Command::Transfer(TransferCommand::Start(JobRequest::Upload { items, into, .. })) => {
+                Some((items, into.to_string()))
+            }
             _ => None,
         })
         .collect()

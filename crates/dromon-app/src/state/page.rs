@@ -30,7 +30,8 @@ pub enum SettingsSection {
 }
 
 impl SettingsSection {
-    pub const ALL: [SettingsSection; 3] = [SettingsSection::Appearance, SettingsSection::Transfers, SettingsSection::Browsing];
+    pub const ALL: [SettingsSection; 3] =
+        [SettingsSection::Appearance, SettingsSection::Transfers, SettingsSection::Browsing];
 
     pub fn title(self) -> &'static str {
         match self {

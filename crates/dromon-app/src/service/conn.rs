@@ -170,7 +170,11 @@ struct Task<S: Sink> {
 }
 
 impl<S: Sink> Task<S> {
-    async fn run(mut self, mut cmds: mpsc::UnboundedReceiver<ConnCmd>, mut asks: mpsc::UnboundedReceiver<AskpassRequest>) {
+    async fn run(
+        mut self,
+        mut cmds: mpsc::UnboundedReceiver<ConnCmd>,
+        mut asks: mpsc::UnboundedReceiver<AskpassRequest>,
+    ) {
         loop {
             let poll_at = self.poll_at();
             let input = tokio::select! {
@@ -380,7 +384,8 @@ impl<S: Sink> Task<S> {
     /// under way or waiting (exactly one per host).
     fn poll_at(&self) -> Option<Instant> {
         let s = self.session.as_ref()?;
-        let idle = s.sftp.is_some() && s.listing.is_none() && self.waiting.is_empty() && self.life.phase == Phase::Ready;
+        let idle =
+            s.sftp.is_some() && s.listing.is_none() && self.waiting.is_empty() && self.life.phase == Phase::Ready;
         if idle { self.watch.due() } else { None }
     }
 
@@ -600,7 +605,10 @@ impl<S: Sink> Task<S> {
                         }
                         let start = self.session.as_ref().map_or_else(RemotePath::root, |s| s.home.clone());
                         for window in std::mem::take(&mut self.route.joining) {
-                            self.sink.emit_to(window, ServiceEvent::Opened { host: self.host.clone(), start: start.clone() });
+                            self.sink.emit_to(
+                                window,
+                                ServiceEvent::Opened { host: self.host.clone(), start: start.clone() },
+                            );
                         }
                         self.session_up();
                     }

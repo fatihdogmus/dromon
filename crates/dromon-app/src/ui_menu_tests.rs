@@ -77,7 +77,10 @@ fn a_rows_menu_selects_it_and_lists_its_actions() {
     assert!(shown(&rt, "ctx-menu"));
     let c = rt.state.conn().unwrap();
     assert!(c.selection.contains("index.html") && !c.selection.contains("README.md"), "right-click selects the row");
-    assert_eq!(items(&rt), ["Open", "Download", "Copy", "Cut", "Paste", "Copy path", "New folder", "Rename", "Delete", "Properties"]);
+    assert_eq!(
+        items(&rt),
+        ["Open", "Download", "Copy", "Cut", "Paste", "Copy path", "New folder", "Rename", "Delete", "Properties"]
+    );
     // Paste without a clip is disabled: clicking it does nothing, and the menu stays.
     click(&mut rt, "ctx-paste");
     assert!(shown(&rt, "ctx-menu"));
@@ -151,7 +154,10 @@ fn while_reconnecting_the_server_changing_items_are_off() {
         s.act(Action::File(crate::state::FileAction::Copy));
         s.apply(ServiceEvent::Status { host: prod(), status: ConnStatus::Reconnecting { attempt: 1 } });
         // The listing is inert while it reconnects; a menu already asked for still opens.
-        s.act(Action::File(crate::state::FileAction::OpenMenu { kind: MenuKind::Row("index.html".into()), at: Some((400.0, 200.0)) }));
+        s.act(Action::File(crate::state::FileAction::OpenMenu {
+            kind: MenuKind::Row("index.html".into()),
+            at: Some((400.0, 200.0)),
+        }));
     });
     settle(&mut rt);
     for k in ["ctx-delete", "ctx-rename", "ctx-new-folder", "ctx-paste", "ctx-download"] {
@@ -171,12 +177,17 @@ fn press(rt: &mut Runtime<App>, key: Key, mods: Mods) {
 }
 
 fn rect_of(rt: &Runtime<App>, key: &str) -> [f32; 4] {
-    rt.elements().into_iter().find(|e| e.key.as_deref() == Some(key) && !e.exiting).unwrap_or_else(|| panic!("no element {key:?}")).rect
+    rt.elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some(key) && !e.exiting)
+        .unwrap_or_else(|| panic!("no element {key:?}"))
+        .rect
 }
 
 #[test]
 fn shift_f10_opens_the_cursor_rows_menu_at_the_row_and_the_menu_key_too() {
-    let row_items = ["Open", "Download", "Copy", "Cut", "Paste", "Copy path", "New folder", "Rename", "Delete", "Properties"];
+    let row_items =
+        ["Open", "Download", "Copy", "Cut", "Paste", "Copy path", "New folder", "Rename", "Delete", "Properties"];
     for (key, mods) in [(Key::Function(10), SHIFT), (Key::ContextMenu, Mods::default())] {
         let mut rt = runtime();
         // A row near the top, so the whole menu fits below it (lower down it flips above).
@@ -206,7 +217,10 @@ fn shift_f10_without_a_cursor_row_opens_the_empty_areas_menu_and_never_over_a_fi
     press(&mut rt, Key::Function(10), SHIFT);
     assert_eq!(items(&rt), ["New folder", "Paste", "Refresh", "Show hidden files"]);
     let (list, menu) = (rect_of(&rt, "list"), rect_of(&rt, "ctx-menu"));
-    assert!((menu[0] - list[0]).abs() < 1.5 && (menu[1] - (list[1] + 2.0)).abs() < 1.5, "at the list's top-left: {menu:?} in {list:?}");
+    assert!(
+        (menu[0] - list[0]).abs() < 1.5 && (menu[1] - (list[1] + 2.0)).abs() < 1.5,
+        "at the list's top-left: {menu:?} in {list:?}"
+    );
     press(&mut rt, Key::Escape, Mods::default());
     assert!(!shown(&rt, "ctx-menu"));
 
@@ -242,13 +256,36 @@ fn the_native_menu_has_the_same_items_and_shortcut_hints() {
             _ => "—".to_owned(),
         })
         .collect();
-    assert_eq!(ids, ["open", "download", "—", "copy", "cut", "paste", "copy-path", "—", "new-folder", "rename", "delete", "—", "properties"]);
+    assert_eq!(
+        ids,
+        [
+            "open",
+            "download",
+            "—",
+            "copy",
+            "cut",
+            "paste",
+            "copy-path",
+            "—",
+            "new-folder",
+            "rename",
+            "delete",
+            "—",
+            "properties"
+        ]
+    );
     let copy = menu.find("copy").unwrap();
-    assert_eq!(copy.key_equivalent_shortcut().map(ToString::to_string), "mod+c".parse::<rune::Shortcut>().ok().map(|s| s.to_string()));
+    assert_eq!(
+        copy.key_equivalent_shortcut().map(ToString::to_string),
+        "mod+c".parse::<rune::Shortcut>().ok().map(|s| s.to_string())
+    );
     let chord = crate::state::menu::properties_chord();
     let properties = menu.find("properties").unwrap();
     assert!(chord.parse::<rune::Shortcut>().is_ok(), "{chord} is a shortcut");
-    assert_eq!(properties.key_equivalent_shortcut().map(ToString::to_string), chord.parse::<rune::Shortcut>().ok().map(|s| s.to_string()));
+    assert_eq!(
+        properties.key_equivalent_shortcut().map(ToString::to_string),
+        chord.parse::<rune::Shortcut>().ok().map(|s| s.to_string())
+    );
     assert!(!menu.find("rename").unwrap().is_enabled() || rt.state.conn().unwrap().selection.len() == 1);
     let empty = crate::views::menu_popup(&rt.state.menu(&MenuKind::Empty));
     assert!(empty.find("hidden").unwrap().is_checked());

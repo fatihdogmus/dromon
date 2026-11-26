@@ -7,7 +7,7 @@ use dromon_core::{Entry, EntryKind, Error, HostId, RemotePath};
 use super::*;
 use crate::fixture;
 use crate::state::edit::Edit;
-use crate::state::{Action, App, Command, FileAction, Listing, ListError, Recorder, ServiceEvent};
+use crate::state::{Action, App, Command, FileAction, ListError, Listing, Recorder, ServiceEvent};
 
 const SITE: &str = "/var/www/site";
 
@@ -50,7 +50,15 @@ fn entries(s: &App) -> Vec<Entry> {
 }
 
 fn file(name: &str, size: u64) -> Entry {
-    Entry { name: name.into(), kind: EntryKind::File, size, mtime: Some(fixture::DEMO_NOW), mode: None, owner: None, group: None }
+    Entry {
+        name: name.into(),
+        kind: EntryKind::File,
+        size,
+        mtime: Some(fixture::DEMO_NOW),
+        mode: None,
+        owner: None,
+        group: None,
+    }
 }
 
 fn refreshed(s: &mut App, path: &str, entries: Vec<Entry>) {
@@ -98,7 +106,10 @@ fn a_refresh_changes_rows_in_place_and_keeps_the_selection_where_it_can() {
     let c = s.conn().unwrap();
     assert_eq!(c.cwd.as_str(), SITE);
     assert!(names(&s).contains(&"new.txt".to_owned()) && !names(&s).contains(&"robots.txt".to_owned()));
-    assert_eq!(c.find("server.log").unwrap().size, entries(&demo()).iter().find(|e| e.name == "server.log").unwrap().size + 1000);
+    assert_eq!(
+        c.find("server.log").unwrap().size,
+        entries(&demo()).iter().find(|e| e.name == "server.log").unwrap().size + 1000
+    );
     assert_eq!(selected(&s), ["index.html"], "the row that left left the selection quietly");
     assert_eq!(c.selection.cursor(), Some(before[at + 1].as_str()), "the cursor moved to the row after it, unselected");
     assert_eq!(c.fresh.inserted.iter().collect::<Vec<_>>(), ["new.txt"]);
@@ -131,9 +142,21 @@ fn a_paged_refresh_animates_like_a_poll() {
     let mut s = demo();
     let mut now = entries(&s);
     now.push(file("fresh.txt", 1));
-    s.apply(ServiceEvent::ListingPage { host: prod(), path: p(SITE), entries: now[..5].to_vec(), first: true, done: false });
+    s.apply(ServiceEvent::ListingPage {
+        host: prod(),
+        path: p(SITE),
+        entries: now[..5].to_vec(),
+        first: true,
+        done: false,
+    });
     assert!(s.conn().unwrap().fresh.inserted.is_empty(), "nothing until the refresh is whole");
-    s.apply(ServiceEvent::ListingPage { host: prod(), path: p(SITE), entries: now[5..].to_vec(), first: false, done: true });
+    s.apply(ServiceEvent::ListingPage {
+        host: prod(),
+        path: p(SITE),
+        entries: now[5..].to_vec(),
+        first: false,
+        done: true,
+    });
     assert!(s.conn().unwrap().fresh.is_new("fresh.txt"));
     assert!(s.take_animate());
 }
@@ -194,7 +217,11 @@ fn a_vanished_folder_climbs_to_the_nearest_parent_and_says_so() {
 fn a_vanished_folder_whose_parent_is_locked_shows_that_and_the_toast() {
     let (mut s, _) = recorded(demo());
     s.apply(ServiceEvent::ListFailed { host: prod(), path: p(SITE), error: Error::NotFound(p(SITE)) });
-    s.apply(ServiceEvent::ListFailed { host: prod(), path: p("/var/www"), error: Error::PermissionDenied(p("/var/www")) });
+    s.apply(ServiceEvent::ListFailed {
+        host: prod(),
+        path: p("/var/www"),
+        error: Error::PermissionDenied(p("/var/www")),
+    });
     assert_eq!(s.conn().unwrap().listing, Listing::Failed(ListError::PermissionDenied));
     assert_eq!(toasts(&s), ["/var/www/site was removed"]);
 }

@@ -87,21 +87,35 @@ pub enum FileAction {
     CopyPath,
     /// The OS clipboard held `text` when ⌘V (or ⌥⌘V, `as_move`) asked: paste the clip if it's
     /// still that.
-    Paste { text: String, as_move: bool },
+    Paste {
+        text: String,
+        as_move: bool,
+    },
     /// ⌥⌘V, the menus' Paste: read the OS clipboard, then [`FileAction::Paste`].
-    RequestPaste { as_move: bool },
+    RequestPaste {
+        as_move: bool,
+    },
     /// A row drag left its row (the row is selected first if it wasn't).
     DragStart(String),
     /// The drag is over `target` (or nothing that takes rows); `copy` while ⌥ (Ctrl) is held.
-    DragOver { target: Option<DragTarget>, copy: bool },
+    DragOver {
+        target: Option<DragTarget>,
+        copy: bool,
+    },
     DragDrop,
     DragCancel,
     /// A right-click on a row or the empty list: the row is selected first; `at` opens the
     /// drawn menu there (`None`: a native menu opens instead).
-    OpenMenu { kind: MenuKind, at: Option<(f32, f32)> },
+    OpenMenu {
+        kind: MenuKind,
+        at: Option<(f32, f32)>,
+    },
     CloseMenu,
     /// An item of `kind`'s menu was picked.
-    Pick { kind: MenuKind, id: String },
+    Pick {
+        kind: MenuKind,
+        id: String,
+    },
     DismissToast(ToastId),
     /// List the folder on screen again.
     Refresh,
@@ -126,7 +140,8 @@ pub fn delete_title(names: &[String]) -> String {
 
 /// "and 12 more" under the first names, when there are more.
 pub fn delete_more(names: &[String]) -> Option<String> {
-    (names.len() > DELETE_NAMES).then(|| format!("and {} more", crate::fmt::thousands((names.len() - DELETE_NAMES) as u64)))
+    (names.len() > DELETE_NAMES)
+        .then(|| format!("and {} more", crate::fmt::thousands((names.len() - DELETE_NAMES) as u64)))
 }
 
 impl App {
@@ -142,7 +157,11 @@ impl App {
     }
 
     fn items(c: &ConnView, names: &[String]) -> Vec<RemoteItem> {
-        names.iter().filter_map(|n| c.find(n)).map(|e| RemoteItem { path: c.cwd.join(&e.name), kind: e.kind, size: e.size }).collect()
+        names
+            .iter()
+            .filter_map(|n| c.find(n))
+            .map(|e| RemoteItem { path: c.cwd.join(&e.name), kind: e.kind, size: e.size })
+            .collect()
     }
 
     /// Whether a text field has the keyboard: the list's shortcuts leave it alone.
@@ -171,7 +190,11 @@ impl App {
 
     /// The toasts on screen, oldest first: running and failed deletes, then notes.
     pub fn toasts(&self) -> Vec<Toast> {
-        let ops = self.ops.ops.iter().filter_map(|o| delete_toast(o, self.files.deletes.get(&o.id).map_or(&[][..], Vec::as_slice)));
+        let ops = self
+            .ops
+            .ops
+            .iter()
+            .filter_map(|o| delete_toast(o, self.files.deletes.get(&o.id).map_or(&[][..], Vec::as_slice)));
         ops.chain(self.files.toasts.notes()).collect()
     }
 
@@ -202,7 +225,8 @@ impl App {
             FileAction::CopyPath => {
                 let names = self.selected_names();
                 let Some(c) = self.conn() else { return };
-                let paths: Vec<RemotePath> = if names.is_empty() { vec![c.cwd.clone()] } else { names.iter().map(|n| c.cwd.join(n)).collect() };
+                let paths: Vec<RemotePath> =
+                    if names.is_empty() { vec![c.cwd.clone()] } else { names.iter().map(|n| c.cwd.join(n)).collect() };
                 fx.push(Effect::Copy(paths_text(&paths)));
             }
             FileAction::Paste { text, as_move } => self.paste(&text, as_move),

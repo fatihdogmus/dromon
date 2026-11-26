@@ -76,7 +76,10 @@ fn a_rows_menu_and_its_disabled_items() {
 fn the_empty_areas_menu() {
     let mut s = demo();
     let empty = MenuKind::Empty;
-    assert_eq!(shape(&s, &empty), [("new-folder", true), ("paste", false), ("—", false), ("refresh", true), ("hidden", true)]);
+    assert_eq!(
+        shape(&s, &empty),
+        [("new-folder", true), ("paste", false), ("—", false), ("refresh", true), ("hidden", true)]
+    );
     let hidden = s.menu(&empty).into_iter().filter_map(|e| e.item().cloned()).find(|i| i.id == "hidden").unwrap();
     assert_eq!(hidden.checked, Some(true), "hidden files are shown by default");
     assert_eq!(s.menu_action(&empty, "hidden"), Some(Action::ToggleHidden));
@@ -87,7 +90,10 @@ fn the_empty_areas_menu() {
     s.act(Action::File(FileAction::Pick { kind: empty.clone(), id: "new-folder".into() }));
     assert!(s.files.menu.is_none() && s.files.edit.field().is_some());
     s.apply(ServiceEvent::Status { host: prod(), status: ConnStatus::Reconnecting { attempt: 1 } });
-    assert_eq!(shape(&s, &empty), [("new-folder", false), ("paste", false), ("—", false), ("refresh", false), ("hidden", true)]);
+    assert_eq!(
+        shape(&s, &empty),
+        [("new-folder", false), ("paste", false), ("—", false), ("refresh", false), ("hidden", true)]
+    );
 }
 
 #[test]

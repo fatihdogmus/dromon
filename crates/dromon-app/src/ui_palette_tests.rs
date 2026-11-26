@@ -62,7 +62,11 @@ fn shown(rt: &Runtime<App>, k: &str) -> bool {
 /// The palette's rows on screen, in order (the sidebar's hosts are options too).
 fn rows(rt: &Runtime<App>) -> Vec<String> {
     let Some(list) = element(rt, "palette-list") else { return Vec::new() };
-    rt.elements().into_iter().filter(|e| !e.exiting && e.role == "option" && e.path.starts_with(&list.path)).filter_map(|e| e.key).collect()
+    rt.elements()
+        .into_iter()
+        .filter(|e| !e.exiting && e.role == "option" && e.path.starts_with(&list.path))
+        .filter_map(|e| e.key)
+        .collect()
 }
 
 fn cwd(rt: &Runtime<App>) -> String {
@@ -85,10 +89,18 @@ fn cmd_k_opens_it_focused_and_escape_gives_the_keyboard_back_to_the_list() {
     assert_eq!(panel.role, "dialog");
     assert_eq!(panel.rect[2], 560.0, "560 pt wide");
     assert_eq!(panel.rect[1], (SIZE.1 / 3.0).round(), "its top a third of the way down, at a whole point");
-    assert_eq!(rows(&rt)[..3], ["pal-host-prod", "pal-host-staging", "pal-host-nas"], "hosts first, as the sidebar has them");
+    assert_eq!(
+        rows(&rt)[..3],
+        ["pal-host-prod", "pal-host-staging", "pal-host-nas"],
+        "hosts first, as the sidebar has them"
+    );
     assert_eq!(element(&rt, "pal-host-staging").unwrap().label.as_deref(), Some("staging"));
     // Its shortcut, as this platform writes it.
-    let hint = rt.elements().into_iter().find(|e| e.path.contains("pal-host-prod/shortcut") && e.text.is_some()).and_then(|e| e.text);
+    let hint = rt
+        .elements()
+        .into_iter()
+        .find(|e| e.path.contains("pal-host-prod/shortcut") && e.text.is_some())
+        .and_then(|e| e.text);
     assert_eq!(hint.as_deref(), Some(if cfg!(target_os = "macos") { "⌘1" } else { "Ctrl+1" }));
     key(&mut rt, Key::Escape);
     assert!(!shown(&rt, "palette"));

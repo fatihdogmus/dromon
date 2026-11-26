@@ -76,7 +76,11 @@ pub fn score(query: &str, title: &str) -> Option<Match> {
             let mut top: Option<(i32, usize)> = None;
             for (k, prev) in best[i - 1].iter().enumerate().take(j).skip(i - 1) {
                 let Some(prev) = *prev else { continue };
-                let link = if k + 1 == j { NEXT.max(start_bonus(&t, j)) } else { start_bonus(&t, j) - ((j - k - 1) as i32 * GAP).min(GAP_MAX) };
+                let link = if k + 1 == j {
+                    NEXT.max(start_bonus(&t, j))
+                } else {
+                    start_bonus(&t, j) - ((j - k - 1) as i32 * GAP).min(GAP_MAX)
+                };
                 let s = prev + MATCH + link;
                 if top.is_none_or(|(b, _)| s > b) {
                     top = Some((s, k));
@@ -88,10 +92,13 @@ pub fn score(query: &str, title: &str) -> Option<Match> {
             }
         }
     }
-    let (mut j, score) = (0..n).filter_map(|j| best[m - 1][j].map(|s| (j, s))).fold(None, |acc: Option<(usize, i32)>, (j, s)| match acc {
-        Some((_, b)) if b >= s => acc,
-        _ => Some((j, s)),
-    })?;
+    let (mut j, score) = (0..n).filter_map(|j| best[m - 1][j].map(|s| (j, s))).fold(
+        None,
+        |acc: Option<(usize, i32)>, (j, s)| match acc {
+            Some((_, b)) if b >= s => acc,
+            _ => Some((j, s)),
+        },
+    )?;
     let mut at = vec![0usize; m];
     for i in (0..m).rev() {
         at[i] = j;
@@ -114,7 +121,8 @@ pub fn score(query: &str, title: &str) -> Option<Match> {
 /// The titles `query` matches, best first (equal scores in the order given), as their indices
 /// with how they matched.
 pub fn rank<'a>(query: &str, titles: impl IntoIterator<Item = &'a str>) -> Vec<(usize, Match)> {
-    let mut hits: Vec<(usize, Match)> = titles.into_iter().enumerate().filter_map(|(i, t)| score(query, t).map(|m| (i, m))).collect();
+    let mut hits: Vec<(usize, Match)> =
+        titles.into_iter().enumerate().filter_map(|(i, t)| score(query, t).map(|m| (i, m))).collect();
     // Stable: ties stay in order.
     hits.sort_by_key(|(_, m)| std::cmp::Reverse(m.score));
     hits

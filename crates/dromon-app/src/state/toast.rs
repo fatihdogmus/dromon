@@ -105,7 +105,9 @@ pub fn delete_toast(op: &OpView, names: &[String]) -> Option<Toast> {
     }
     let text = match op.total {
         None => format!("Deleting {}…", what(names, op.items)),
-        Some(total) => format!("Deleting… {} of {}", crate::fmt::thousands(op.done.min(total)), crate::fmt::thousands(total)),
+        Some(total) => {
+            format!("Deleting… {} of {}", crate::fmt::thousands(op.done.min(total)), crate::fmt::thousands(total))
+        }
     };
     Some(Toast { id, text, tone: Tone::Busy })
 }
