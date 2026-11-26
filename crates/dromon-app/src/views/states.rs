@@ -4,7 +4,7 @@
 use dromon_core::ConnStatus;
 use rune::{El, LoopSpec, Transition, Tx, col, el, icon, row, text};
 
-use super::widgets::{chord, dot};
+use super::widgets::{Keyboard, chord, dot};
 use super::{Paint, run};
 use crate::icons::{self, IconPair};
 use crate::state::{Action, App, ConnView};
@@ -44,6 +44,7 @@ fn button(p: Paint, key: &'static str, glyph: &'static IconPair, label: &'static
         .press(t.press)
         .press_scale(0.97)
         .on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, action.clone(), tx))
+        .tab_press()
         .child(icon(glyph.at(p.scale), size::ICON).color(t.text_2))
         .child(text(label).font(type_::BODY_STRONG).color(t.text))
 }
@@ -193,7 +194,8 @@ pub fn banner(s: &App, p: Paint) -> Option<El> {
         .child(text(detail).font(type_::META).color(t.text_3).grow(1.0));
     if sign_in {
         b = b.child(
-            row().key("banner-sign-in").role("button").h(22.0).px(space::S2).radius(radius::ROW).center_y().border(p.hair, t.border).hover(t.hover).child(text("Sign in").font(type_::META_STRONG).color(t.text)),
+            // It does nothing yet (`progress.md`): readers hear it as unavailable.
+            row().key("banner-sign-in").role("button").label("Sign in").aria_disabled(true).h(22.0).px(space::S2).radius(radius::ROW).center_y().border(p.hair, t.border).hover(t.hover).child(text("Sign in").font(type_::META_STRONG).color(t.text)),
         );
     } else {
         b = b.child(text("Changes are paused until it's back").font(type_::META).color(t.text_3));

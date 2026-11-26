@@ -59,9 +59,10 @@ fn shown(rt: &Runtime<App>, k: &str) -> bool {
     element(rt, k).is_some()
 }
 
-/// The palette's rows on screen, in order.
+/// The palette's rows on screen, in order (the sidebar's hosts are options too).
 fn rows(rt: &Runtime<App>) -> Vec<String> {
-    rt.elements().into_iter().filter(|e| !e.exiting && e.role == "option").filter_map(|e| e.key).collect()
+    let Some(list) = element(rt, "palette-list") else { return Vec::new() };
+    rt.elements().into_iter().filter(|e| !e.exiting && e.role == "option" && e.path.starts_with(&list.path)).filter_map(|e| e.key).collect()
 }
 
 fn cwd(rt: &Runtime<App>) -> String {

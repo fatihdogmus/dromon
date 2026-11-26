@@ -291,8 +291,9 @@ fn cut_rows_dim_and_paste_on_another_host_moves_across() {
     let (mut rt, _, rec) = recorded();
     click(&mut rt, "rows/index.html");
     press(&mut rt, Key::Command('x'), primary());
-    let dim = rt.elements().into_iter().find(|e| e.label.as_deref() == Some("index.html") && e.role == "row").map(|e| e.opacity);
-    assert_eq!(dim, Some(0.5), "the cut row is dimmed");
+    let row = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("index.html") && e.role == "row").expect("the row");
+    assert_eq!(row.opacity, 0.5, "the cut row is dimmed");
+    assert_eq!(row.label.as_deref(), Some("index.html (cut)"), "and says so (§6.9)");
     click(&mut rt, "host-nas");
     press(&mut rt, Key::Command('v'), primary());
     assert_eq!(

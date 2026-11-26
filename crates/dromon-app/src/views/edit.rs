@@ -57,7 +57,8 @@ pub fn field(f: &Field, sending: bool, p: Paint) -> El {
                 act(s, FileAction::EditBlur, tx);
             }
         })
-        .read_only(sending);
+        .read_only(sending)
+        .invalid(f.error.is_some());
     let error = f.error.is_some();
     let mut boxed = row()
         .key(format!("edit-field-{}", f.shakes))

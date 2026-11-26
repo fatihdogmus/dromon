@@ -4,7 +4,7 @@
 use dromon_core::{ConnStatus, HostSpec};
 use rune::{Color, Cursor, Drag, El, Phase, ScrollSpec, Tx, col, el, icon, row, text};
 
-use super::widgets::dot;
+use super::widgets::{Keyboard, dot};
 use super::{Paint, menu};
 use crate::icons;
 use crate::state::{Action, App, MenuKind, RowTarget, Section, hosts};
@@ -15,10 +15,13 @@ pub const QUICK_CONNECT: &str = "sb-quick-connect";
 
 pub fn view(s: &App, p: Paint) -> El {
     let t = p.t;
-    let mut sections = col().key("sb-sections").w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec::default()).px(space::S2).pb(space::S2);
-    for (section, hosts) in s.hosts.sections(&s.conns) {
-        sections = sections.child(section_view(s, p, section, &hosts));
+    // One list of every host (§6.9): Tab reaches the host on screen (or the first), ↑ ↓ move
+    // between them across the sections, and Return or Space connects.
+    let mut hosts = col().key("sb-hosts").role("listbox").label("Hosts").w_full().focus_group();
+    for (section, list) in s.hosts.sections(&s.conns) {
+        hosts = hosts.child(section_view(s, p, section, &list));
     }
+    let sections = col().key("sb-sections").w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec::default()).px(space::S2).pb(space::S2).child(hosts);
     col()
         .key("sidebar")
         .role("navigation")
@@ -49,8 +52,28 @@ fn section_view(s: &App, p: Paint, section: Section, hosts: &[&HostSpec]) -> El 
         .px(space::S2)
         .pt(space::S1)
         .center_y()
+        .a11y_hidden()
         .child(text(section.title().to_uppercase()).font(type_::CAPTION).color(p.t.text_3));
-    col().key(section.key()).w_full().pt(space::S2).child(label).children(hosts.iter().map(|h| host_row(s, p, h)))
+    col()
+        .key(section.key())
+        .role("group")
+        .label(section.title())
+        .w_full()
+        .pt(space::S2)
+        .child(label)
+        .children(hosts.iter().map(|h| host_row(s, p, h)))
+}
+
+/// What the row's dot says, in words (never colour alone, §6.9).
+fn status_words(status: Option<&ConnStatus>, opened: bool) -> Option<&'static str> {
+    Some(match status? {
+        ConnStatus::Ready => "Connected",
+        ConnStatus::Connecting => "Connecting",
+        ConnStatus::NeedsInput if !opened => "Signing in",
+        ConnStatus::Reconnecting { .. } | ConnStatus::NeedsInput => "Reconnecting",
+        ConnStatus::Failed(_) => "Couldn't connect",
+        ConnStatus::Disconnected => return None,
+    })
 }
 
 fn host_row(s: &App, p: Paint, h: &HostSpec) -> El {
@@ -72,11 +95,23 @@ fn host_row(s: &App, p: Paint, h: &HostSpec) -> El {
         .color(if active { t.text } else { t.text_2 })
         .truncate()
         .grow(1.0);
+    let opened = s.conns.get(&h.id).is_some_and(|c| c.opened);
+    let address = hosts::address(h).unwrap_or_default();
+    let description = match status_words(status, opened) {
+        Some(w) if address.is_empty() => w.to_owned(),
+        Some(w) => format!("{w}, {address}"),
+        None => address,
+    };
     let mut r = row()
         .key(format!("host-{}", h.id))
-        .role("button")
+        .role("option")
         .label(h.display_name().to_owned())
-        .description(hosts::address(h).unwrap_or_default())
+        .description(description)
+        .tab_stop()
+        // The group's Tab stop is the host on screen; the item draws its own ring, as list
+        // items have none by default (their selection stands in, which isn't the focus here).
+        .focus_selected(active)
+        .focus_ring(2.0, -2.0, t.focus)
         .w_full()
         .h(size::ROW)
         .px(space::S2)
@@ -125,6 +160,7 @@ fn footer(p: Paint) -> El {
         .press(t.press)
         .child(icon(icons::PLUS.at(p.scale), size::ICON).color(t.text_3))
         .on_press_tx(|s: &mut App, tx: &mut Tx| super::run(s, Action::QuickConnect, tx))
+        .tab_press()
         .child(text("Quick connect").font(type_::BODY).color(t.text_2).grow(1.0));
     row().w_full().h(44.0).px(space::S2).center_y().border_sides([p.hair, 0.0, 0.0, 0.0], t.border_subtle).child(button)
 }

@@ -6,6 +6,7 @@
 use dromon_core::{Prompt, PromptKind};
 use rune::{Beat, El, LoopSpec, ScrollSpec, Sequence, Transition, Tx, col, icon, row, text, text_input};
 
+use super::widgets::Keyboard;
 use super::{Paint, conflict, quit, run};
 use crate::icons;
 use crate::state::sheets::takes_text;
@@ -95,7 +96,8 @@ pub(super) fn button(p: Paint, key: &'static str, label: &str, primary: bool, ac
         .center()
         .press_scale(0.97)
         .press_motion(rune::Anim::INSTANT, motion::SNAP)
-        .on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, action.clone(), tx));
+        .on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, action.clone(), tx))
+        .tab_stop();
     if primary {
         b.fill(t.accent).default_button().child(text(label.to_owned()).font(type_::BODY_STRONG).color(t.on_accent))
     } else {
@@ -156,6 +158,7 @@ fn sign_in(s: &App, p: Paint, host: &str, prompt: &Prompt, sent: bool) -> El {
             input = input.read_only(true);
         }
         let error = prompt.error.is_some();
+        input = input.invalid(error);
         let mut field = row()
             .key(format!("sheet-field-{}", prompt.id.0))
             .w_full()
@@ -165,6 +168,7 @@ fn sign_in(s: &App, p: Paint, host: &str, prompt: &Prompt, sent: bool) -> El {
             .radius(radius::ROW)
             .fill(t.field)
             .border(p.hair, if error { t.danger } else { t.border_strong })
+            .focus_visible_within_ring(2.0, 1.0, t.focus)
             .child(input);
         if error {
             field = field.sequence(Sequence::new(SHAKE));
@@ -172,7 +176,7 @@ fn sign_in(s: &App, p: Paint, host: &str, prompt: &Prompt, sent: bool) -> El {
         panel = panel.child(field);
     }
     if let Some(e) = &prompt.error {
-        panel = panel.child(text(e.clone()).key("sheet-error").font(type_::META).color(t.danger));
+        panel = panel.child(text(e.clone()).key("sheet-error").role("alert").font(type_::META).color(t.danger));
     }
     if prompt.kind.rememberable() {
         let note = "Kept in memory until you quit or disconnect. Never saved to disk.";
@@ -248,6 +252,7 @@ fn log_sheet(s: &App, host: &dromon_core::HostId, p: Paint) -> El {
                 tx.copy(c.log.to_text());
             }
         })
+        .tab_stop()
         .child(text("Copy all").font(type_::BODY).color(t.text));
     let live = c.is_some_and(|c| crate::state::hosts::is_live(&c.status));
     let mut actions = Vec::new();

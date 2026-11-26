@@ -12,6 +12,7 @@ use dromon_transfer::{ConflictChoice, ConflictView, Side, unique_name};
 use rune::{El, Tx, col, el, icon, row, text};
 
 use super::sheets::{button, buttons, frame};
+use super::widgets::Keyboard;
 use super::{Paint, run};
 use crate::icons;
 use crate::state::{Action, App};
@@ -142,6 +143,7 @@ pub(super) fn danger(p: Paint, key: &'static str, label: &'static str, action: A
         .press_scale(0.97)
         .press_motion(rune::Anim::INSTANT, motion::SNAP)
         .on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, action.clone(), tx))
+        .tab_stop()
         .child(text(label).font(type_::BODY_STRONG).color(t.danger))
 }
 
@@ -161,6 +163,8 @@ fn checkbox(p: Paint, on: bool, label: String) -> El {
         .gap(space::S2)
         .center_y()
         .on_press_tx(|s: &mut App, tx: &mut Tx| run(s, Action::ToggleApplyAll, tx))
+        .tab_stop()
+        .radius(4.0)
         .child(bx)
         .child(text(label).font(type_::BODY).color(t.text))
 }

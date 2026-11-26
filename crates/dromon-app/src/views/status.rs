@@ -4,7 +4,7 @@
 use dromon_core::ConnStatus;
 use rune::{Color, El, Tx, row, text};
 
-use super::widgets::dot;
+use super::widgets::{Keyboard, dot};
 use super::{Paint, run};
 use crate::fmt;
 use crate::state::{Action, App, ConnView, Listing};
@@ -69,6 +69,9 @@ pub fn view(s: &App, p: Paint) -> El {
         .gap(6.0)
         .center_y()
         .on_press_tx(|s: &mut App, tx: &mut Tx| run(s, Action::OpenLog, tx))
+        .has_popup(rune::HasPopup::Dialog)
+        .tab_press()
+        .radius(4.0)
         .child(dot(color, 6.0))
         .child(text(label).font(type_::META).color(t.text_2));
     bar.child(text(summary(c)).key("status-summary").font(type_::META).color(t.text_2).grow(1.0).truncate()).child(conn)

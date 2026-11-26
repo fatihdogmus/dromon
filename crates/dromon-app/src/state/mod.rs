@@ -9,6 +9,7 @@ pub mod conn;
 pub mod drag;
 pub mod edit;
 pub mod files;
+pub mod focus;
 pub mod frames;
 pub mod fuzzy;
 pub mod history;
@@ -89,6 +90,8 @@ pub struct UiState {
     /// Scenes only: this window draws the Settings window's view (`views/settings.rs`), since a
     /// headless run renders no second window.
     pub settings_preview: bool,
+    /// What screen readers are told as it happens (`focus.rs`, §6.9).
+    pub announcer: focus::Announcer,
 }
 
 impl Default for UiState {
@@ -106,6 +109,7 @@ impl Default for UiState {
             quick: quick::QuickConnect::default(),
             palette: palette::Palette::default(),
             settings_preview: false,
+            announcer: focus::Announcer::default(),
         }
     }
 }

@@ -3,9 +3,9 @@
 //! takes the press, and leaves room for Windows' caption buttons (`ChromeInsets::trailing`).
 
 use dromon_core::{ConnStatus, RemotePath};
-use rune::{El, Key, KeyEvent, LoopSpec, Tx, el, icon, row, text, text_input};
+use rune::{El, HasPopup, Key, KeyEvent, LoopSpec, Tx, el, icon, row, text, text_input};
 
-use super::widgets::{chord, icon_button, kbd};
+use super::widgets::{Keyboard, chord, icon_button, kbd};
 use super::{Paint, run, transfers};
 use crate::icons;
 use crate::state::{Action, App, ConnView, Filter, PaletteAction, RowTarget};
@@ -64,14 +64,17 @@ fn palette_button(p: Paint) -> El {
         .hover(p.t.hover)
         .press(p.t.press)
         .on_press_tx(|s: &mut App, tx: &mut Tx| run(s, Action::Palette(PaletteAction::Toggle), tx))
-        .child(kbd(p, &label))
+        .has_popup(HasPopup::Dialog)
+        .tab_press()
+        // The chip's text repeats the shortcut the button already says.
+        .child(kbd(p, &label).a11y_hidden())
 }
 
 /// Breadcrumbs for the folder on screen, or what's happening instead.
 fn path_bar(s: &App, p: Paint) -> El {
     let t = p.t;
     // Clipped, so a path longer than the room fades out under the filter instead of over it.
-    let bar = row().key("tb-path").grow(1.0).min_w(0.0).h(28.0).center_y().clip_soft(0.0);
+    let bar = row().key("tb-path").role("navigation").label("Folder path").grow(1.0).min_w(0.0).h(28.0).center_y().clip_soft(0.0);
     let Some(c) = s.conn() else {
         return bar;
     };
@@ -105,7 +108,6 @@ fn crumb(p: Paint, i: usize, label: String, path: RemotePath, current: bool, liv
     let mut e = row()
         .data(RowTarget::Crumb(path.clone()))
         .key(format!("crumb-{i}"))
-        .role("link")
         .label(label.clone())
         .h(24.0)
         .px(6.0)
@@ -122,8 +124,16 @@ fn crumb(p: Paint, i: usize, label: String, path: RemotePath, current: bool, liv
     if over {
         e = e.fill(t.accent.alpha(0.22)).border(1.5, t.accent).shadow(2.0, 8.0, t.shadow);
     }
-    if !current && live {
-        e = e.hover(t.hover).press(t.press).on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, Action::GoTo(path.clone()), tx));
+    // The folder on screen is the trail's end, not a link (it says so); the others are links,
+    // dimmed for readers while the connection is down.
+    if current {
+        return e.description("Current folder");
+    }
+    e = e.role("link");
+    if live {
+        e = e.hover(t.hover).press(t.press).on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, Action::GoTo(path.clone()), tx)).tab_press();
+    } else {
+        e = e.disabled(true);
     }
     e
 }
@@ -150,11 +160,15 @@ fn filter(s: &App, c: &ConnView, p: Paint) -> El {
         return field
             .role("button")
             .label("Filter")
+            .shortcut_hint(chord("mod+f"))
             .hover(t.hover)
             .on_press_tx(|s: &mut App, tx: &mut Tx| run(s, Action::OpenFilter, tx))
+            .tab_press()
             .child(text("Filter").font(type_::BODY).color(t.text_3).grow(1.0))
-            .child(kbd(p, &chord("mod+f")));
+            .child(kbd(p, &chord("mod+f")).a11y_hidden());
     }
+    // The field's box rings while the keyboard has the field (a caret alone is easy to miss).
+    let field = field.focus_visible_within_ring(2.0, 1.0, t.focus);
     let input = text_input(&s.ui.filter_edit, type_::BODY)
         .key("tb-filter-input")
         .label("Filter")
@@ -179,6 +193,7 @@ fn filter(s: &App, c: &ConnView, p: Paint) -> El {
         .hover(t.hover)
         .press(t.press)
         .on_press_tx(|s: &mut App, tx: &mut Tx| run(s, Action::CloseFilter, tx))
+        .tab_press()
         .child(icon(icons::CLOSE.at(p.scale), size::ICON).color(t.text_3));
     field.child(input).child(clear)
 }

@@ -8,6 +8,7 @@
 use dromon_ssh::{QuickField, split_address};
 use rune::{Align, Beat, El, FileDialogOptions, Key, KeyEvent, Sequence, Side, Transition, Tx, col, icon, row, text, text_input};
 
+use super::widgets::Keyboard;
 use super::{Paint, run, sidebar};
 use crate::icons;
 use crate::state::{Action, App, HostAction};
@@ -119,6 +120,7 @@ fn field(s: &App, p: Paint, f: QuickField, placeholder: &str, with_error: bool) 
     let mut input = text_input(q.edit(f), font)
         .key(format!("quick-{name}-input"))
         .label(f.label())
+        .invalid(error.is_some())
         .single_line()
         .grow(1.0)
         .min_w(0.0)
@@ -154,6 +156,7 @@ fn field(s: &App, p: Paint, f: QuickField, placeholder: &str, with_error: bool) 
         .center_y()
         .fill(t.hover)
         .border(p.hair, if error.is_some() { t.danger } else { t.border })
+        .focus_visible_within_ring(2.0, 1.0, t.focus)
         .child(input);
     if f == QuickField::IdentityFile {
         boxed = boxed.child(pick_button(p));
@@ -192,6 +195,7 @@ fn pick_button(p: Paint) -> El {
             };
             tx.open_file(options, |s: &mut App, picked, tx| act(s, HostAction::PickedIdentity(picked.map_err(|e| e.to_string())), tx));
         })
+        .tab_press()
         .child(text("Choose…").font(type_::META_STRONG).color(t.text_2))
 }
 
@@ -215,6 +219,7 @@ fn more_toggle(s: &App, p: Paint) -> El {
         .hover(t.hover)
         .press(t.press)
         .on_press_tx(|s: &mut App, tx: &mut Tx| act(s, HostAction::ToggleMore, tx))
+        .tab_press()
         .child(icon(glyph.at(p.scale), size::ICON).color(t.text_3))
         .child(text("More").font(type_::META_STRONG).color(t.text_2))
 }
@@ -233,7 +238,8 @@ fn buttons(p: Paint, editing: bool) -> El {
             .center()
             .press_scale(0.97)
             .press_motion(rune::Anim::INSTANT, motion::SNAP)
-            .on_press_tx(move |s: &mut App, tx: &mut Tx| act(s, action.clone(), tx));
+            .on_press_tx(move |s: &mut App, tx: &mut Tx| act(s, action.clone(), tx))
+            .tab_press();
         if primary {
             b.fill(t.accent).child(text(label).font(type_::BODY_STRONG).color(t.on_accent))
         } else {

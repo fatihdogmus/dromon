@@ -23,6 +23,7 @@ use rune::{
     Transition, Tx, WindowHandle, canvas, col, el, icon, row, text,
 };
 
+use super::widgets::Keyboard;
 use super::{Paint, run};
 use crate::fmt;
 use crate::icons::{self, IconPair};
@@ -68,7 +69,9 @@ pub fn button(s: &App, p: Paint) -> El {
         .press(t.press)
         .press_scale(0.97)
         .press_motion(rune::Anim::INSTANT, motion::SNAP)
-        .on_press_tx(|s: &mut App, tx: &mut Tx| run(s, Action::ToggleTransfers, tx));
+        .on_press_tx(|s: &mut App, tx: &mut Tx| run(s, Action::ToggleTransfers, tx))
+        .has_popup(rune::HasPopup::Dialog)
+        .tab_press();
     if tr.open {
         b = b.fill(t.press);
     }
@@ -109,14 +112,15 @@ fn ring(p: Paint, fraction: f32) -> El {
     let second = turned(half(1, t.accent).absolute(0.0, 0.0), (f - 0.5).max(0.0) * 2.0 * PI);
     // The track is opaque: a translucent stroke darkens where its segments overlap.
     let track_color = flatten(t.border_strong, t.surface);
+    // The ring's drawing says nothing the progress bar's value doesn't.
     el().key("tb-ring")
         .role("progressbar")
         .label(format!("{:.0}%", f * 100.0))
         .absolute((28.0 - RING) / 2.0, (28.0 - RING) / 2.0)
         .size(RING, RING)
-        .child(canvas(Shape::new().stroke_svg(&track, RING_STROKE, LineCap::Round, track_color)).absolute(0.0, 0.0).size(RING, RING))
-        .child(el().absolute(c, 0.0).size(c, RING).clip_soft(0.0).child(first))
-        .child(el().absolute(0.0, 0.0).size(c, RING).clip_soft(0.0).child(second))
+        .child(canvas(Shape::new().stroke_svg(&track, RING_STROKE, LineCap::Round, track_color)).absolute(0.0, 0.0).size(RING, RING).a11y_hidden())
+        .child(el().absolute(c, 0.0).size(c, RING).clip_soft(0.0).child(first.a11y_hidden()))
+        .child(el().absolute(0.0, 0.0).size(c, RING).clip_soft(0.0).child(second.a11y_hidden()))
 }
 
 /// The ring's pulse: a copy of it in the accent that grows out of it and fades, once.
@@ -134,6 +138,7 @@ fn pulse(p: Paint, n: u32) -> El {
         .size(RING, RING)
         .sequence(Sequence::new(PULSE_BEATS))
         .motion_intent(MotionIntent::PULSE)
+        .a11y_hidden()
 }
 
 /// `top` drawn over `bottom` as the screen blends them (in sRGB), as one opaque colour.
@@ -158,6 +163,8 @@ fn badge(p: Paint, n: usize) -> El {
         .center()
         .fill(t.accent)
         .border(1.5, t.surface)
+        // The button's name says the count.
+        .a11y_hidden()
         .child(text(label).key("tb-badge-count").font(type_::BADGE).color(t.on_accent))
 }
 
@@ -202,7 +209,9 @@ fn tabs(s: &App, p: Paint) -> El {
             .key(key)
             .role("tab")
             .label(format!("{label}, {n}"))
-            .checked(on)
+            // One Tab stop, the open tab; ← → switch (tabs follow focus).
+            .tab_stop()
+            .focus_selected(on)
             .grow(1.0)
             .h(24.0)
             .gap(6.0)
@@ -221,6 +230,8 @@ fn tabs(s: &App, p: Paint) -> El {
     let control = row()
         .key("tr-tabs")
         .role("tablist")
+        .label("Transfers")
+        .focus_group()
         .w_full()
         .h(28.0)
         .padding(2.0)
@@ -323,8 +334,10 @@ fn tile(p: Paint, j: &JobView, flourishing: bool) -> El {
     let inset = (28.0 - size::ICON) / 2.0;
     match &j.state {
         TaskState::Done => {
+            // The row's name says "Done": the check is its picture.
             let check = icon(icons::CHECK.at(p.scale), size::ICON)
                 .key(format!("tr-check-{}", j.id.0))
+                .a11y_hidden()
                 .color(t.accent)
                 .absolute(inset, inset)
                 .scale(if flourishing { 0.5 } else { 1.0 })
@@ -361,6 +374,7 @@ fn job_row(p: Paint, j: &JobView, flourish: Option<Flourish>) -> El {
             .hover(t.hover)
             .press(t.press)
             .on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, Action::Transfer(cmd.clone()), tx))
+            .tab_press()
             .child(icon(glyph.at(p.scale), size::ICON).color(t.text_2))
     });
     // A name clash waits for an answer: closing the popover brings up its sheet.
@@ -377,6 +391,7 @@ fn job_row(p: Paint, j: &JobView, flourish: Option<Flourish>) -> El {
             .hover(t.accent.alpha(0.1))
             .press(t.accent.alpha(0.16))
             .on_press_tx(|s: &mut App, tx: &mut Tx| run(s, Action::ToggleTransfers, tx))
+            .tab_press()
             .child(text("Resolve…").font(type_::META_STRONG).color(t.accent))
     });
     let title = row()
@@ -449,7 +464,7 @@ fn job_row(p: Paint, j: &JobView, flourish: Option<Flourish>) -> El {
         _ => None,
     };
     if let Some(label) = reveal {
-        r = r.on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, Action::RevealTransfer(id), tx)).help(label);
+        r = r.on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, Action::RevealTransfer(id), tx)).help(label).tab_press().focus_ring(2.0, -1.0, t.focus);
     }
     // What failed or was left out says so on hover, over the reveal hint.
     if let Some(d) = details(j) {
@@ -478,6 +493,7 @@ fn footer(s: &App, p: Paint) -> El {
             .hover(t.hover)
             .press(t.press)
             .on_press_tx(|s: &mut App, tx: &mut Tx| run(s, Action::Transfer(TransferCommand::ClearFinished), tx))
+            .tab_press()
     } else {
         clear.disabled(true)
     };
@@ -497,6 +513,13 @@ fn footer(s: &App, p: Paint) -> El {
 /// the ring's pulse on the window's clock. A step that changes what shows animates: it isn't
 /// input's doing, and Rune would land it at once otherwise.
 pub fn poll(s: &mut App, clock: f64, tx: &mut Tx) -> bool {
+    // What finished, failed, dropped or came back since the last frame, for screen readers
+    // (§6.9); it changes nothing on screen.
+    let mut announcer = std::mem::take(&mut s.ui.announcer);
+    if let Some(news) = announcer.news(s) {
+        tx.announce(news, rune::LiveRegion::Polite);
+    }
+    s.ui.announcer = announcer;
     let step = s.transfers.flourish.step(clock);
     if let Some(due) = step.wake {
         tx.wake_at(due);

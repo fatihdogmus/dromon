@@ -7,6 +7,27 @@ use crate::icons::IconPair;
 use crate::state::App;
 use crate::theme::{motion, radius, size, type_};
 
+/// How a control takes the keyboard (§6.9): Tab, Shift+Tab and assistive technology focus it
+/// and its ring shows (`Cx::focus_ring`); a click presses it without taking focus from the list,
+/// as AppKit's buttons do, so type-to-select and the arrows stay the list's.
+pub trait Keyboard {
+    /// A Tab stop that Space presses. In a sheet Return stays the default button's.
+    fn tab_stop(self) -> El;
+    /// [`Keyboard::tab_stop`] that Return presses too: where no default button waits (the
+    /// toolbar, popovers, toasts), Return would otherwise reach the list and open its selection.
+    fn tab_press(self) -> El;
+}
+
+impl Keyboard for El {
+    fn tab_stop(self) -> El {
+        self.focusable(true).keyboard_focus_only()
+    }
+
+    fn tab_press(self) -> El {
+        self.tab_stop().press_on_return()
+    }
+}
+
 /// A 28 pt square toolbar button around a 16 pt glyph. Fills on press in the same frame and
 /// scales to 0.97 (§6.6); without an action it draws dimmed and takes nothing.
 pub fn icon_button(
@@ -26,7 +47,7 @@ pub fn icon_button(
         .center()
         .child(icon(glyph.at(p.scale), size::ICON).color(if action.is_some() { t.text_2 } else { t.text_3.alpha(0.6) }));
     match action {
-        Some(f) => b.hover(t.hover).press(t.press).press_scale(0.97).press_motion(rune::Anim::INSTANT, motion::SNAP).on_press_tx(f),
+        Some(f) => b.hover(t.hover).press(t.press).press_scale(0.97).press_motion(rune::Anim::INSTANT, motion::SNAP).on_press_tx(f).tab_press(),
         None => b.disabled(true),
     }
 }

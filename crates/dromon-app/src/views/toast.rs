@@ -4,6 +4,7 @@
 
 use rune::{El, LoopSpec, Transition, Tx, col, el, icon, row, text};
 
+use super::widgets::Keyboard;
 use super::{Paint, run, sheets};
 use crate::icons;
 use crate::state::toast::{Toast, Tone};
@@ -71,6 +72,7 @@ pub fn toast(toast: &Toast, p: Paint) -> El {
                 .hover(t.hover)
                 .press(t.press)
                 .on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, Action::File(FileAction::DismissToast(id)), tx))
+                .tab_press()
                 .child(icon(icons::CLOSE.at(p.scale), size::ICON).color(t.text_3)),
         );
     }

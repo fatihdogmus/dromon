@@ -127,7 +127,10 @@ fn entry(e: &MenuEntry, i: usize, kind: &MenuKind, p: Paint) -> El {
         return r.disabled(true);
     }
     let (kind, id) = (kind.clone(), item.id.to_owned());
-    r.focus_highlight(t.hover)
+    // ↑ ↓ move the highlight (the menu is a focus group), Return or Space picks. The highlight
+    // is the keyboard's focus too, so it's the selection's accent wash, not the 4% hover.
+    r.focusable(true)
+        .focus_highlight(t.selection)
         .hover(t.hover)
         .press(t.press)
         .on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, Action::File(FileAction::Pick { kind: kind.clone(), id: id.clone() }), tx))

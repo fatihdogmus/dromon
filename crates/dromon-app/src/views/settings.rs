@@ -96,7 +96,9 @@ pub fn preview(s: &App, p: Paint) -> Option<El> {
         .radius(radius::POPOVER)
         .border(p.hair, p.t.elevated_edge())
         .shadow(16.0, 48.0, p.t.sheet_shadow)
-        .inert();
+        .inert()
+        // A picture of the other window: readers meet the real one (`settings_window.rs`).
+        .a11y_hidden();
     Some(el().key("settings-preview").pin(Some(0.0), Some(0.0), Some(0.0), Some(0.0)).center().child(window))
 }
 

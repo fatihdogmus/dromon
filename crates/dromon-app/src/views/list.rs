@@ -5,34 +5,44 @@
 use std::borrow::Cow;
 
 use dromon_core::{ConnStatus, Entry, SortDir, SortKey};
-use rune::{Align, Anim, AnimExt, Color, Curve, Easing, El, GrowthSpec, ScrollSpec, Transition, Tx, col, el, icon, oklch, row, text};
+use rune::{
+    Align, Anim, AnimExt, Color, Curve, Easing, El, GrowthSpec, KeyEvent, KeyPlatform, ScrollSpec, Transition, Tx, col, el, icon, oklch, row, text,
+};
 
-use super::{LIST, Paint, ROWS, drag, drop, edit, menu, run, states};
+use super::widgets::Keyboard;
+use super::{LIST, Paint, ROWS, drag, drop, edit, effect, menu, run, states};
 use crate::fmt;
 use crate::icons;
 use crate::state::refresh::HIGHLIGHT;
-use crate::state::{Action, App, ConnView, FileAction, ListError, Listing, MenuKind, RowTarget};
+use crate::state::{Action, App, ConnView, FileAction, ListError, Listing, MenuKind, RowTarget, Shortcut, keys};
 use crate::theme::{motion, radius, size, space, type_};
 
 /// The list area for one connection, in whatever state it's in.
+/// The grid's key (§6.9): its header row and its rows.
+pub const GRID: &str = "file-grid";
+
+/// The list as a reader meets it: a grid of the header row and `rows` entries (all of them,
+/// built or not), three columns.
+fn grid(rows: usize) -> El {
+    col().key(GRID).role("grid").label("Files").multiselectable(true).row_count(rows + 1).column_count(3).w_full().h_full()
+}
+
 pub fn view(s: &App, c: &ConnView, p: Paint) -> El {
     match &c.listing {
-        Listing::Loading => col().w_full().h_full().child(header(c, p)).child(states::skeleton(p, s.settings.density.row())),
+        Listing::Loading => grid(0).busy(true).child(header(c, p)).child(states::skeleton(p, s.settings.density.row())),
         Listing::Failed(ListError::PermissionDenied) => states::denied(p, c),
         Listing::Failed(ListError::NotFound) => states::message(p, "This folder no longer exists", c.cwd.as_str(), true),
         Listing::Failed(ListError::Other(e)) => states::message(p, "Couldn't open this folder", e, true),
         // A new folder in an empty one: its row, under the header.
         Listing::Ready(entries) if entries.is_empty() => match edit::new_folder_row(s, c, p) {
-            Some(new) => col().w_full().h_full().child(header(c, p)).child(col().w_full().py(space::S1).child(new)),
+            Some(new) => grid(1).child(header(c, p)).child(col().w_full().py(space::S1).child(new)),
             None => empty_area(states::empty(p)),
         },
-        Listing::Ready(_) if c.row_count() == 0 && c.filter.is_on() => {
-            col().w_full().h_full().child(header(c, p)).child(states::no_matches(p, c.filter.query()))
-        }
+        Listing::Ready(_) if c.row_count() == 0 && c.filter.is_on() => grid(0).child(header(c, p)).child(states::no_matches(p, c.filter.query())),
         Listing::Ready(_) => {
             let rows = rows(s, c, p);
             let dimmed = !matches!(c.status, ConnStatus::Ready);
-            let mut body = col().w_full().h_full().child(header(c, p)).child(rows);
+            let mut body = grid(c.row_count()).child(header(c, p)).child(rows);
             if dimmed {
                 // Reconnecting: the last listing stays, dimmed and read-only.
                 body = body.opacity(0.6).inert();
@@ -57,17 +67,25 @@ fn header(c: &ConnView, p: Paint) -> El {
         let active = c.sort.key == key;
         let caret = if c.sort.dir == SortDir::Ascending { &icons::CARET_UP } else { &icons::CARET_DOWN };
         let txt = text(label).font(type_::META_STRONG).color(if active { t.text_2 } else { t.text_3 });
+        let column = match key {
+            SortKey::Name => 1,
+            SortKey::Size => 2,
+            SortKey::Modified => 3,
+        };
         let mut r = row()
             .key(format!("col-{label}"))
             .role("columnheader")
             .label(label)
+            .column_index(column)
             .sorted(active.then_some(c.sort.dir == SortDir::Ascending))
             .h(22.0)
             .center_y()
             .radius(4.0)
             .hover(t.hover)
             .press(t.press)
-            .on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, Action::Sort(key), tx));
+            .on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, Action::Sort(key), tx))
+            // Tab reaches each header; Space or Return sorts by it.
+            .tab_press();
         if end {
             r = r.justify_end().pl(space::S1);
             if active {
@@ -88,6 +106,7 @@ fn header(c: &ConnView, p: Paint) -> El {
     let modified = row().w(size::COL_MODIFIED).pl(space::S4 - space::S1).child(cell(SortKey::Modified, "Modified", false));
     el().key("list-header")
         .role("row")
+        .row_index(1)
         .w_full()
         .h(size::HEADER)
         .fill(t.canvas)
@@ -95,13 +114,32 @@ fn header(c: &ConnView, p: Paint) -> El {
         .child(columns(name, size_cell, modified))
 }
 
+/// Keys the rows take while they have the keyboard: type-to-select (a focused control keeps
+/// typed letters from the window's `on_key`, which takes the rest: arrows, Return, ⌘ keys).
+fn rows_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
+    match keys::shortcut(ev, KeyPlatform::current()) {
+        Some(sc @ Shortcut::Type(_)) => {
+            for fx in s.shortcut(sc, tx.clock()) {
+                effect(fx, tx);
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
 fn rows(s: &App, c: &ConnView, p: Paint) -> El {
-    let stack = col()
-        .key(ROWS)
-        .role("grid")
-        .label("Files")
-        .multiselectable(true)
-        .row_count(c.row_count())
+    // The rows hold the keyboard as one Tab stop (an NSTableView): the cursor's row is the
+    // active descendant a reader follows, and the ring is drawn on it (`file_row`); with no
+    // cursor yet, around the rows.
+    // (The selection keeps its cursor among the rows on screen: `Selection::retain`.)
+    let cursor = c.selection.cursor().map(str::to_owned);
+    let mut stack = col().key(ROWS).role("rowgroup").label("Files").focusable(true).on_key(rows_key);
+    stack = match cursor {
+        Some(name) => stack.active_descendant(name).no_focus_ring(),
+        None => stack.focus_ring(2.0, -2.0, p.t.focus),
+    };
+    let stack = stack
         .w_full()
         .growth(GrowthSpec::default())
         .virtual_rows(c.row_count(), s.settings.density.row(), row_key, move |s: &App, i| match s.conn() {
@@ -156,11 +194,28 @@ fn file_row(s: &App, c: &ConnView, i: usize, p: Paint) -> El {
         Some(f) => edit::field(f, s.files.edit.is_sending(), p),
         None => text(e.name.clone()).font(if selected { type_::BODY_STRONG } else { type_::BODY }).color(name_color).truncate().grow(1.0).min_w(0.0),
     };
+    // Each column a cell, as it reads on screen; the exact size and the whole date besides.
+    let name = name.role("gridcell").label(e.name.clone()).column_index(1);
     // Cut rows stay dimmed until they're pasted or the clip changes.
     let cut = s.clip().as_ref().is_some_and(|k| k.is_cut(&c.host, &c.cwd.join(&e.name)));
-    let size_cell = text(fmt::entry_size(e)).font(type_::META).color(meta_color).w(size::COL_SIZE).align(Align::End);
-    let modified =
-        text(fmt::modified(e.mtime, s.now)).font(type_::META).color(meta_color).w(size::COL_MODIFIED).pl(space::S4).truncate();
+    let size_text = fmt::entry_size(e);
+    let mut size_cell = text(size_text.clone()).font(type_::META).color(meta_color).w(size::COL_SIZE).align(Align::End).role("gridcell").label(size_text).column_index(2);
+    if !open {
+        size_cell = size_cell.description(format!("{} bytes", fmt::thousands(e.size)));
+    }
+    let modified_text = fmt::modified(e.mtime, s.now);
+    let mut modified = text(modified_text.clone())
+        .font(type_::META)
+        .color(meta_color)
+        .w(size::COL_MODIFIED)
+        .pl(space::S4)
+        .truncate()
+        .role("gridcell")
+        .label(modified_text)
+        .column_index(3);
+    if let Some(t) = e.mtime {
+        modified = modified.description(full_date(t));
+    }
     let mut cells = row()
         .w_full()
         .h_full()
@@ -182,6 +237,10 @@ fn file_row(s: &App, c: &ConnView, i: usize, p: Paint) -> El {
     if drop_here {
         cells = cells.border(1.5, t.accent).shadow(2.0, 8.0, t.shadow);
     }
+    // The keyboard's ring, inside the row's shape, while the rows have the keyboard.
+    if c.selection.cursor() == Some(e.name.as_str()) {
+        cells = cells.focus_ring_for(ROWS, 2.0, -2.0, t.focus);
+    }
     let fresh = c.fresh.is_new(&e.name);
     let cells = cells
         .children(fresh.then(|| highlight(c.fresh.seq, c.fresh.seen, p)))
@@ -189,10 +248,13 @@ fn file_row(s: &App, c: &ConnView, i: usize, p: Paint) -> El {
         .child(name)
         .child(size_cell)
         .child(modified);
+    // Its place among all the grid's rows (the header is the first), whether it's selected (the
+    // fill shows it, §6.9), what kind it is (the icon shows it) and whether it's cut (dimmed).
     let mut r = row()
         .role("row")
-        .label(e.name.clone())
-        .row_index(i)
+        .label(if cut { format!("{} (cut)", e.name) } else { e.name.clone() })
+        .row_index(i + 2)
+        .focus_selected(selected)
         .w_full()
         .h(s.settings.density.row())
         .px(space::S1)
@@ -202,6 +264,9 @@ fn file_row(s: &App, c: &ConnView, i: usize, p: Paint) -> El {
         })
         .on_secondary_press(move |s: &mut App, at, tx: &mut Tx| menu::open(s, MenuKind::Row(n3.clone()), at, tx))
         .child(cells);
+    if let Some(kind) = kind_words(e) {
+        r = r.description(kind);
+    }
     if cut {
         r = r.opacity(0.5);
     }
@@ -218,6 +283,22 @@ fn file_row(s: &App, c: &ConnView, i: usize, p: Paint) -> El {
         r = drop::folder_row(r, &e.name).data(target);
     }
     r
+}
+
+/// What the row's icon says of it, in words: a folder, a link (files say nothing more).
+fn kind_words(e: &Entry) -> Option<&'static str> {
+    match (e.kind.is_dir_like(), e.kind.is_symlink()) {
+        (true, false) => Some("Folder"),
+        (true, true) => Some("Folder, symbolic link"),
+        (false, true) => Some("Symbolic link"),
+        (false, false) => None,
+    }
+}
+
+/// "Nov 24, 2026, 18:00": the Modified cell's whole date (UTC, as the column's).
+fn full_date(t: i64) -> String {
+    let clock = fmt::clock_ms(t * 1000);
+    format!("{}, {}", fmt::date(t, 0), &clock[..5])
 }
 
 /// The mint wash under a row the last refresh brought (§4.5): it shows whole as the row

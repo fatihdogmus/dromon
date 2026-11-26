@@ -33,9 +33,13 @@ mod views;
 mod windows;
 
 #[cfg(test)]
+mod ui_a11y_tests;
+#[cfg(test)]
 mod ui_access_tests;
 #[cfg(test)]
 mod ui_file_tests;
+#[cfg(test)]
+mod ui_keyboard_tests;
 #[cfg(test)]
 mod ui_menu_tests;
 #[cfg(test)]
