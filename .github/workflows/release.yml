@@ -5,13 +5,14 @@ name: Release
 # signing themselves (each package's `dromon --version`, each new signature verified).
 #
 #   Windows  Dromon-<v>-windows-x64.msi          WiX v5; Authenticode (azure | sslcom | signpath)
-#   macOS    Dromon-<v>-macos-arm64.dmg          Apple silicon; Developer ID, notarized, stapled
+#   macOS    Dromon-<v>-macos-universal.dmg      Apple silicon + Intel; Developer ID, notarized
 #   Linux    Dromon-<v>-linux-x64.deb            + .asc (GPG)
 #            Dromon-<v>-linux-x64.pkg.tar.zst    + .sig (GPG)
 #   all      SHA256SUMS + SHA256SUMS.asc, Sigstore build-provenance attestations
 #
-# Targets for now: Windows x64 (Windows on Arm runs it emulated), macOS Apple silicon only (no
-# Intel Macs), Linux x86_64. The packaging scripts take an --arch / -Arch to add more later.
+# Targets for now: Windows x64 (Windows on Arm runs it emulated), macOS (one universal app:
+# Apple silicon and Intel), Linux x86_64. The packaging scripts take an --arch / -Arch to add
+# more later.
 #
 # Run it from Actions → Release → Run workflow on main, choosing patch, minor or major:
 # - plan bumps [workspace.package].version (0.1.0 → 0.1.1 | 0.2.0 | 1.0.0) in a commit on top of
@@ -236,13 +237,13 @@ jobs:
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          key: release-macos-arm64
+          key: release-macos-universal
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Build Dromon.app (Apple silicon) and the unsigned DMG
+      - name: Build Dromon.app (universal, Apple silicon + Intel) and the unsigned DMG
         run: |
           bash packaging/macos/build-app.sh "$RUNNER_TEMP/build"
           mkdir -p "$RUNNER_TEMP/macos"
-          mv "$RUNNER_TEMP/build/Dromon.app.zip" "$RUNNER_TEMP/build/Dromon-$VERSION-macos-arm64.dmg" "$RUNNER_TEMP/macos/"
+          mv "$RUNNER_TEMP/build/Dromon.app.zip" "$RUNNER_TEMP/build/Dromon-$VERSION-macos-universal.dmg" "$RUNNER_TEMP/macos/"
       - id: upload
         uses: ./.github/release/upload
         with:

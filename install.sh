@@ -1,5 +1,5 @@
 #!/bin/sh
-# Dromon installer for macOS (Apple silicon) and Linux (x86_64: Debian/Ubuntu, Arch).
+# Dromon installer for macOS (Apple silicon and Intel) and Linux (x86_64: Debian/Ubuntu, Arch).
 #
 #   curl -fsSL https://raw.githubusercontent.com/fatihdogmus/dromon/main/install.sh | sh
 #
@@ -110,15 +110,9 @@ detect_platform() {
       USE_ROOT=1
       ;;
     Darwin)
-      if [ "$machine" != arm64 ]; then
-        # A terminal run under Rosetta reports x86_64 on an Apple silicon Mac.
-        if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null || true)" != 1 ] &&
-          [ "$(sysctl -n hw.optional.arm64 2>/dev/null || true)" != 1 ]; then
-          die "no Intel Mac build (Apple silicon only). Build from source: $SOURCE_URL"
-        fi
-      fi
+      # One universal app: Apple silicon and Intel.
       OS=macos
-      ASSET_SUFFIX=macos-arm64.dmg
+      ASSET_SUFFIX=macos-universal.dmg
       # Writing to /Applications (or replacing an app there) needs sudo unless we may do it.
       if [ ! -w /Applications ] || { [ -e /Applications/Dromon.app ] && [ ! -w /Applications/Dromon.app ]; }; then
         USE_ROOT=1

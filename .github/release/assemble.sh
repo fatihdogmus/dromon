@@ -4,11 +4,12 @@
 # each found once, or the run fails:
 #
 #   Dromon-<version>-windows-x64.msi
-#   Dromon-<version>-macos-arm64.dmg
+#   Dromon-<version>-macos-universal.dmg
 #   Dromon-<version>-linux-x64.deb
 #   Dromon-<version>-linux-x64.pkg.tar.zst
 #
-# Release targets: Windows x64, macOS Apple silicon, Linux x86_64. More architectures need their
+# Release targets: Windows x64, macOS (one universal app: Apple silicon and Intel), Linux
+# x86_64. More architectures need their
 # builds in release.yml and their names here (and in release-notes.sh).
 # shellcheck source-path=SCRIPTDIR source=lib.sh
 . "$(dirname "$0")/lib.sh"
@@ -20,7 +21,7 @@ shift 2
 
 expected=(
   "Dromon-$version-windows-x64.msi"
-  "Dromon-$version-macos-arm64.dmg"
+  "Dromon-$version-macos-universal.dmg"
   "Dromon-$version-linux-x64.deb"
   "Dromon-$version-linux-x64.pkg.tar.zst"
 )

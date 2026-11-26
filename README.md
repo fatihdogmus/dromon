@@ -33,7 +33,7 @@ Dromon does one thing and does it extremely well: **SFTP over the SSH you alread
 **Quick install**
 
 ```sh
-# macOS (Apple silicon) and Linux (Debian/Ubuntu, Arch; x86_64)
+# macOS (Apple silicon and Intel) and Linux (Debian/Ubuntu, Arch; x86_64)
 curl -fsSL https://raw.githubusercontent.com/fatihdogmus/dromon/main/install.sh | sh
 ```
 
@@ -54,12 +54,12 @@ Or download a file yourself from the [Releases page](https://github.com/fatihdog
 
 | Platform | File | Notes |
 |---|---|---|
-| macOS 14+, Apple silicon | `Dromon-<version>-macos-arm64.dmg` | Drag Dromon to Applications |
+| macOS 14+, Apple silicon and Intel | `Dromon-<version>-macos-universal.dmg` | Drag Dromon to Applications |
 | Windows 11 (x64; Arm runs it emulated) | `Dromon-<version>-windows-x64.msi` | If SmartScreen asks: **More info → Run anyway** |
 | Debian 12+, Ubuntu 22.04+ (x86_64) | `Dromon-<version>-linux-x64.deb` | `sudo apt install ./Dromon-….deb` (pulls in `openssh-client`) |
 | Arch Linux (x86_64) | `Dromon-<version>-linux-x64.pkg.tar.zst` | `sudo pacman -U Dromon-….pkg.tar.zst` |
 
-Dromon uses your system `ssh` (OpenSSH 8.4 or newer; on Windows, the built-in OpenSSH client). On an Intel Mac or Arm Linux, [build it from source](#source).
+Dromon uses your system `ssh` (OpenSSH 8.4 or newer; on Windows, the built-in OpenSSH client). On Arm Linux, [build it from source](#source).
 
 <details>
 <summary><b>Verifying a download</b></summary>

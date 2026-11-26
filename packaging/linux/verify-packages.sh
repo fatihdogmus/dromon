@@ -38,8 +38,10 @@ summary() {
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then echo "- $*" >> "$GITHUB_STEP_SUMMARY"; fi
 }
 
+# Docker Hub's official images through Google's mirror: Docker Hub rate-limits anonymous pulls.
+hub=${DROMON_IMAGE_MIRROR-mirror.gcr.io/library/}
 for image in debian:12 ubuntu:24.04; do
-  reported=$(docker run --rm -v "$dir:/pkg:ro" -e DEB="$deb" "$image" bash -euo pipefail -c '
+  reported=$(docker run --rm -v "$dir:/pkg:ro" -e DEB="$deb" "$hub$image" bash -euo pipefail -c '
     export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq > /dev/null
     apt-get install -y -qq --no-install-recommends "/pkg/$DEB" > /dev/null
@@ -62,7 +64,7 @@ if [ "$arch" = x64 ]; then
     key_mount=(-v "$(cd "$(dirname "$key")" && pwd)/$(basename "$key"):/release-key.asc:ro")
     fingerprint=$(gpg --batch --with-colons --list-keys | awk -F: '$1 == "fpr" { print $10; exit }')
   fi
-  reported=$(docker run --rm -v "$dir:/pkg:ro" "${key_mount[@]}" -e PKG="$pkg" -e FINGERPRINT="$fingerprint" archlinux:latest bash -euo pipefail -c '
+  reported=$(docker run --rm -v "$dir:/pkg:ro" "${key_mount[@]}" -e PKG="$pkg" -e FINGERPRINT="$fingerprint" "${hub}archlinux:latest" bash -euo pipefail -c '
     pacman -Syu --noconfirm --noprogressbar > /dev/null
     if [ -n "$FINGERPRINT" ]; then
       pacman-key --init > /dev/null 2>&1

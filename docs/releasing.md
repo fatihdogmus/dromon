@@ -8,7 +8,7 @@ to `main`.
 | File | For | Signed with |
 |---|---|---|
 | `Dromon-<v>-windows-x64.msi` | Windows 11 x64 (Windows on Arm runs it emulated) | Authenticode (SignPath Foundation, SSL.com eSigner or Azure Artifact Signing), else unsigned |
-| `Dromon-<v>-macos-arm64.dmg` | macOS 14+, Apple silicon (not Intel Macs) | Developer ID + notarization, else ad-hoc |
+| `Dromon-<v>-macos-universal.dmg` | macOS 14+, Apple silicon and Intel (one universal app) | Developer ID + notarization, else ad-hoc |
 | `Dromon-<v>-linux-x64.deb` (+ `.deb.asc`) | Debian 12+, Ubuntu 22.04+, x86_64 | release GPG key |
 | `Dromon-<v>-linux-x64.pkg.tar.zst` (+ `.pkg.tar.zst.sig`) | Arch Linux, x86_64 | release GPG key |
 | `SHA256SUMS` (+ `SHA256SUMS.asc`), `dromon-release-key.asc` | every file | release GPG key |
@@ -55,7 +55,7 @@ runs the packaged `dromon --version`, and each signing step verifies the signatu
 ```
 plan ─┬─ approve (release-approval: you) ── credentials (release env) ──────────────┐
       ├─ build-linux (x64, ubuntu-22.04) ── package-arch ───────────────────────────┤
-      ├─ build-macos (macos-15, arm64) ── sign-macos (release env)* ────────────────┤
+      ├─ build-macos (macos-15, universal) ── sign-macos (release env)* ────────────┤
       └─ build-windows (x64) ── sign-windows-exe (release env)*                     │
                                     ── package-windows (x64)                        │
                                     ── sign-windows-msi (release env)* ─────────────┤
@@ -76,7 +76,7 @@ there: `scripts/package-linux.sh --verify` (Debian, Ubuntu, Arch containers),
 | `credentials` | plan, approve | `release` | which credentials exist (`windows`, `macos`, `gpg`); enforces the [policy](#credentials-policy) |
 | `build-linux` ×2 | plan | — | `.deb` (binary built on Ubuntu 22.04: glibc 2.35) |
 | `package-arch` | build-linux | — | both `.pkg.tar.zst`, made by makepkg from the `.deb`s |
-| `build-macos` | plan | — | `Dromon.app.zip` (Apple silicon, ad-hoc signed) and the unsigned DMG |
+| `build-macos` | plan | — | `Dromon.app.zip` (universal: arm64 and x86_64 built on Apple silicon and joined with lipo; ad-hoc signed) and the unsigned DMG |
 | `build-windows` ×2 | plan | — | `dromon.exe` with its version resource and icon |
 | `sign-windows-exe` | credentials, build-windows | `release` | Authenticode-signed `dromon.exe` (azure, sslcom) |
 | `package-windows` ×2 | build-windows, sign-windows-exe | — | the MSI around the signed (or unsigned) exe |
@@ -415,7 +415,7 @@ is written by `release.yml`'s `homebrew` job after publishing (to redo it, re-ru
 On a macOS runner it:
 
 1. skips the release unless it is GitHub's latest one and not a prerelease;
-2. downloads `Dromon-<v>-macos-arm64.dmg` and `SHA256SUMS`, and checks the DMG's SHA-256 against
+2. downloads `Dromon-<v>-macos-universal.dmg` and `SHA256SUMS`, and checks the DMG's SHA-256 against
    its line and against the Sigstore attestation `release.yml` made (run from `main`);
 3. asks Gatekeeper (`spctl --assess`) whether `Dromon.app` is notarized;
 4. writes the cask (`.github/release/homebrew-cask.sh`) and pushes it to the tap.
@@ -526,10 +526,10 @@ cargo and rustup caches. `--build host` builds on the host, as CI does on its ub
 The Linux half is verified end to end locally; the rest needs GitHub's runners. On the first
 check run, look at:
 
-- **Targets**: Windows x64, macOS Apple silicon and Linux x86_64 only, for now. Adding one means
-  a build job for it in `release.yml` (the packaging scripts already take `--arch` / `-Arch`;
-  `packaging/macos/build-app.sh` notes how to make a universal binary for Intel Macs), its file
-  name in `assemble.sh` and a row in `release-notes.sh`.
+- **Targets**: Windows x64, macOS (one universal app for Apple silicon and Intel) and Linux
+  x86_64, for now. Adding one means a build job for it in `release.yml` (the packaging scripts
+  already take `--arch` / `-Arch`), its file name in `assemble.sh` and a row in
+  `release-notes.sh`. CI tests on both Mac architectures (`macos`, `macos-intel`).
 - **SignPath**: `packaging/signpath/dromon-msi.xml` follows SignPath's documented syntax but is
   only validated when uploaded to SignPath. The exe's ProductVersion string is the release
   version (`0.1.0`); its numeric FileVersion is `0.1.0.0`.

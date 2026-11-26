@@ -22,7 +22,7 @@ cask "dromon" do
   version "$version"
   sha256 "$sha"
 
-  url "https://github.com/$repo/releases/download/#{version}/Dromon-#{version}-macos-arm64.dmg"
+  url "https://github.com/$repo/releases/download/#{version}/Dromon-#{version}-macos-universal.dmg"
   name "Dromon"
   desc "Small, fast SFTP file browser"
   homepage "https://github.com/$repo"
@@ -32,7 +32,6 @@ cask "dromon" do
     strategy :github_latest
   end
 
-  depends_on arch: :arm64
   depends_on macos: ">= :sonoma"
 
   app "Dromon.app"

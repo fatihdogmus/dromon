@@ -58,7 +58,7 @@ case "$build" in
       -e CARGO_HOME=/cargo -e RUSTUP_HOME=/rustup -e CARGO_TARGET_DIR="/src/target/package-linux-$arch" \
       -e CARGO_TERM_COLOR=always -e CARGO_INCREMENTAL=0 \
       -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" -e DROMON_VERSION="$version" \
-      ubuntu:22.04 bash -euo pipefail -c '
+      mirror.gcr.io/library/ubuntu:22.04 bash -euo pipefail -c '
         export DEBIAN_FRONTEND=noninteractive PATH="/cargo/bin:$PATH"
         apt-get update -qq > /dev/null
         apt-get install -y -qq --no-install-recommends ca-certificates curl git build-essential dpkg-dev \

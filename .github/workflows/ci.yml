@@ -4,7 +4,7 @@ name: CI
 # - linux: clippy, the whole test suite with the Docker sshd fixture required (testcontainers),
 #   goldens unchanged, the smoke script (headless, real window under Xvfb, real connect), and the
 #   --script flows rendered as artifacts for review.
-# - macos: the test suite (the Docker fixture tests skip: no Linux containers there), then the
+# - macos (Apple silicon) and macos-intel: the test suite (the Docker fixture tests skip: no Linux containers there), then the
 #   sshd fixture tests (askpass, SFTP, transfer I/O, the app's e2e and transfers) against a
 #   private native sshd instead of Docker: dromon-testkit's native backend
 #   (DROMON_FIXTURE_BACKEND=native) starts Apple's sshd as root through sudo, with test users
@@ -15,6 +15,8 @@ name: CI
 #   askpass, against the same Linux image: Docker runs in
 #   WSL2 (Ubuntu 24.04) and answers on tcp://127.0.0.1:2375; the ports its containers publish on
 #   127.0.0.1 reach Windows through WSL's localhost forwarding. Then the headless smoke.
+# - linux-package, macos-package, windows-package: each installer built with the release's
+#   scripts (unsigned) and checked the way a user would install it.
 
 on:
   push:
@@ -105,8 +107,18 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  # Apple silicon and Intel: the release ships one universal app for both.
   macos:
-    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos
+            runner: macos-15
+          - name: macos-intel
+            runner: macos-15-intel
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
     # The suite twice (plain, then against the native sshd).
     timeout-minutes: 75
     steps:
@@ -117,7 +129,7 @@ jobs:
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          key: macos
+          key: ${{ matrix.name }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Tests
         run: cargo test --workspace --locked
@@ -133,7 +145,7 @@ jobs:
           module="$(brew --prefix google-authenticator-libpam)/lib/security/pam_google_authenticator.so"
           ls -lL "$module"
           codesign -dv "$module" 2>&1 || true
-      # No Docker on Apple-silicon runners (no nested virtualisation): the sshd fixture tests
+      # No Docker on macOS runners (no nested virtualisation): the sshd fixture tests
       # again, against dromon-testkit's native backend (Apple's /usr/sbin/sshd as root through
       # the runner's passwordless sudo, users dromon_*; tests/docker/README.md). The TOTP tests
       # run there too: dromon_kbd's PAM service adds the module above to Apple's sshd policy.
@@ -280,9 +292,56 @@ jobs:
           if ($status -ne 0) { Show-SshdLog }
           exit $status
 
-  # The Windows installer, unsigned, on every push: release.yml builds it only after the
-  # release environment's approval, which once hid a WiX error (WIX0367) until a release
-  # check. The same scripts as release.yml, then a silent install, check and uninstall.
+  # ---- Packages: each platform's installer, unsigned, on every push --------------------------
+  # The same scripts as release.yml, then each package checked the way a user would get it, so
+  # a broken package shows on the push that broke it, not in the next release (a WiX error,
+  # WIX0367, once hid until a release run).
+
+  # The .deb and the Arch package, built on ubuntu-22.04 like the release (glibc 2.35), then
+  # installed in clean debian:12, ubuntu:24.04 and archlinux containers (`dromon --version`).
+  linux-package:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends dpkg-dev pkg-config libxkbcommon-dev libwayland-dev
+      - name: Rust toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: release-linux-x64
+          save-if: false
+      - name: Build, install and run the packages
+        run: cargo package-linux --arch x64 --build host --verify --out "$RUNNER_TEMP/linux"
+
+  # The universal Dromon.app (Apple silicon + Intel) in its DMG, ad-hoc signed, then opened as a
+  # user would: bundle, version, both architectures (the Intel half through Rosetta), signature.
+  macos-package:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Rust toolchain
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: release-macos-universal
+          save-if: false
+      - name: Build Dromon.app and the DMG
+        run: bash packaging/macos/build-app.sh "$RUNNER_TEMP/build"
+      - name: Open and check the DMG
+        run: |
+          version=$(awk '/^\[/ { s = $0 } s == "[workspace.package]" && $1 == "version" { gsub(/"/, "", $3); print $3; exit }' Cargo.toml)
+          bash packaging/macos/verify-dmg.sh "$RUNNER_TEMP/build/Dromon-$version-macos-universal.dmg" "$version" false
+
+  # The Windows installer: silent install, check and uninstall.
   windows-package:
     runs-on: windows-2025
     timeout-minutes: 40

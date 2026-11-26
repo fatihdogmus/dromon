@@ -40,7 +40,7 @@ row() {
 
 rows=$(
   row "Dromon-$v-windows-x64.msi" "Windows 11, x64 (Arm runs it emulated)" "$windows_status"
-  row "Dromon-$v-macos-arm64.dmg" "macOS 14+, Apple silicon (not Intel Macs)" "$macos_status"
+  row "Dromon-$v-macos-universal.dmg" "macOS 14+, Apple silicon and Intel" "$macos_status"
   row "Dromon-$v-linux-x64.deb" "Debian 12+, Ubuntu 22.04+, x64" "$deb_status"
   row "Dromon-$v-linux-x64.pkg.tar.zst" "Arch Linux, x86_64" "$pkg_status"
 )
@@ -116,7 +116,7 @@ if [ "$macos" = true ]; then
 Open the DMG and drag Dromon to Applications. To check it:
 
 \`\`\`sh
-spctl --assess --type open --context context:primary-signature -v Dromon-$v-macos-arm64.dmg
+spctl --assess --type open --context context:primary-signature -v Dromon-$v-macos-universal.dmg
 codesign --verify --deep --strict -v /Applications/Dromon.app
 spctl --assess --type execute -vv /Applications/Dromon.app    # "accepted, source=Notarized Developer ID"
 \`\`\`

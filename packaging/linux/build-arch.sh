@@ -6,14 +6,15 @@
 # The container is x86_64 (Arch publishes no arm64 image); nothing is compiled or run from the
 # package, so the arm64 package is made there too, with CARCH=aarch64 and no dependency check.
 #
-# Environment: ARCH_IMAGE (default archlinux:base-devel).
+# Environment: ARCH_IMAGE (default mirror.gcr.io/library/archlinux:base-devel).
 # shellcheck source-path=SCRIPTDIR source=common.sh
 . "$(dirname "$0")/common.sh"
 
 deb=${1:?usage: build-arch.sh <Dromon .deb> <version> <out dir>}
 version=${2:?usage: build-arch.sh <Dromon .deb> <version> <out dir>}
 out=${3:?usage: build-arch.sh <Dromon .deb> <version> <out dir>}
-image=${ARCH_IMAGE:-archlinux:base-devel}
+# Docker Hub's image through Google's mirror: Docker Hub rate-limits anonymous pulls (429s on CI).
+image=${ARCH_IMAGE:-mirror.gcr.io/library/archlinux:base-devel}
 pkgbuild="$REPO_ROOT/packaging/arch/PKGBUILD"
 command -v docker > /dev/null || die "docker is missing"
 

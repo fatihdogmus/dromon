@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # sign-macos.sh <Dromon.app.zip> <out dir> <version> <Info.plist>: signs Dromon.app with the
 # Developer ID identity (hardened runtime, secure timestamp, no entitlements), notarizes and
-# staples it, then builds Dromon-<version>-macos-arm64.dmg around it (with an /Applications
+# staples it, then builds Dromon-<version>-macos-universal.dmg around it (with an /Applications
 # link) and signs, notarizes and staples the DMG too.
 #
 # No entitlements: the hardened runtime limits JIT and unsigned executable memory, DYLD_*
@@ -22,7 +22,7 @@ out=${2:?}
 version=${3:?}
 plist=${4:?}
 bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")
-dmg="$out/Dromon-$version-macos-arm64.dmg"
+dmg="$out/Dromon-$version-macos-universal.dmg"
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT

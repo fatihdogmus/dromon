@@ -4,7 +4,8 @@
 #
 #   - the DMG holds Dromon.app and an /Applications link
 #   - Info.plist: the bundle id of packaging/macos/Info.plist, the version, macOS 14 minimum
-#   - the executable is arm64 (Apple silicon) and prints "dromon <version>" for --version
+#   - the executable is universal (arm64 and x86_64) and prints "dromon <version>" for --version
+#     (this Mac's half, and the Intel half too on Apple silicon with Rosetta)
 #   - codesign --verify --deep --strict passes (ad-hoc or Developer ID)
 #   - signed: Developer ID of <team id> with the hardened runtime, notarization tickets stapled
 #     to the DMG and the app (xcrun stapler validate), and Gatekeeper accepts both (spctl)
@@ -47,10 +48,17 @@ plist() { /usr/libexec/PlistBuddy -c "Print :$1" "$2"; }
 [ "$(plist CFBundleIdentifier "$app/Contents/Info.plist")" = "$(plist CFBundleIdentifier "$template")" ] || fail "wrong bundle identifier"
 [ "$(plist CFBundleShortVersionString "$app/Contents/Info.plist")" = "${version%%-*}" ] || fail "wrong CFBundleShortVersionString"
 [ "$(plist LSMinimumSystemVersion "$app/Contents/Info.plist")" = "$(plist LSMinimumSystemVersion "$template")" ] || fail "wrong LSMinimumSystemVersion"
-archs=$(lipo -archs "$app/Contents/MacOS/dromon")
-[ "$archs" = arm64 ] || fail "dromon is '$archs', not arm64"
-reported=$("$app/Contents/MacOS/dromon" --version)
-[ "$reported" = "dromon $version" ] || fail "dromon --version printed '$reported', not 'dromon $version'"
+archs=$(lipo -archs "$app/Contents/MacOS/dromon" | tr ' ' '\n' | sort | xargs)
+[ "$archs" = "arm64 x86_64" ] || fail "dromon is '$archs', not universal (arm64 x86_64)"
+ran=()
+for arch in arm64 x86_64; do
+  # This Mac's own half, and the other one when it can run it (Rosetta on Apple silicon).
+  if [ "$arch" != "$(uname -m)" ] && ! arch "-$arch" /usr/bin/true 2> /dev/null; then continue; fi
+  reported=$(arch "-$arch" "$app/Contents/MacOS/dromon" --version)
+  [ "$reported" = "dromon $version" ] || fail "dromon --version ($arch) printed '$reported', not 'dromon $version'"
+  ran+=("$arch")
+done
+reported="dromon $version (ran: ${ran[*]})"
 codesign --verify --deep --strict --verbose=2 "$app"
 summary "$(basename "$dmg") on $(uname -m): Dromon.app ($archs), \`dromon --version\` = $reported, codesign --verify --deep --strict passes"
 

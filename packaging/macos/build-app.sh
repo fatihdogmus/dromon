@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
-# build-app.sh <out dir>: builds Dromon's Apple silicon (arm64) release binary and writes
+# build-app.sh <out dir>: builds Dromon's release binary for Apple silicon (aarch64) and Intel
+# (x86_64), joins them into one universal executable (lipo), and writes
 #
-#   <out>/Dromon.app                          ad-hoc signed (Apple silicon runs nothing unsigned)
-#   <out>/Dromon.app.zip                      the app for the release signing job (ditto keeps
-#                                             permissions and signatures)
-#   <out>/Dromon-<version>-macos-arm64.dmg    unsigned DMG with an /Applications link (what ships
-#                                             when the release has no Apple credentials)
+#   <out>/Dromon.app                              ad-hoc signed (Apple silicon runs nothing
+#                                                 unsigned)
+#   <out>/Dromon.app.zip                          the app for the release signing job (ditto keeps
+#                                                 permissions and signatures)
+#   <out>/Dromon-<version>-macos-universal.dmg    unsigned DMG with an /Applications link (what
+#                                                 ships when the release has no Apple credentials)
 #
-# Intel Macs aren't a release target yet (Rosetta can't run arm64 code on Intel). To add them,
-# build x86_64-apple-darwin as well and `lipo -create` both into one universal binary.
+# One app for every Mac: each runs its own half natively. On an Apple silicon Mac with Rosetta
+# the Intel half's `--version` is checked too.
 #
 # Runs on macOS with Xcode's command-line tools. The version is [workspace.package].version from
 # Cargo.toml; the bundle's identity is packaging/macos/Info.plist. The release workflow signs,
@@ -24,21 +26,26 @@ short=${version%%-*}
 minimum=$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$root/packaging/macos/Info.plist")
 export MACOSX_DEPLOYMENT_TARGET=$minimum
 
-target=aarch64-apple-darwin
-rustup target add "$target"
-cargo build --release --locked -p dromon-app --target "$target" --manifest-path "$root/Cargo.toml"
+targets=(aarch64-apple-darwin x86_64-apple-darwin)
+rustup target add "${targets[@]}"
+for target in "${targets[@]}"; do
+  cargo build --release --locked -p dromon-app --bin dromon --target "$target" --manifest-path "$root/Cargo.toml"
+done
 
 mkdir -p "$out"
 out=$(cd "$out" && pwd)
 app="$out/Dromon.app"
-dmg="$out/Dromon-$version-macos-arm64.dmg"
+dmg="$out/Dromon-$version-macos-universal.dmg"
 rm -rf "$app" "$out/Dromon.app.zip" "$dmg"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/licenses"
-cp "${CARGO_TARGET_DIR:-$root/target}/$target/release/dromon" "$app/Contents/MacOS/dromon"
-archs=$(lipo -archs "$app/Contents/MacOS/dromon")
-[ "$archs" = arm64 ] || { echo "dromon is '$archs', not arm64" >&2; exit 1; }
-minos=$(otool -l "$app/Contents/MacOS/dromon" | awk '/LC_BUILD_VERSION/ { found = 1 } found && $1 == "minos" { print $2; exit }')
-[ "$minos" = "$minimum" ] || { echo "dromon needs macOS $minos, not $minimum" >&2; exit 1; }
+built=${CARGO_TARGET_DIR:-$root/target}
+lipo -create -output "$app/Contents/MacOS/dromon" "$built/aarch64-apple-darwin/release/dromon" "$built/x86_64-apple-darwin/release/dromon"
+archs=$(lipo -archs "$app/Contents/MacOS/dromon" | tr ' ' '\n' | sort | xargs)
+[ "$archs" = "arm64 x86_64" ] || { echo "dromon is '$archs', not 'arm64 x86_64'" >&2; exit 1; }
+for arch in arm64 x86_64; do
+  minos=$(otool -arch "$arch" -l "$app/Contents/MacOS/dromon" | awk '/LC_BUILD_VERSION/ { found = 1 } found && $1 == "minos" { print $2; exit }')
+  [ "$minos" = "$minimum" ] || { echo "dromon ($arch) needs macOS $minos, not $minimum" >&2; exit 1; }
+done
 
 sed "s/@VERSION@/$short/g" "$root/packaging/macos/Info.plist" > "$app/Contents/Info.plist"
 plutil -lint "$app/Contents/Info.plist"
@@ -48,8 +55,15 @@ cp "$root/crates/dromon-app/assets/fonts/Inter-LICENSE.txt" "$root/crates/dromon
 
 codesign --force --sign - "$app"
 codesign --verify --strict --verbose=2 "$app"
-reported=$("$app/Contents/MacOS/dromon" --version)
-[ "$reported" = "dromon $version" ] || { echo "dromon --version printed '$reported', not 'dromon $version'" >&2; exit 1; }
+for arch in arm64 x86_64; do
+  # This Mac's own half, and the other one when it can run it (Rosetta on Apple silicon).
+  if [ "$arch" != "$(uname -m)" ] && ! arch "-$arch" /usr/bin/true 2> /dev/null; then
+    echo "($arch half not run: this Mac can't)"
+    continue
+  fi
+  reported=$(arch "-$arch" "$app/Contents/MacOS/dromon" --version)
+  [ "$reported" = "dromon $version" ] || { echo "dromon --version ($arch) printed '$reported', not 'dromon $version'" >&2; exit 1; }
+done
 
 /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$app" "$out/Dromon.app.zip"
 

@@ -28,7 +28,7 @@ if [ "$latest" != "$TAG" ]; then
 fi
 
 work=$(mktemp -d)
-dmg="Dromon-$version-macos-arm64.dmg"
+dmg="Dromon-$version-macos-universal.dmg"
 gh release download "$TAG" --repo "$REPO" --dir "$work" --pattern "$dmg" --pattern SHA256SUMS
 
 sha=$(sha256 "$work/$dmg" | cut -c1-64)

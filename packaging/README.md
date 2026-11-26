@@ -27,7 +27,7 @@ packaging/
 │  └─ PKGBUILD.aur               template for a future dromon-bin AUR package (sha256 + validpgpkeys)
 ├─ macos/
 │  ├─ Info.plist                 the bundle's Info.plist; the one place the bundle id lives
-│  ├─ build-app.sh               Apple silicon Dromon.app (ad-hoc signed), its zip, the unsigned DMG
+│  ├─ build-app.sh               universal Dromon.app (Apple silicon + Intel, ad-hoc signed), its zip, the unsigned DMG
 │  └─ verify-dmg.sh              opens a DMG and checks the app as a user's Mac would
 ├─ windows/
 │  ├─ build-exe.ps1              dromon.exe for x64/arm64, version resource + icon stamped (rcedit)
