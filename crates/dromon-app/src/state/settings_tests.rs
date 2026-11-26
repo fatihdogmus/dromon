@@ -329,6 +329,15 @@ fn back_and_escape_leave_the_page_for_the_folder_view_as_it_was() {
 }
 
 #[test]
+fn upload_shortcut_does_nothing_on_the_page() {
+    let mut s = browsing();
+    assert!(s.shortcut(Shortcut::Upload, 0.0).iter().any(|e| matches!(e, crate::state::Effect::PickUpload { .. })), "⌘U picks on the folder view");
+    s.act(Action::OpenSettings);
+    assert!(s.shortcut(Shortcut::Upload, 0.0).is_empty(), "no picker on the page");
+    assert!(s.on_settings());
+}
+
+#[test]
 fn a_host_picked_anywhere_leaves_the_page_and_goes_there() {
     let nas = HostId("nas".into());
     // The sidebar (or the active host again: its folder view, as it was).

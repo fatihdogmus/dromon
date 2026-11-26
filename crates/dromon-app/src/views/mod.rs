@@ -95,9 +95,13 @@ fn window_focus(s: &mut App, focused: bool, tx: &mut Tx) {
 }
 
 /// An extra mouse button nothing else took (the root's `on_button`): Back and Forward walk the
-/// folder history (a no-op at either end, still taken); the rest bubble on.
+/// folder history (a no-op at either end, still taken); the rest bubble on. On the Settings
+/// page Back leaves it and Forward does nothing, the hidden folder view's history untouched.
 fn mouse_button(s: &mut App, button: rune::PointerButton, tx: &mut Tx) -> bool {
+    let on_page = s.on_settings();
     let action = match button {
+        rune::PointerButton::Back if on_page => Action::LeaveSettings,
+        rune::PointerButton::Forward if on_page => return true,
         rune::PointerButton::Back => Action::Back,
         rune::PointerButton::Forward => Action::Forward,
         _ => return false,
