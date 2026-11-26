@@ -738,7 +738,8 @@ jobs:
           VERSION: ${{ needs.plan.outputs.version }}
 
   # A release published with the workflow's token starts no other workflow, so the cask update
-  # is called from here.
+  # is called from here. `secrets: inherit` is what lets a called workflow read its own
+  # environment's secrets (homebrew: the tap's deploy key); the repository has no others.
   homebrew:
     needs: [plan, publish]
     if: ${{ !cancelled() && needs.publish.result == 'success' }}
@@ -748,3 +749,4 @@ jobs:
     uses: ./.github/workflows/homebrew.yml
     with:
       tag: ${{ needs.plan.outputs.tag }}
+    secrets: inherit

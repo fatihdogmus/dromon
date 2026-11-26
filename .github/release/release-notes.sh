@@ -52,7 +52,7 @@ cat <<EOF
 |---|---|---|---|
 $rows
 
-Every file has a [build provenance attestation]($server/$repo/attestations) (Sigstore): it was built by this repository's release workflow from tag \`v$v\`. \`SHA256SUMS\` lists every file's SHA-256$([ "$gpg" != true ] || echo "; \`SHA256SUMS.asc\` is its GPG signature").
+Every file has a [build provenance attestation]($server/$repo/attestations) (Sigstore): it was built by this repository's release workflow, run from \`main\`, at tag \`$v\`. \`SHA256SUMS\` lists every file's SHA-256$([ "$gpg" != true ] || echo "; \`SHA256SUMS.asc\` is its GPG signature").
 
 ## Check a download
 
