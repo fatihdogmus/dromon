@@ -81,7 +81,11 @@ impl Harness {
             helper_exe: PathBuf::from(HELPER),
             verbose: false,
             config_file: Some(config.clone()),
-            discover: Some(dromon_ssh::ConfigSources { user: Some(config.clone()), system: None, user_ssh_dir: ssh_dir.clone() }),
+            discover: Some(dromon_ssh::ConfigSources {
+                user: Some(config.clone()),
+                system: None,
+                user_ssh_dir: ssh_dir.clone(),
+            }),
             hosts_file: Some(hosts_conf.clone()),
             hosts: Vec::new(),
             without_env: vec!["SSH_AUTH_SOCK".into()],
@@ -91,7 +95,18 @@ impl Harness {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
         rt.update(move |s, _| *s = App::new(HostDirectory::default(), now, Box::new(backend)));
         rt.frame(0.0);
-        let mut h = Harness { fx, _dir: dir, ssh_dir, config, key, hosts_conf, rt, events, seen: Vec::new(), started: Instant::now() };
+        let mut h = Harness {
+            fx,
+            _dir: dir,
+            ssh_dir,
+            config,
+            key,
+            hosts_conf,
+            rt,
+            events,
+            seen: Vec::new(),
+            started: Instant::now(),
+        };
         // The files task reads hosts.conf (missing: nothing saved) first thing.
         h.pump_until("the saved hosts read", |h| h.seen.iter().any(|e| e.starts_with("HostBook(Saved(")));
         Some(h)
@@ -131,7 +146,10 @@ impl Harness {
             if left.is_zero() {
                 let last: Vec<&String> = self.seen.iter().rev().take(25).collect();
                 let log: Vec<String> = self.rt.state.conns.values().map(|c| c.log.to_text()).collect();
-                panic!("timed out after {WAIT:?} waiting for {what}\nlast events (newest first):\n{last:#?}\nlogs:\n{}", log.join("\n"));
+                panic!(
+                    "timed out after {WAIT:?} waiting for {what}\nlast events (newest first):\n{last:#?}\nlogs:\n{}",
+                    log.join("\n")
+                );
             }
             match self.events.recv_timeout(left.min(Duration::from_millis(100))) {
                 Ok(ev) => {
@@ -162,7 +180,12 @@ impl Harness {
     }
 
     fn text_of(&self, k: &str) -> String {
-        self.rt.elements().into_iter().find(|e| e.key.as_deref() == Some(k) && !e.exiting).and_then(|e| e.text).unwrap_or_default()
+        self.rt
+            .elements()
+            .into_iter()
+            .find(|e| e.key.as_deref() == Some(k) && !e.exiting)
+            .and_then(|e| e.text)
+            .unwrap_or_default()
     }
 
     /// Picks `item` from `host`'s menu: the platform's own (macOS, Windows) or the drawn one.
@@ -214,7 +237,12 @@ impl Harness {
     fn wait_for_listing(&mut self, path: &str) -> Vec<String> {
         let path = RemotePath::new(path);
         self.pump_until(&format!("the listing of {path}"), |h| {
-            h.rt.state.conn().is_some_and(|c| c.status == ConnStatus::Ready && c.cwd == path && matches!(c.listing, Listing::Ready(_)) && !c.loading_more())
+            h.rt.state.conn().is_some_and(|c| {
+                c.status == ConnStatus::Ready
+                    && c.cwd == path
+                    && matches!(c.listing, Listing::Ready(_))
+                    && !c.loading_more()
+            })
         });
         self.rt.state.conn().unwrap().row_names().into_iter().map(str::to_owned).collect()
     }
@@ -276,7 +304,8 @@ fn quick_connect_save_and_add_to_ssh_config() {
     h.click("quick-save");
     assert!(!h.shown("quick"));
     h.pump_until("the service's saved list with it", |h| {
-        h.seen.iter().any(|e| e.starts_with("HostBook(Saved(") && e.contains(SAVED)) && h.shown(&format!("host-{SAVED}"))
+        h.seen.iter().any(|e| e.starts_with("HostBook(Saved(") && e.contains(SAVED))
+            && h.shown(&format!("host-{SAVED}"))
     });
     assert_eq!(h.source(SAVED), Some(HostSource::Saved));
     let conf = std::fs::read_to_string(&h.hosts_conf).unwrap();
@@ -285,7 +314,11 @@ fn quick_connect_save_and_add_to_ssh_config() {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        assert_eq!(std::fs::metadata(&h.hosts_conf).unwrap().permissions().mode() & 0o777, 0o600, "hosts.conf is the user's alone");
+        assert_eq!(
+            std::fs::metadata(&h.hosts_conf).unwrap().permissions().mode() & 0o777,
+            0o600,
+            "hosts.conf is the user's alone"
+        );
     }
     h.step(&format!("saved {SAVED}: in Saved and in hosts.conf"));
 
@@ -294,7 +327,14 @@ fn quick_connect_save_and_add_to_ssh_config() {
     h.host_menu(SAVED, "host-add-to-config");
     h.pump_until("the sheet's block", |h| h.shown("add-config-block-text"));
     let block = h.text_of("add-config-block-text");
-    assert!(block.starts_with(&format!("Host {SAVED}\n    HostName 127.0.0.1\n    User {}\n    Port {}\n", h.fx.user(Role::Key), h.fx.port())), "{block}");
+    assert!(
+        block.starts_with(&format!(
+            "Host {SAVED}\n    HostName 127.0.0.1\n    User {}\n    Port {}\n",
+            h.fx.user(Role::Key),
+            h.fx.port()
+        )),
+        "{block}"
+    );
     assert!(h.text_of("add-config-backup").contains("config.dromon-backup-"));
     h.click("add-config-confirm");
     h.pump_until("the host under SSH Config, resolved, and the sheet gone", |h| {
@@ -302,15 +342,21 @@ fn quick_connect_save_and_add_to_ssh_config() {
             && h.rt.state.hosts.get(&HostId(SAVED.into())).is_some_and(|s| s.hostname.as_deref() == Some("127.0.0.1"))
             && !h.shown("add-config")
     });
-    let backups: Vec<PathBuf> =
-        std::fs::read_dir(&h.ssh_dir).unwrap().map(|e| e.unwrap().path()).filter(|p| p.to_string_lossy().contains("config.dromon-backup-")).collect();
+    let backups: Vec<PathBuf> = std::fs::read_dir(&h.ssh_dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.to_string_lossy().contains("config.dromon-backup-"))
+        .collect();
     assert_eq!(backups.len(), 1, "{backups:?}");
     assert_eq!(std::fs::read_to_string(&backups[0]).unwrap(), before, "the backup is the file as it was");
     let after = std::fs::read_to_string(&h.config).unwrap();
     assert!(after.starts_with(&before), "the file is kept and appended to");
     assert!(after[before.len()..].starts_with(&format!("\nHost {SAVED}\n")), "{after}");
     assert!(!std::fs::read_to_string(&h.hosts_conf).unwrap().contains(SAVED), "out of hosts.conf");
-    h.step(&format!("added {SAVED} to the ssh config: backup {}, block appended, under SSH Config", backups[0].display()));
+    h.step(&format!(
+        "added {SAVED} to the ssh config: backup {}, block appended, under SSH Config",
+        backups[0].display()
+    ));
 
     // 4. It connects as an SSH Config host (the host key is known from step 1).
     h.click(&format!("host-{SAVED}"));

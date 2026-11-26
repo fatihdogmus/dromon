@@ -122,24 +122,15 @@ mod tests {
 
     #[test]
     fn skips_taken_numbers() {
-        assert_eq!(
-            run("a.txt", &["a.txt", "a (1).txt", "a (2).txt"]),
-            "a (3).txt"
-        );
+        assert_eq!(run("a.txt", &["a.txt", "a (1).txt", "a (2).txt"]), "a (3).txt");
         // A gap is filled: first free, not last + 1.
         assert_eq!(run("a.txt", &["a.txt", "a (2).txt"]), "a (1).txt");
-        assert_eq!(
-            run("s.tar.gz", &["s.tar.gz", "s (1).tar.gz"]),
-            "s (2).tar.gz"
-        );
+        assert_eq!(run("s.tar.gz", &["s.tar.gz", "s (1).tar.gz"]), "s (2).tar.gz");
     }
 
     #[test]
     fn numbered_name_is_not_reparsed() {
-        assert_eq!(
-            run("a (1).txt", &["a (1).txt", "a (1) (1).txt"]),
-            "a (1) (2).txt"
-        );
+        assert_eq!(run("a (1).txt", &["a (1).txt", "a (1) (1).txt"]), "a (1) (2).txt");
     }
 
     #[test]

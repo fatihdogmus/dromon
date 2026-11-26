@@ -58,8 +58,8 @@ mod totp;
 pub mod toxiproxy;
 
 pub use matrix::Variant;
-pub use toxiproxy::Toxiproxy;
 pub use totp::{STEP as TOTP_STEP, totp_at, totp_now, totp_secret, wrong_totp};
+pub use toxiproxy::Toxiproxy;
 
 /// The fixture's users, by how they log in. [`Fixture::user`] names the account.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -258,7 +258,9 @@ pub(crate) async fn try_fixture(variant: Variant, test: &str) -> Result<&'static
         State::Unavailable(why) if native_backend() => {
             panic!("{test}: {REQUIRE_DOCKER_ENV}=1 but the native sshd fixture can't run: {why}")
         }
-        State::Unavailable(why) => panic!("{test}: {REQUIRE_DOCKER_ENV}=1 but the {} sshd fixture can't run: {why}", variant.name()),
+        State::Unavailable(why) => {
+            panic!("{test}: {REQUIRE_DOCKER_ENV}=1 but the {} sshd fixture can't run: {why}", variant.name())
+        }
         State::Failed(why) => panic!("{test}: the {} sshd fixture didn't start: {why}", variant.name()),
     }
 }
@@ -483,7 +485,8 @@ impl Fixture {
     /// SHA-1 of a file on the server as lowercase hex (`sha1sum`, on macOS `shasum -a 1`, as
     /// root through [`Fixture::exec`]): compare with [`file_sha1`].
     pub fn sha1(&self, path: &str) -> Result<String, String> {
-        let out = if self.bsd_tools() { self.exec(&["shasum", "-a", "1", path])? } else { self.exec(&["sha1sum", path])? };
+        let out =
+            if self.bsd_tools() { self.exec(&["shasum", "-a", "1", path])? } else { self.exec(&["sha1sum", path])? };
         out.split_whitespace().next().map(str::to_owned).ok_or_else(|| format!("no hash for {path}: {out:?}"))
     }
 
@@ -576,7 +579,12 @@ fn restrict_to_current_user(path: &Path) -> Result<(), String> {
         .output()
         .map_err(|e| format!("spawn icacls: {e}"))?;
     if !out.status.success() {
-        return Err(format!("icacls {}: {}: {}", path.display(), out.status, String::from_utf8_lossy(&out.stdout).trim()));
+        return Err(format!(
+            "icacls {}: {}: {}",
+            path.display(),
+            out.status,
+            String::from_utf8_lossy(&out.stdout).trim()
+        ));
     }
     Ok(())
 }

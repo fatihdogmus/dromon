@@ -194,11 +194,7 @@ where
                 ("FAIL", message.clone())
             }
         };
-        note(format_args!(
-            "matrix: {name:<34} {:<9} {word:<5} {:>6.1} s  {text}",
-            variant.name(),
-            took.as_secs_f64()
-        ));
+        note(format_args!("matrix: {name:<34} {:<9} {word:<5} {:>6.1} s  {text}", variant.name(), took.as_secs_f64()));
     }
     if !failed.is_empty() {
         panic!("{name} failed on {} (see the matrix lines above)", failed.join(", "));

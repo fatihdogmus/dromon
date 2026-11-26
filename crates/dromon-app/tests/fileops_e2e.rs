@@ -170,9 +170,26 @@ fn write_ssh_config(fx: &Fixture, dir: &Path) -> PathBuf {
     let key = dir.join("id_ed25519");
     copy_private_key(&fx.key(), &key).unwrap();
     let mut config = String::new();
-    writeln!(config, "Host fx-key\n    HostName {}\n    Port {}\n    User {}", fx.host(), fx.port(), fx.user(Role::Key)).unwrap();
-    writeln!(config, "    IdentityFile {}\n    IdentitiesOnly yes\n    PreferredAuthentications publickey", key.display()).unwrap();
-    writeln!(config, "    UserKnownHostsFile {}\n    GlobalKnownHostsFile {NULL_DEVICE}", dir.join("known_hosts").display()).unwrap();
+    writeln!(
+        config,
+        "Host fx-key\n    HostName {}\n    Port {}\n    User {}",
+        fx.host(),
+        fx.port(),
+        fx.user(Role::Key)
+    )
+    .unwrap();
+    writeln!(
+        config,
+        "    IdentityFile {}\n    IdentitiesOnly yes\n    PreferredAuthentications publickey",
+        key.display()
+    )
+    .unwrap();
+    writeln!(
+        config,
+        "    UserKnownHostsFile {}\n    GlobalKnownHostsFile {NULL_DEVICE}",
+        dir.join("known_hosts").display()
+    )
+    .unwrap();
     writeln!(config, "    StrictHostKeyChecking accept-new\n    UpdateHostKeys no").unwrap();
     let path = dir.join("ssh_config");
     std::fs::write(&path, config).unwrap();
@@ -197,7 +214,11 @@ fn a_new_folder_and_a_rename_and_their_refusals() {
     assert_eq!(h.listing(&scratch), ["renamed"]);
 
     // Onto a name that's taken (a file, and a folder): refused, nothing replaced.
-    h.remote(&format!("printf hi > '{0}/taken.txt' && chown {1} '{0}/taken.txt'", scratch.as_str(), h.fx.owner(Role::Key)));
+    h.remote(&format!(
+        "printf hi > '{0}/taken.txt' && chown {1} '{0}/taken.txt'",
+        scratch.as_str(),
+        h.fx.owner(Role::Key)
+    ));
     h.op(4, FileOp::Rename { from: h.at("renamed"), to: h.at("taken.txt") });
     assert_eq!(h.end(4).0, Err(Error::AlreadyExists(h.at("taken.txt"))));
     h.op(5, FileOp::Rename { from: h.at("taken.txt"), to: h.at("renamed") });

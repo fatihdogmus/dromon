@@ -51,8 +51,12 @@ const USER_PREFIX: &str = "dromon_";
 const SEED: &str = include_str!("../../../tests/docker/seed.sh");
 const SSHD_CANDIDATES: [&str; 3] = ["/usr/sbin/sshd", "/usr/local/sbin/sshd", "/usr/bin/sshd"];
 /// macOS; Debian/Ubuntu; Fedora/RHEL; Arch.
-const SFTP_SERVER_CANDIDATES: [&str; 4] =
-    ["/usr/libexec/sftp-server", "/usr/lib/openssh/sftp-server", "/usr/libexec/openssh/sftp-server", "/usr/lib/ssh/sftp-server"];
+const SFTP_SERVER_CANDIDATES: [&str; 4] = [
+    "/usr/libexec/sftp-server",
+    "/usr/lib/openssh/sftp-server",
+    "/usr/libexec/openssh/sftp-server",
+    "/usr/lib/ssh/sftp-server",
+];
 /// How long sshd may take to say `Server listening on`.
 const READY_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -112,7 +116,11 @@ impl Sshd {
             .output()
             .map_err(|e| format!("spawn {command:?}: {e}"))?;
         if !out.status.success() {
-            return Err(format!("{command:?} as root: {}: {}", out.status, String::from_utf8_lossy(&out.stderr).trim()));
+            return Err(format!(
+                "{command:?} as root: {}: {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr).trim()
+            ));
         }
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
     }
@@ -428,7 +436,11 @@ async fn launch(os: Os, as_root: bool, sshd_bin: &str, sftp_server: &str) -> Res
             .lines()
             .find_map(|l| l.strip_prefix(name.as_str()).and_then(|rest| rest.strip_prefix(' ')))
             .ok_or_else(|| format!("create the fixture users: no group for {name} in {made:?}"))?;
-        accounts.push(Account { name: name.clone(), home: format!("{}/{name}", os.home_root()), group: group.trim().to_owned() });
+        accounts.push(Account {
+            name: name.clone(),
+            home: format!("{}/{name}", os.home_root()),
+            group: group.trim().to_owned(),
+        });
     }
     let key_account = &accounts[Role::Key.index()];
     root_sh(as_root, "seed.sh", &script(SEED_AS), &[&key_account.name, &key_account.home], SEED.as_bytes())?;
@@ -523,7 +535,10 @@ async fn wait_listening(sshd: &Sshd) -> Result<(), String> {
             return Err(format!("sshd didn't start:\n{}", text.trim()));
         }
         if Instant::now() > deadline {
-            return Err(format!("no `Server listening on` from sshd within {READY_TIMEOUT:?}; its log:\n{}", text.trim()));
+            return Err(format!(
+                "no `Server listening on` from sshd within {READY_TIMEOUT:?}; its log:\n{}",
+                text.trim()
+            ));
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -598,7 +613,9 @@ mod tests {
         assert!(config.contains("    AuthenticationMethods keyboard-interactive\n\nMatch User dromon_keypw\n"));
         assert!(!config.contains("PAMServiceName"));
         assert!(config.contains("Match User dromon_pw\n    PasswordAuthentication yes\n    PubkeyAuthentication no\n    AuthenticationMethods password\n"));
-        assert!(config.contains("Match User dromon_keypw\n    PasswordAuthentication yes\n    AuthenticationMethods publickey,password\n"));
+        assert!(config.contains(
+            "Match User dromon_keypw\n    PasswordAuthentication yes\n    AuthenticationMethods publickey,password\n"
+        ));
         assert!(config.contains("AuthorizedKeysFile /var/tmp/d/authorized_keys/%u\n"));
         assert!(config.contains("Subsystem sftp /usr/libexec/sftp-server\n"));
         assert!(config.contains("ListenAddress 127.0.0.1\nPort 2222\n"));
@@ -607,7 +624,8 @@ mod tests {
     #[test]
     fn totp_selects_the_kbd_users_pam_service_in_its_match_block_only() {
         let names: Vec<String> = Role::ALL.iter().map(|r| format!("dromon_{}", r.base_name())).collect();
-        let t = totp::Totp { service: "dromon-testkit-sshd.abc".into(), module: "/m/pam_google_authenticator.so".into() };
+        let t =
+            totp::Totp { service: "dromon-testkit-sshd.abc".into(), module: "/m/pam_google_authenticator.so".into() };
         let config = sshd_config(2222, "/var/tmp/dromon-testkit-sshd.abc", "/s", &names, Some(&t));
         let kbd = config.split("Match User dromon_kbd\n").nth(1).unwrap().split("Match User").next().unwrap();
         assert!(kbd.contains("    PAMServiceName dromon-testkit-sshd.abc\n    LogLevel DEBUG1\n"), "{kbd}");

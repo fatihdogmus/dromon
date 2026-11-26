@@ -70,7 +70,8 @@ fn env_u64(name: &str, default: u64) -> u64 {
 
 /// Where local copies go: on disk, so writes and the final `fsync` cost what they cost.
 fn local_dir(name: &str) -> tempfile::TempDir {
-    let base = std::env::var_os("DROMON_PERF_DIR").map_or_else(|| PathBuf::from(env!("CARGO_TARGET_TMPDIR")), PathBuf::from);
+    let base =
+        std::env::var_os("DROMON_PERF_DIR").map_or_else(|| PathBuf::from(env!("CARGO_TARGET_TMPDIR")), PathBuf::from);
     std::fs::create_dir_all(&base).unwrap();
     tempfile::Builder::new().prefix(&format!("perf-{name}-")).tempdir_in(base).unwrap()
 }
@@ -129,7 +130,8 @@ fn scp_args(fixture: &Fixture) -> Vec<String> {
 
 async fn scp(fixture: &Fixture, extra: &[&str], from: &str, to: &str) -> Duration {
     let start = Instant::now();
-    let status = Command::new(openssh("scp")).args(scp_args(fixture)).args(extra).args(["-q", from, to]).status().await.unwrap();
+    let status =
+        Command::new(openssh("scp")).args(scp_args(fixture)).args(extra).args(["-q", from, to]).status().await.unwrap();
     assert!(status.success(), "scp {from} {to}");
     start.elapsed()
 }
@@ -163,8 +165,12 @@ async fn run_scan(sftp: &Sftp, scan: Scan) {
             loop {
                 let Some(plan) = queue.lock().await.pop() else { return };
                 match &plan {
-                    FilePlan::Download { .. } => drop(download(&sftp, &plan, CopyOptions::default(), |_| {}).await.unwrap()),
-                    FilePlan::Upload { .. } => drop(upload(&sftp, &plan, CopyOptions::default(), |_| {}).await.unwrap()),
+                    FilePlan::Download { .. } => {
+                        drop(download(&sftp, &plan, CopyOptions::default(), |_| {}).await.unwrap())
+                    }
+                    FilePlan::Upload { .. } => {
+                        drop(upload(&sftp, &plan, CopyOptions::default(), |_| {}).await.unwrap())
+                    }
                     other => panic!("not a download or upload: {other:?}"),
                 }
             }
@@ -270,7 +276,12 @@ async fn perf_large_file_vs_scp() {
     on_server(c.fixture, &format!("head -c {size} /dev/urandom >'{src}'"), &src);
     let want = c.fixture.sha1(src.as_str()).unwrap();
     let local = local_dir("large");
-    println!("large file: {} MiB, chunk {} B, {} requests in flight", size / MIB, c.sftp.chunk_size(), CopyOptions::default().in_flight);
+    println!(
+        "large file: {} MiB, chunk {} B, {} requests in flight",
+        size / MIB,
+        c.sftp.chunk_size(),
+        CopyOptions::default().in_flight
+    );
     let mut pairs = Vec::new();
     for run in 0..runs {
         let check = |ours: &Path, up: &RemotePath| {

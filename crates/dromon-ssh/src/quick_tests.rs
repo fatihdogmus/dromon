@@ -97,17 +97,36 @@ fn every_field_is_checked_and_errors_say_which() {
     let fields = errors(quick_host(&bad, HostSource::Saved));
     assert_eq!(
         fields,
-        [QuickField::Host, QuickField::User, QuickField::Port, QuickField::Alias, QuickField::IdentityFile, QuickField::ProxyJump]
+        [
+            QuickField::Host,
+            QuickField::User,
+            QuickField::Port,
+            QuickField::Alias,
+            QuickField::IdentityFile,
+            QuickField::ProxyJump
+        ]
     );
     assert_eq!(errors(quick_host(&input(""), HostSource::Recent)), [QuickField::Host]);
     assert_eq!(errors(quick_host(&input("pro d"), HostSource::Recent)), [QuickField::Host]);
     assert_eq!(errors(quick_host(&input("a\u{7}b"), HostSource::Recent)), [QuickField::Host]);
     assert_eq!(errors(quick_host(&input("a\"b"), HostSource::Recent)), [QuickField::Host]);
     assert_eq!(errors(quick_host(&input("${HOME}"), HostSource::Recent)), [QuickField::Host]);
-    assert_eq!(errors(quick_host(&QuickInput { user: "a%b".into(), ..input("h") }, HostSource::Recent)), [QuickField::User]);
-    assert_eq!(errors(quick_host(&QuickInput { identity_file: "/k\nx".into(), ..input("h") }, HostSource::Recent)), [QuickField::IdentityFile]);
-    assert_eq!(errors(quick_host(&QuickInput { alias: "a*".into(), ..input("h") }, HostSource::Saved)), [QuickField::Alias]);
-    assert_eq!(errors(quick_host(&QuickInput { alias: "a@b".into(), ..input("h") }, HostSource::Saved)), [QuickField::Alias]);
+    assert_eq!(
+        errors(quick_host(&QuickInput { user: "a%b".into(), ..input("h") }, HostSource::Recent)),
+        [QuickField::User]
+    );
+    assert_eq!(
+        errors(quick_host(&QuickInput { identity_file: "/k\nx".into(), ..input("h") }, HostSource::Recent)),
+        [QuickField::IdentityFile]
+    );
+    assert_eq!(
+        errors(quick_host(&QuickInput { alias: "a*".into(), ..input("h") }, HostSource::Saved)),
+        [QuickField::Alias]
+    );
+    assert_eq!(
+        errors(quick_host(&QuickInput { alias: "a@b".into(), ..input("h") }, HostSource::Saved)),
+        [QuickField::Alias]
+    );
     assert_eq!(errors(quick_host(&input("h:0"), HostSource::Recent)), [QuickField::Port]);
     // A typed address that disagrees with the fields.
     let clash = QuickInput { user: "root".into(), port: "22".into(), ..input("deploy@h:2222") };
@@ -143,7 +162,11 @@ fn generated_names_are_safe_tokens() {
 
 #[test]
 fn quick_hosts_build_the_explicit_command() {
-    let i = QuickInput { identity_file: "/keys/id ed".into(), proxy_jump: "bastion".into(), ..input("deploy@10.0.0.4:2222") };
+    let i = QuickInput {
+        identity_file: "/keys/id ed".into(),
+        proxy_jump: "bastion".into(),
+        ..input("deploy@10.0.0.4:2222")
+    };
     let h = quick_host(&i, HostSource::Recent).unwrap();
     let env = crate::AskpassEnv { exe: "/opt/dromon".into(), endpoint: "e".into(), token: "t".into() };
     let cmd = SshCommand::sftp(&h, &env, false).unwrap();

@@ -423,7 +423,15 @@ fn refresh_gate(m: &mut Metrics) {
     let mut all = entries(100_000);
     stream(&mut rt, &all);
     settle(&mut rt);
-    all.push(Entry { name: "new-upload.bin".into(), kind: EntryKind::File, size: 1, mtime: Some(1_790_000_000), mode: None, owner: None, group: None });
+    all.push(Entry {
+        name: "new-upload.bin".into(),
+        kind: EntryKind::File,
+        size: 1,
+        mtime: Some(1_790_000_000),
+        mode: None,
+        owner: None,
+        group: None,
+    });
     // Its parts on their own: the listing diff and the sort.
     let t = Instant::now();
     let changes = dromon_sftp::diff(rt.state.conn().map_or(&[], |c| c.entries()), &all);

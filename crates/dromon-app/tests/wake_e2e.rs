@@ -81,7 +81,16 @@ impl Harness {
             without_env: vec!["SSH_AUTH_SOCK".into()],
         };
         service::start(commands, TestSink(tx), cfg).expect("start the service thread");
-        let mut h = Harness { fx, _dir: dir, backend, events, start: RemotePath::root(), log: Vec::new(), frozen: Vec::new(), _one: one };
+        let mut h = Harness {
+            fx,
+            _dir: dir,
+            backend,
+            events,
+            start: RemotePath::root(),
+            log: Vec::new(),
+            frozen: Vec::new(),
+            _one: one,
+        };
         h.backend.send(Command::Connect { host: host() });
         let mut start = None;
         h.wait_for("the connection to open", |ev| {
@@ -104,7 +113,10 @@ impl Harness {
     /// Waits for a whole listing of the start folder.
     fn listed(&mut self) {
         let start = self.start.clone();
-        self.wait_for("the listing", |ev| matches!(ev, ServiceEvent::ListingPage { path, done: true, .. } if *path == start));
+        self.wait_for(
+            "the listing",
+            |ev| matches!(ev, ServiceEvent::ListingPage { path, done: true, .. } if *path == start),
+        );
     }
 
     /// Applies events until `done` says so.
@@ -112,7 +124,10 @@ impl Harness {
         let deadline = Instant::now() + WAIT;
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
-            let ev = self.events.recv_timeout(left).unwrap_or_else(|_| panic!("timed out waiting for {what}\nconnection log:\n{}", self.log.join("\n")));
+            let ev = self
+                .events
+                .recv_timeout(left)
+                .unwrap_or_else(|_| panic!("timed out waiting for {what}\nconnection log:\n{}", self.log.join("\n")));
             match &ev {
                 ServiceEvent::Log { line, .. } => self.log.push(line.clone()),
                 ServiceEvent::Prompt(p) => panic!("unexpected prompt: {p:?}\nconnection log:\n{}", self.log.join("\n")),
@@ -162,9 +177,26 @@ fn write_ssh_config(fx: &Fixture, dir: &Path) -> PathBuf {
     let key = dir.join("id_ed25519");
     copy_private_key(&fx.key(), &key).unwrap();
     let mut config = String::new();
-    writeln!(config, "Host fx-key\n    HostName {}\n    Port {}\n    User {}", fx.host(), fx.port(), fx.user(Role::Key)).unwrap();
-    writeln!(config, "    IdentityFile {}\n    IdentitiesOnly yes\n    PreferredAuthentications publickey", key.display()).unwrap();
-    writeln!(config, "    UserKnownHostsFile {}\n    GlobalKnownHostsFile {NULL_DEVICE}", dir.join("known_hosts").display()).unwrap();
+    writeln!(
+        config,
+        "Host fx-key\n    HostName {}\n    Port {}\n    User {}",
+        fx.host(),
+        fx.port(),
+        fx.user(Role::Key)
+    )
+    .unwrap();
+    writeln!(
+        config,
+        "    IdentityFile {}\n    IdentitiesOnly yes\n    PreferredAuthentications publickey",
+        key.display()
+    )
+    .unwrap();
+    writeln!(
+        config,
+        "    UserKnownHostsFile {}\n    GlobalKnownHostsFile {NULL_DEVICE}",
+        dir.join("known_hosts").display()
+    )
+    .unwrap();
     writeln!(config, "    StrictHostKeyChecking accept-new\n    UpdateHostKeys no").unwrap();
     let path = dir.join("ssh_config");
     std::fs::write(&path, config).unwrap();
@@ -208,9 +240,14 @@ fn a_focus_probe_finds_a_silent_server_and_reconnects_long_before_server_alive()
     // takes over (ServerAlive: 15 s × 3).
     let focused = Instant::now();
     h.backend.send(Command::Window { visible: true, focused: true });
-    h.wait_for("the probe to give up", |ev| matches!(ev, ServiceEvent::Log { line, .. } if line.contains("didn't answer a check")));
+    h.wait_for(
+        "the probe to give up",
+        |ev| matches!(ev, ServiceEvent::Log { line, .. } if line.contains("didn't answer a check")),
+    );
     let gave_up = focused.elapsed();
-    h.wait_for("Reconnecting", |ev| matches!(ev, ServiceEvent::Status { status: ConnStatus::Reconnecting { attempt: 1 }, .. }));
+    h.wait_for("Reconnecting", |ev| {
+        matches!(ev, ServiceEvent::Status { status: ConnStatus::Reconnecting { attempt: 1 }, .. })
+    });
     h.ready();
     h.listed();
     let back = focused.elapsed();

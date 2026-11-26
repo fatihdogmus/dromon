@@ -13,9 +13,13 @@ use windows_sys::Win32::Foundation::{HANDLE, HLOCAL, LocalFree};
 use windows_sys::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
 };
-use windows_sys::Win32::Security::{GetTokenInformation, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser};
+use windows_sys::Win32::Security::{
+    GetTokenInformation, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
+};
 use windows_sys::Win32::System::Pipes::GetNamedPipeClientProcessId;
-use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION};
+use windows_sys::Win32::System::Threading::{
+    GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
+};
 
 /// Memory from `LocalAlloc` (as the SID and security-descriptor conversions return), freed on drop.
 struct LocalMem(HLOCAL);
@@ -118,7 +122,12 @@ pub(crate) fn create_pipe_for_user(options: &ServerOptions, name: &str, sid: &st
     // SAFETY: `sddl` is a NUL-terminated UTF-16 string alive for the call; `descriptor` is a valid,
     // writable pointer slot; the size out-parameter is optional and passed as null.
     if unsafe {
-        ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.as_ptr(), SDDL_REVISION_1, &mut descriptor, ptr::null_mut())
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl.as_ptr(),
+            SDDL_REVISION_1,
+            &mut descriptor,
+            ptr::null_mut(),
+        )
     } == 0
     {
         return Err(io::Error::last_os_error());

@@ -103,10 +103,7 @@ pub(crate) fn map_err(err: SftpError, op: Op, path: &RemotePath) -> Error {
 /// russh-sftp reports a stopped transport as `UnexpectedBehavior` with one of these messages
 /// (`rawsession.rs`: "session closed", "sender dropped"; `error.rs`: channel send/recv errors).
 fn is_closed(msg: &str) -> bool {
-    msg == "session closed"
-        || msg == "sender dropped"
-        || msg.starts_with("SendError")
-        || msg.starts_with("RecvError")
+    msg == "session closed" || msg == "sender dropped" || msg.starts_with("SendError") || msg.starts_with("RecvError")
 }
 
 /// True when `err` is the generic `Failure` status, which OpenSSH also uses for `EEXIST`.
@@ -126,33 +123,19 @@ mod tests {
     use super::*;
 
     fn status(code: StatusCode, msg: &str) -> SftpError {
-        SftpError::Status(Status {
-            id: 7,
-            status_code: code,
-            error_message: msg.into(),
-            language_tag: "en".into(),
-        })
+        SftpError::Status(Status { id: 7, status_code: code, error_message: msg.into(), language_tag: "en".into() })
     }
 
     #[test]
     fn status_codes_map_to_variants_with_the_path() {
         let p = RemotePath::new("/srv/a");
-        assert_eq!(
-            map_err(status(StatusCode::NoSuchFile, "No such file"), Op::Stat, &p),
-            Error::NotFound(p.clone())
-        );
+        assert_eq!(map_err(status(StatusCode::NoSuchFile, "No such file"), Op::Stat, &p), Error::NotFound(p.clone()));
         assert_eq!(
             map_err(status(StatusCode::PermissionDenied, "Permission denied"), Op::List, &p),
             Error::PermissionDenied(p.clone())
         );
-        assert_eq!(
-            map_err(status(StatusCode::OpUnsupported, ""), Op::CopyData, &p),
-            Error::Unsupported("copy-data")
-        );
-        assert_eq!(
-            map_err(status(StatusCode::ConnectionLost, ""), Op::Read, &p),
-            Error::ConnectionLost
-        );
+        assert_eq!(map_err(status(StatusCode::OpUnsupported, ""), Op::CopyData, &p), Error::Unsupported("copy-data"));
+        assert_eq!(map_err(status(StatusCode::ConnectionLost, ""), Op::Read, &p), Error::ConnectionLost);
     }
 
     #[test]
@@ -180,10 +163,7 @@ mod tests {
         ] {
             assert_eq!(map_err(err, Op::Stat, &p), Error::ConnectionLost);
         }
-        assert!(matches!(
-            map_err(SftpError::UnexpectedBehavior("bad data".into()), Op::Stat, &p),
-            Error::Io(_)
-        ));
+        assert!(matches!(map_err(SftpError::UnexpectedBehavior("bad data".into()), Op::Stat, &p), Error::Io(_)));
     }
 
     #[test]

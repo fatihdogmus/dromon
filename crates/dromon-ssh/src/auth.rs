@@ -111,7 +111,9 @@ impl AuthAttempt {
                 self.challenge_since_password = true;
                 AuthDecision::AskUser { error: None }
             }
-            PromptKind::HostKey { .. } | PromptKind::Confirm | PromptKind::Notice => AuthDecision::AskUser { error: None },
+            PromptKind::HostKey { .. } | PromptKind::Confirm | PromptKind::Notice => {
+                AuthDecision::AskUser { error: None }
+            }
         }
     }
 
@@ -120,7 +122,13 @@ impl AuthAttempt {
     /// repeated prompt and clears them); host-key and other answers, cancels and empty answers
     /// are not. ssh treats an empty passphrase as "skip this key", so remembering it would skip
     /// the key on every reconnect.
-    pub fn on_user_answer(&mut self, kind: &PromptKind, prompt: &str, answer: &PromptAnswer, store: &mut PasswordStore) {
+    pub fn on_user_answer(
+        &mut self,
+        kind: &PromptKind,
+        prompt: &str,
+        answer: &PromptAnswer,
+        store: &mut PasswordStore,
+    ) {
         let PromptAnswer::Text(text) = answer else { return };
         if text.is_empty() {
             return;

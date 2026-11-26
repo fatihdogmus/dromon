@@ -95,7 +95,11 @@ impl Sftp {
         Ok(())
     }
 
-    async fn remove_planned(&self, plan: Vec<Doomed>, mut progress: impl FnMut(u64, Option<u64>) + Send) -> Result<u64> {
+    async fn remove_planned(
+        &self,
+        plan: Vec<Doomed>,
+        mut progress: impl FnMut(u64, Option<u64>) + Send,
+    ) -> Result<u64> {
         let total = plan.len() as u64;
         let mut done = 0u64;
         let mut in_flight: JoinSet<Result<()>> = JoinSet::new();

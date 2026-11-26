@@ -31,7 +31,8 @@ pub fn totp_now() -> String {
 /// A 6-digit code the server rejects now: none of the codes inside its window.
 pub fn wrong_totp() -> String {
     let t = now();
-    let accepted: Vec<String> = (0..=2 * WINDOW).map(|i| totp_at((t + i * STEP).saturating_sub(WINDOW * STEP))).collect();
+    let accepted: Vec<String> =
+        (0..=2 * WINDOW).map(|i| totp_at((t + i * STEP).saturating_sub(WINDOW * STEP))).collect();
     (0..10u32).map(|d| d.to_string().repeat(6)).find(|c| !accepted.contains(c)).expect("a rejected code")
 }
 
@@ -79,7 +80,9 @@ mod tests {
         // RFC 6238 appendix B: the ASCII secret "12345678901234567890", 8 digits; the last 6
         // digits are the 6-digit code.
         let key = b"12345678901234567890";
-        for (t, code) in [(59, "287082"), (1_111_111_109, "081804"), (1_234_567_890, "005924"), (2_000_000_000, "279037")] {
+        for (t, code) in
+            [(59, "287082"), (1_111_111_109, "081804"), (1_234_567_890, "005924"), (2_000_000_000, "279037")]
+        {
             assert_eq!(hotp(key, t / STEP), code, "t = {t}");
         }
     }

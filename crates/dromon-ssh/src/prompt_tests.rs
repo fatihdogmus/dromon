@@ -133,7 +133,11 @@ fn table() {
         ("".into(), None, PromptKind::Other),
         // Hints.
         ("Confirm user presence for key ED25519-SK SHA256:abc".into(), Some("none"), PromptKind::Notice),
-        ("Allow use of key /home/u/.ssh/id_rsa?\nKey fingerprint SHA256:abc.".into(), Some("confirm"), PromptKind::Confirm),
+        (
+            "Allow use of key /home/u/.ssh/id_rsa?\nKey fingerprint SHA256:abc.".into(),
+            Some("confirm"),
+            PromptKind::Confirm,
+        ),
         ("Add key /home/u/.ssh/id_ed25519 (u@laptop) to agent?".into(), Some("confirm"), PromptKind::Confirm),
         ("Password: ".into(), Some("CONFIRM"), PromptKind::Confirm),
         ("Password: ".into(), Some(" none "), PromptKind::Notice),
@@ -149,7 +153,11 @@ fn table() {
             Some("confirm"),
             host_key("ED25519", FP),
         ),
-        ("Please type 'yes' or 'no': ".into(), Some("confirm"), PromptKind::HostKey { key_type: None, fingerprint: None }),
+        (
+            "Please type 'yes' or 'no': ".into(),
+            Some("confirm"),
+            PromptKind::HostKey { key_type: None, fingerprint: None },
+        ),
     ];
     for (text, hint, expected) in cases {
         assert_eq!(classify_prompt(&text, hint), expected, "prompt {text:?} hint {hint:?}");

@@ -38,7 +38,12 @@ fn file() -> Option<Existing> {
 }
 
 fn dl_plan(name: &str, size: u64) -> FilePlan {
-    FilePlan::Download { src: RemotePath::new(&format!("/r/{name}")), dst: PathBuf::from(format!("/d/{name}")), size, mtime: None }
+    FilePlan::Download {
+        src: RemotePath::new(&format!("/r/{name}")),
+        dst: PathBuf::from(format!("/d/{name}")),
+        size,
+        mtime: None,
+    }
 }
 
 fn up_plan(name: &str, size: u64) -> FilePlan {
@@ -351,7 +356,8 @@ fn apply_all_answers_other_conflicts_now_and_later_ones() {
     q.exists(id2, 0, file(), Side::default());
     q.resolve(id2, ConflictChoice::Replace, true);
     q.exists(id2, 1, file(), Side::default());
-    let scans: Vec<_> = q.poll(T0).into_iter().filter(|a| matches!(a, Action::Scan { job, .. } if *job == id2)).collect();
+    let scans: Vec<_> =
+        q.poll(T0).into_iter().filter(|a| matches!(a, Action::Scan { job, .. } if *job == id2)).collect();
     assert_eq!(scans.len(), 2);
     assert!(scans.iter().all(|a| matches!(a, Action::Scan { dst: ItemDst::Remote { overwrite: true, .. }, .. })));
 }

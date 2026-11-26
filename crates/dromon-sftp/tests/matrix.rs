@@ -81,7 +81,8 @@ fn pattern(len: usize, seed: u8) -> Vec<u8> {
 async fn put(sftp: &Sftp, path: &RemotePath, mode: WriteMode, offset: u64, data: &[u8]) {
     let file = sftp.open_write(path, mode).await.unwrap();
     let chunk = sftp.chunk_size() as usize;
-    let acks: Vec<_> = data.chunks(chunk).enumerate().map(|(i, c)| file.write_at(offset + (i * chunk) as u64, c)).collect();
+    let acks: Vec<_> =
+        data.chunks(chunk).enumerate().map(|(i, c)| file.write_at(offset + (i * chunk) as u64, c)).collect();
     for ack in acks {
         ack.await.unwrap();
     }
@@ -91,7 +92,8 @@ async fn put(sftp: &Sftp, path: &RemotePath, mode: WriteMode, offset: u64, data:
 async fn get(sftp: &Sftp, path: &RemotePath, len: u64) -> Vec<u8> {
     let file = sftp.open_read(path).await.unwrap();
     let chunk = u64::from(sftp.chunk_size());
-    let reads: Vec<_> = (0..len.div_ceil(chunk)).map(|i| file.read_at(i * chunk, chunk.min(len - i * chunk) as u32)).collect();
+    let reads: Vec<_> =
+        (0..len.div_ceil(chunk)).map(|i| file.read_at(i * chunk, chunk.min(len - i * chunk) as u32)).collect();
     let mut out = Vec::new();
     for read in reads {
         out.extend(read.await.unwrap());
@@ -194,7 +196,13 @@ async fn listing_10k_paged() {
         assert_eq!(rx.recv().await.unwrap().unwrap().len(), 100);
         drop(rx);
         assert_eq!(c.sftp.list(&seed(fx, "fixture/mixed")).await.unwrap().len(), 100);
-        Outcome::Ok(format!("first page {}, {} pages {}, list() {}", secs(first), pages.len(), secs(total), secs(whole)))
+        Outcome::Ok(format!(
+            "first page {}, {} pages {}, list() {}",
+            secs(first),
+            pages.len(),
+            secs(total),
+            secs(whole)
+        ))
     })
     .await;
 }

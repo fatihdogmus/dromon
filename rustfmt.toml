@@ -1,0 +1,5 @@
+# `cargo fmt --all` formats the workspace; `cargo lint` checks it (docs/clean-code.md).
+# The edition (2024) comes from Cargo.toml. A wide line and "Max" heuristics keep short
+# expressions, builder chains and table-like matches on one line, as the code was written.
+max_width = 120
+use_small_heuristics = "Max"

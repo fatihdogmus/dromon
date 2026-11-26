@@ -105,7 +105,11 @@ impl Harness {
             helper_exe: PathBuf::from(HELPER),
             verbose: false,
             config_file: Some(config.clone()),
-            discover: Some(dromon_ssh::ConfigSources { user: Some(config), system: None, user_ssh_dir: dir.path().to_path_buf() }),
+            discover: Some(dromon_ssh::ConfigSources {
+                user: Some(config),
+                system: None,
+                user_ssh_dir: dir.path().to_path_buf(),
+            }),
             hosts_file: None,
             hosts: Vec::new(),
             without_env: vec!["SSH_AUTH_SOCK".into()],
@@ -116,7 +120,8 @@ impl Harness {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
         rt.update(move |s, _| *s = App::new(HostDirectory::default(), now, Box::new(backend)));
         rt.frame(0.0);
-        let mut h = Harness { name, fx, dir, rt, events, seen: Vec::new(), started, secrets: Vec::new(), codes: Vec::new() };
+        let mut h =
+            Harness { name, fx, dir, rt, events, seen: Vec::new(), started, secrets: Vec::new(), codes: Vec::new() };
         // Discovery: the four aliases, then what `ssh -F <config> -G` resolved for them.
         h.pump_until("the fixture's aliases in the sidebar, resolved", |rt| {
             ["fx-key", "fx-pw", "fx-kbd", "fx-enc"].iter().all(|a| {
@@ -191,7 +196,11 @@ impl Harness {
         let left = deadline.saturating_duration_since(Instant::now());
         if left.is_zero() {
             let last: Vec<&String> = self.seen.iter().rev().take(25).collect::<Vec<_>>().into_iter().rev().collect();
-            panic!("{}: timed out after {WAIT:?} waiting for {what}\nlast events:\n{last:#?}\nconnection log:\n{}", self.name, self.log());
+            panic!(
+                "{}: timed out after {WAIT:?} waiting for {what}\nlast events:\n{last:#?}\nconnection log:\n{}",
+                self.name,
+                self.log()
+            );
         }
         match self.events.recv_timeout(left.min(Duration::from_millis(100))) {
             Ok(ev) => {
@@ -233,7 +242,12 @@ impl Harness {
 
     /// Types into the open sheet's field and presses Return.
     fn answer(&mut self, s: &str) {
-        assert_eq!(self.rt.presented_focus_key(), Some("sheet-input"), "{}: the sheet's field has the keyboard", self.name);
+        assert_eq!(
+            self.rt.presented_focus_key(),
+            Some("sheet-input"),
+            "{}: the sheet's field has the keyboard",
+            self.name
+        );
         self.type_text(s);
         self.key(Key::Enter);
     }
@@ -276,7 +290,8 @@ impl Harness {
 
     /// Trusts the host key on its sheet (Return) and returns the fingerprint it showed.
     fn trust_host_key(&mut self, alias: &str) -> String {
-        let (kind, _, _) = self.wait_for_sheet(&format!("First connection to {alias}"), |k| matches!(k, PromptKind::HostKey { .. }));
+        let (kind, _, _) =
+            self.wait_for_sheet(&format!("First connection to {alias}"), |k| matches!(k, PromptKind::HostKey { .. }));
         let shown = self.text_of("sheet-fingerprint");
         let PromptKind::HostKey { key_type, fingerprint } = kind else { unreachable!() };
         assert_eq!(key_type.as_deref(), Some("ED25519"));
@@ -290,7 +305,10 @@ impl Harness {
         let path = RemotePath::new(path);
         self.pump_until(&format!("the listing of {path}"), |rt| {
             rt.state.conn().is_some_and(|c| {
-                c.status == ConnStatus::Ready && c.cwd == path && matches!(c.listing, Listing::Ready(_)) && !c.loading_more()
+                c.status == ConnStatus::Ready
+                    && c.cwd == path
+                    && matches!(c.listing, Listing::Ready(_))
+                    && !c.loading_more()
             }) && rt.find("rows").is_some()
         });
         self.rt.state.conn().unwrap().row_names().into_iter().map(str::to_owned).collect()
@@ -331,7 +349,11 @@ fn shown(rt: &Runtime<App>, k: &str) -> bool {
 }
 
 fn text_of(rt: &Runtime<App>, k: &str) -> String {
-    rt.elements().into_iter().find(|e| e.key.as_deref() == Some(k) && !e.exiting).and_then(|e| e.text).unwrap_or_default()
+    rt.elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some(k) && !e.exiting)
+        .and_then(|e| e.text)
+        .unwrap_or_default()
 }
 
 /// Whether `number` appears in `hay` on its own, not inside a longer run of digits.
@@ -365,9 +387,12 @@ fn write_ssh_config(fx: &Fixture, dir: &Path) -> PathBuf {
     ];
     let mut config = String::new();
     for (alias, role, identity, method) in hosts {
-        writeln!(config, "Host {alias}\n    HostName {}\n    Port {port}\n    User {}", fx.host(), fx.user(role)).unwrap();
+        writeln!(config, "Host {alias}\n    HostName {}\n    Port {port}\n    User {}", fx.host(), fx.user(role))
+            .unwrap();
         match identity {
-            Some(file) => writeln!(config, "    IdentityFile {}\n    PubkeyAuthentication yes", file.display()).unwrap(),
+            Some(file) => {
+                writeln!(config, "    IdentityFile {}\n    PubkeyAuthentication yes", file.display()).unwrap()
+            }
             None => writeln!(config, "    PubkeyAuthentication no").unwrap(),
         }
         writeln!(config, "    PreferredAuthentications {method}").unwrap();
@@ -478,7 +503,8 @@ fn key_host_trust_list_and_browse() {
     assert_eq!(h.rt.state.conn().unwrap().selection.cursor(), Some("locked"));
     h.key(Key::Enter);
     h.pump_until("the permission-denied state", |rt| {
-        rt.state.conn().is_some_and(|c| c.listing == Listing::Failed(ListError::PermissionDenied)) && shown(rt, "denied")
+        rt.state.conn().is_some_and(|c| c.listing == Listing::Failed(ListError::PermissionDenied))
+            && shown(rt, "denied")
     });
     assert_eq!(h.status(), Some(ConnStatus::Ready), "a folder without access doesn't break the connection");
     h.step("opened locked: “You don't have access to this folder”");
@@ -576,15 +602,20 @@ fn server_drop_reconnects_silently() {
     let killed = h.fx.kill_sessions(Role::Password).unwrap();
     assert!(killed > 0, "{pw} had no processes to kill");
     h.step(&format!("killed {killed} processes of {pw} on the server"));
-    h.pump_until("Reconnecting", |rt| matches!(rt.state.conn().map(|c| &c.status), Some(ConnStatus::Reconnecting { .. })));
-    let banner = h.rt.elements().into_iter().find(|e| e.key.as_deref() == Some("banner") && !e.exiting).and_then(|e| e.label);
+    h.pump_until("Reconnecting", |rt| {
+        matches!(rt.state.conn().map(|c| &c.status), Some(ConnStatus::Reconnecting { .. }))
+    });
+    let banner =
+        h.rt.elements().into_iter().find(|e| e.key.as_deref() == Some("banner") && !e.exiting).and_then(|e| e.label);
     assert_eq!(banner.as_deref(), Some("Reconnecting to fx-pw…"), "the reconnect banner shows");
     let status = h.status();
     h.step(&format!("status {status:?}, banner “{}”", banner.unwrap_or_default()));
     let name = h.name;
     h.pump_until("Ready again, the folder listed again", |rt| {
         assert!(!rt.state.ui.sheets.is_open(), "{name}: a sheet opened during the reconnect");
-        rt.state.conn().is_some_and(|c| c.status == ConnStatus::Ready && matches!(c.listing, Listing::Ready(_)) && !c.loading_more())
+        rt.state.conn().is_some_and(|c| {
+            c.status == ConnStatus::Ready && matches!(c.listing, Listing::Ready(_)) && !c.loading_more()
+        })
     });
     // The refresh after the reconnect: a whole new listing of the folder on screen.
     h.pump_until_event(mark, &format!("the relisting of {pw_home}"), |e| {
@@ -593,7 +624,10 @@ fn server_drop_reconnects_silently() {
     h.drain();
     let since = &h.seen[mark..];
     assert!(!since.iter().any(|e| e.starts_with("Prompt(")), "no prompt after the drop: {since:#?}");
-    assert!(since.iter().any(|e| e.starts_with("ListingPage") && e.contains(&pw_home) && e.contains("first: true")), "{since:#?}");
+    assert!(
+        since.iter().any(|e| e.starts_with("ListingPage") && e.contains(&pw_home) && e.contains("first: true")),
+        "{since:#?}"
+    );
     let rows = h.rt.state.conn().unwrap().row_names().into_iter().map(str::to_owned).collect::<Vec<_>>();
     assert!(rows.iter().any(|r| r == ".profile"), "{rows:?}");
     assert!(h.log().contains("answered from memory"), "{}", h.log());
@@ -649,9 +683,14 @@ fn file_operations_from_the_keyboard() {
     let fx = h.fx;
     let scratch = fx.path(Role::Key, &format!("scratch/e2e-fileops-{}", std::process::id()));
     let dir = scratch.as_str().to_owned();
-    let make = format!("rm -rf '{dir}' && mkdir -p '{dir}' && printf 'hello' > '{dir}/page.txt' && chown -R {} '{dir}'", fx.owner(Role::Key));
+    let make = format!(
+        "rm -rf '{dir}' && mkdir -p '{dir}' && printf 'hello' > '{dir}/page.txt' && chown -R {} '{dir}'",
+        fx.owner(Role::Key)
+    );
     fx.exec(&["sh", "-c", &make]).unwrap();
-    let on_server = |test: &str, rel: &str| fx.exec(&["sh", "-c", &format!("test {test} '{dir}/{rel}' && echo yes || echo no")]).unwrap().trim() == "yes";
+    let on_server = |test: &str, rel: &str| {
+        fx.exec(&["sh", "-c", &format!("test {test} '{dir}/{rel}' && echo yes || echo no")]).unwrap().trim() == "yes"
+    };
     // The OS clipboard: an in-memory one, as a test's.
     h.rt.use_clipboard(&rune::clipboard::memory());
 
@@ -672,7 +711,8 @@ fn file_operations_from_the_keyboard() {
     h.type_text("made");
     h.key(Key::Enter);
     h.pump_until("the new folder listed and selected", |rt| {
-        rt.state.conn().is_some_and(|c| c.find("made").is_some() && c.selection.contains("made")) && !shown(rt, "edit-input")
+        rt.state.conn().is_some_and(|c| c.find("made").is_some() && c.selection.contains("made"))
+            && !shown(rt, "edit-input")
     });
     assert!(on_server("-d", "made"), "the folder exists on the server");
     h.step("⌘⇧N made “made”");
@@ -682,7 +722,9 @@ fn file_operations_from_the_keyboard() {
     h.type_text("renamed");
     h.key(Key::Enter);
     h.pump_until("the renamed folder listed and selected", |rt| {
-        rt.state.conn().is_some_and(|c| c.find("renamed").is_some() && c.find("made").is_none() && c.selection.contains("renamed"))
+        rt.state
+            .conn()
+            .is_some_and(|c| c.find("renamed").is_some() && c.find("made").is_none() && c.selection.contains("renamed"))
     });
     assert!(on_server("-d", "renamed") && !on_server("-e", "made"), "renamed on the server");
     h.step("F2 renamed it to “renamed”");
@@ -693,7 +735,11 @@ fn file_operations_from_the_keyboard() {
     h.rt.key(KeyEvent { key: Key::Command('v'), mods: mods(false) });
     h.settle();
     h.pump_until("the copy job done", |rt| {
-        rt.state.transfers.jobs.iter().any(|j| j.kind == dromon_transfer::JobKind::RemoteCopy && j.state == dromon_transfer::TaskState::Done)
+        rt.state
+            .transfers
+            .jobs
+            .iter()
+            .any(|j| j.kind == dromon_transfer::JobKind::RemoteCopy && j.state == dromon_transfer::TaskState::Done)
     });
     assert!(on_server("-f", "page (1).txt"), "the copy is on the server as “page (1).txt”");
     assert_eq!(fx.exec(&["cat", &format!("{dir}/page (1).txt")]).unwrap(), "hello");

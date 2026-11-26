@@ -152,10 +152,7 @@ mod tests {
         }
         let after = m.bytes_per_sec().unwrap();
         let expected = start * (-1.0f64).exp();
-        assert!(
-            close(after, expected, expected * 1e-6),
-            "{after} vs {expected}"
-        );
+        assert!(close(after, expected, expected * 1e-6), "{after} vs {expected}");
     }
 
     #[test]
@@ -165,11 +162,7 @@ mod tests {
             // 1 MB/s for 5 s, then 3 MB/s for 3 s.
             let mut t = 0;
             while t <= 8000 {
-                let bytes = if t <= 5000 {
-                    t * 1000
-                } else {
-                    5_000_000 + (t - 5000) * 3000
-                };
+                let bytes = if t <= 5000 { t * 1000 } else { 5_000_000 + (t - 5000) * 3000 };
                 m.record(ms(t), bytes);
                 t += step_ms;
             }
@@ -186,11 +179,7 @@ mod tests {
         m.record(ms(0), 0);
         m.record(ms(1000), 1_000_000); // 1 MB/s
         m.record(ms(61_000), 1_000_000 + 60 * 5_000_000); // 5 MB/s over a 60 s gap
-        assert!(close(
-            m.bytes_per_sec().unwrap(),
-            5_000_000.0,
-            5_000_000.0 * 1e-6
-        ));
+        assert!(close(m.bytes_per_sec().unwrap(), 5_000_000.0, 5_000_000.0 * 1e-6));
     }
 
     #[test]
@@ -275,43 +264,16 @@ mod tests {
 
     #[test]
     fn aggregate_sums() {
-        let items = [
-            Progress {
-                done: 10,
-                total: 100,
-            },
-            Progress {
-                done: 40,
-                total: 50,
-            },
-            Progress { done: 0, total: 0 },
-        ];
-        assert_eq!(
-            aggregate(&items),
-            Progress {
-                done: 50,
-                total: 150
-            }
-        );
+        let items =
+            [Progress { done: 10, total: 100 }, Progress { done: 40, total: 50 }, Progress { done: 0, total: 0 }];
+        assert_eq!(aggregate(&items), Progress { done: 50, total: 150 });
         assert_eq!(aggregate(&[]), Progress::default());
         assert_eq!(aggregate(items.iter().take(1)), items[0]);
     }
 
     #[test]
     fn aggregate_saturates() {
-        let items = [
-            Progress {
-                done: u64::MAX,
-                total: u64::MAX,
-            },
-            Progress { done: 5, total: 5 },
-        ];
-        assert_eq!(
-            aggregate(&items),
-            Progress {
-                done: u64::MAX,
-                total: u64::MAX
-            }
-        );
+        let items = [Progress { done: u64::MAX, total: u64::MAX }, Progress { done: 5, total: 5 }];
+        assert_eq!(aggregate(&items), Progress { done: u64::MAX, total: u64::MAX });
     }
 }

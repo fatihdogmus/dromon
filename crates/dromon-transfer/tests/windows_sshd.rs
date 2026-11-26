@@ -22,7 +22,9 @@ use dromon_core::{EntryKind, Error, RemotePath};
 use dromon_sftp::{Sftp, WriteMode};
 use dromon_testkit::{NULL_DEVICE, openssh};
 use dromon_transfer::FilePlan;
-use dromon_transfer::io::{CopyOptions, copy_remote, create_dirs, download, scan_local, scan_remote, scan_remote_copy, upload};
+use dromon_transfer::io::{
+    CopyOptions, copy_remote, create_dirs, download, scan_local, scan_remote, scan_remote_copy, upload,
+};
 use tokio::process::{Child, Command};
 
 const ENV: &str = "DROMON_WINDOWS_SSHD";
@@ -40,7 +42,9 @@ impl Server {
     /// key isn't.
     fn from_env(test: &str) -> Option<Server> {
         if std::env::var(ENV).ok().as_deref() != Some("1") {
-            eprintln!("skipping {test}: set {ENV}=1 and {ENV}_KEY to test against a Windows OpenSSH server (CI: windows job)");
+            eprintln!(
+                "skipping {test}: set {ENV}=1 and {ENV}_KEY to test against a Windows OpenSSH server (CI: windows job)"
+            );
             return None;
         }
         let var = |name: &str, default: Option<&str>| {
@@ -260,14 +264,24 @@ async fn round_trip_rename_copy_delete() {
     }
 
     // Replace on upload, and a same-host copy (copy-data when offered, else streamed).
-    let plan = FilePlan::Upload { src: local.clone(), dst: renamed.clone(), size: data.len() as u64, mtime: Some(mtime_local(&local)), overwrite: true };
+    let plan = FilePlan::Upload {
+        src: local.clone(),
+        dst: renamed.clone(),
+        size: data.len() as u64,
+        mtime: Some(mtime_local(&local)),
+        overwrite: true,
+    };
     assert_eq!(upload(s, &plan, CopyOptions::default(), |_| {}).await.unwrap(), renamed);
     assert!(read_remote(s, &renamed).await == data);
     let copy = dir.join("copy.bin");
     let plan = the_plan(scan_remote_copy(s, &renamed, &copy, false, |_| {}).await.unwrap());
     let mut progress = Vec::new();
     copy_remote(s, &plan, CopyOptions::default(), |n| progress.push(n)).await.unwrap();
-    println!("same-host copy: {} progress reports ({})", progress.len(), if s.capabilities().copy_data { "copy-data" } else { "streamed" });
+    println!(
+        "same-host copy: {} progress reports ({})",
+        progress.len(),
+        if s.capabilities().copy_data { "copy-data" } else { "streamed" }
+    );
     assert!(read_remote(s, &copy).await == data);
 
     // A copy streamed through one session (servers without copy-data): reads and writes in

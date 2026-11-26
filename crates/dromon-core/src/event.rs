@@ -8,7 +8,9 @@ pub enum ConnStatus {
     Connecting,
     Ready,
     /// Lost and retrying silently; `attempt` counts from 1.
-    Reconnecting { attempt: u32 },
+    Reconnecting {
+        attempt: u32,
+    },
     /// Waiting for the user to answer a prompt.
     NeedsInput,
     Failed(String),
@@ -19,9 +21,14 @@ pub enum ConnStatus {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PromptKind {
     /// "Are you sure you want to continue connecting (yes/no/[fingerprint])?"
-    HostKey { key_type: Option<String>, fingerprint: Option<String> },
+    HostKey {
+        key_type: Option<String>,
+        fingerprint: Option<String>,
+    },
     Password,
-    Passphrase { key_path: Option<String> },
+    Passphrase {
+        key_path: Option<String>,
+    },
     /// A yes/no question (`SSH_ASKPASS_PROMPT=confirm`), e.g. confirming a key use. Not secret.
     Confirm,
     /// A notice with nothing to answer (`SSH_ASKPASS_PROMPT=none`, "touch your security key").

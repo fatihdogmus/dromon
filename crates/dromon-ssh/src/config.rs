@@ -28,10 +28,8 @@ impl ConfigSources {
     /// - Windows: `%USERPROFILE%\.ssh\config` and `%ProgramData%\ssh\ssh_config`
     pub fn default_for_platform() -> Self {
         #[cfg(windows)]
-        let (home, system) = (
-            env_path("USERPROFILE"),
-            env_path("ProgramData").map(|d| d.join("ssh").join("ssh_config")),
-        );
+        let (home, system) =
+            (env_path("USERPROFILE"), env_path("ProgramData").map(|d| d.join("ssh").join("ssh_config")));
         #[cfg(not(windows))]
         let (home, system) = (env_path("HOME"), Some(PathBuf::from("/etc/ssh/ssh_config")));
 

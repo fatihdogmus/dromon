@@ -159,9 +159,9 @@ impl Future for WriteAck {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
         match &mut this.state {
-            AckState::Pending(pending) => Pin::new(pending)
-                .poll(cx)
-                .map(|res| res.map(drop).map_err(|e| map_err(e, Op::Write, &this.path))),
+            AckState::Pending(pending) => {
+                Pin::new(pending).poll(cx).map(|res| res.map(drop).map_err(|e| map_err(e, Op::Write, &this.path)))
+            }
             AckState::Failed(err) => Poll::Ready(Err(err.take().unwrap_or(Error::ConnectionLost))),
         }
     }

@@ -37,12 +37,7 @@ const NOT_UTF8: &str = "the name isn't valid UTF-8";
 /// Recursively plans downloading `src` (a file, a folder, or a link the user picked, which is
 /// followed) into `dst`, the item's final local root (already free). `found` gets the running
 /// number of files planned.
-pub async fn scan_remote(
-    sftp: &Sftp,
-    src: &RemotePath,
-    dst: &Path,
-    found: impl FnMut(u64) + Send,
-) -> Result<Scan> {
+pub async fn scan_remote(sftp: &Sftp, src: &RemotePath, dst: &Path, found: impl FnMut(u64) + Send) -> Result<Scan> {
     walk_remote(sftp, src, Target::Local(dst.to_owned()), false, found).await
 }
 
@@ -183,9 +178,8 @@ pub async fn scan_local(
 ) -> Result<Scan> {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let (src_owned, dst_owned) = (src.to_owned(), dst.clone());
-    let task = tokio::task::spawn_blocking(move || {
-        walk_local(&src_owned, &dst_owned, overwrite, &mut |n| tx.send(n).is_ok())
-    });
+    let task =
+        tokio::task::spawn_blocking(move || walk_local(&src_owned, &dst_owned, overwrite, &mut |n| tx.send(n).is_ok()));
     while let Some(n) = rx.recv().await {
         found(n);
     }

@@ -451,10 +451,14 @@ async fn upload_a_file_and_a_folder_tree() {
     // The tree, empty folder included.
     let remote_root = dir.join("site");
     let scan = scan_local(&root, &remote_root, false, |_| {}).await.unwrap();
-    let dirs: Vec<_> = scan.dirs.iter().map(|d| match d {
-        DirPlan::Remote(r) => r.as_str().strip_prefix(dir.as_str()).unwrap().to_owned(),
-        DirPlan::Local(_) => panic!("a local folder in a local scan"),
-    }).collect();
+    let dirs: Vec<_> = scan
+        .dirs
+        .iter()
+        .map(|d| match d {
+            DirPlan::Remote(r) => r.as_str().strip_prefix(dir.as_str()).unwrap().to_owned(),
+            DirPlan::Local(_) => panic!("a local folder in a local scan"),
+        })
+        .collect();
     assert_eq!(dirs, ["/site", "/site/assets", "/site/assets/img", "/site/empty"]);
     assert_eq!(scan.files.len(), 4);
     create_dirs(s, &scan.dirs).await.unwrap();
@@ -500,8 +504,13 @@ async fn upload_resumes_and_survives_a_cancel() {
     rm_rf(s, &dst).await;
     write_remote(s, &part, &vec![0xEE; 2 * MIB as usize]).await;
     let FilePlan::Upload { mtime, .. } = &plan else { unreachable!() };
-    let stale =
-        FilePlan::Upload { src: src.clone(), dst: dst.clone(), size: data.len() as u64, mtime: mtime.map(|m| m + 5), overwrite: false };
+    let stale = FilePlan::Upload {
+        src: src.clone(),
+        dst: dst.clone(),
+        size: data.len() as u64,
+        mtime: mtime.map(|m| m + 5),
+        overwrite: false,
+    };
     let mut progress = Vec::new();
     upload(s, &stale, CopyOptions::default(), |n| progress.push(n)).await.unwrap();
     assert!(progress[0] <= u64::from(s.chunk_size()));

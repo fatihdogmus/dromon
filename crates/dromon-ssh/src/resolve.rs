@@ -56,12 +56,7 @@ pub async fn resolve(ssh: &Path, alias: &str) -> Result<Resolved, Error> {
 pub async fn resolve_with_timeout(ssh: &Path, alias: &str, timeout: Duration) -> Result<Resolved, Error> {
     check_arg("The host alias", alias)?;
     let mut cmd = tokio::process::Command::new(ssh);
-    cmd.arg("-G")
-        .arg(alias)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
+    cmd.arg("-G").arg(alias).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     #[cfg(windows)]
     cmd.creation_flags(crate::process::CREATE_NO_WINDOW);
 

@@ -7,8 +7,7 @@ use std::sync::{Arc, Mutex};
 use dromon_core::{EntryKind, Error, LinkTarget, RemotePath};
 use dromon_sftp::Sftp;
 use russh_sftp::protocol::{
-    Attrs, Data, File, FileAttributes, Handle, Name, Packet, SftpHandle, SftpString, Status,
-    StatusCode, Version,
+    Attrs, Data, File, FileAttributes, Handle, Name, Packet, SftpHandle, SftpString, Status, StatusCode, Version,
 };
 
 type Log = Arc<Mutex<Vec<(String, Vec<u8>)>>>;

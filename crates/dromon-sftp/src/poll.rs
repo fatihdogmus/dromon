@@ -78,12 +78,7 @@ impl PollSchedule {
     /// The delay before the next poll of a folder with `entries` entries, given how long the
     /// last poll took (`Duration::ZERO` before the first). `None`: don't schedule a poll; the
     /// backoff is then left as it is.
-    pub fn next_delay(
-        &mut self,
-        entries: usize,
-        vis: Visibility,
-        last_poll_took: Duration,
-    ) -> Option<Duration> {
+    pub fn next_delay(&mut self, entries: usize, vis: Visibility, last_poll_took: Duration) -> Option<Duration> {
         let base = base_interval(entries, vis)?;
         let current = base * self.factor;
         if last_poll_took * 4 > current {

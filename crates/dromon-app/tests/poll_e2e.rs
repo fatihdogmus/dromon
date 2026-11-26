@@ -85,7 +85,9 @@ impl Harness {
         let app = App::new(HostDirectory { hosts: vec![spec] }, 0, Box::new(backend));
         let mut h = Harness { fx, _dir: dir, app, events, scratch, log: Vec::new() };
         h.app.act(Action::SelectHost(host()));
-        h.pump("the connection to open", |app, _| app.conn().is_some_and(|c| c.opened && matches!(c.listing, Listing::Ready(_))));
+        h.pump("the connection to open", |app, _| {
+            app.conn().is_some_and(|c| c.opened && matches!(c.listing, Listing::Ready(_)))
+        });
         let scratch = h.scratch.clone();
         h.go(&scratch);
         Some(h)
@@ -96,7 +98,9 @@ impl Harness {
         let deadline = Instant::now() + WAIT;
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
-            let ev = self.next(left).unwrap_or_else(|| panic!("timed out waiting for {what}\nconnection log:\n{}", self.log.join("\n")));
+            let ev = self
+                .next(left)
+                .unwrap_or_else(|| panic!("timed out waiting for {what}\nconnection log:\n{}", self.log.join("\n")));
             if done(&self.app, &ev) {
                 return ev;
             }
@@ -124,9 +128,9 @@ impl Harness {
         let mut seen = Vec::new();
         while let Some(ev) = self.next(deadline.saturating_duration_since(Instant::now())) {
             let about = match &ev {
-                ServiceEvent::ListingPage { path: p, .. } | ServiceEvent::Refreshed { path: p, .. } | ServiceEvent::ListFailed { path: p, .. } => {
-                    p == path
-                }
+                ServiceEvent::ListingPage { path: p, .. }
+                | ServiceEvent::Refreshed { path: p, .. }
+                | ServiceEvent::ListFailed { path: p, .. } => p == path,
                 _ => false,
             };
             if about {
@@ -141,7 +145,8 @@ impl Harness {
         self.app.act(Action::GoTo(path.clone()));
         let p = path.clone();
         self.pump("the folder to list", |app, ev| {
-            matches!(ev, ServiceEvent::ListingPage { path, done: true, .. } if *path == p) && app.conn().is_some_and(|c| c.cwd == p)
+            matches!(ev, ServiceEvent::ListingPage { path, done: true, .. } if *path == p)
+                && app.conn().is_some_and(|c| c.cwd == p)
         });
     }
 
@@ -169,9 +174,26 @@ fn write_ssh_config(fx: &Fixture, dir: &Path) -> PathBuf {
     let key = dir.join("id_ed25519");
     copy_private_key(&fx.key(), &key).unwrap();
     let mut config = String::new();
-    writeln!(config, "Host fx-key\n    HostName {}\n    Port {}\n    User {}", fx.host(), fx.port(), fx.user(Role::Key)).unwrap();
-    writeln!(config, "    IdentityFile {}\n    IdentitiesOnly yes\n    PreferredAuthentications publickey", key.display()).unwrap();
-    writeln!(config, "    UserKnownHostsFile {}\n    GlobalKnownHostsFile {NULL_DEVICE}", dir.join("known_hosts").display()).unwrap();
+    writeln!(
+        config,
+        "Host fx-key\n    HostName {}\n    Port {}\n    User {}",
+        fx.host(),
+        fx.port(),
+        fx.user(Role::Key)
+    )
+    .unwrap();
+    writeln!(
+        config,
+        "    IdentityFile {}\n    IdentitiesOnly yes\n    PreferredAuthentications publickey",
+        key.display()
+    )
+    .unwrap();
+    writeln!(
+        config,
+        "    UserKnownHostsFile {}\n    GlobalKnownHostsFile {NULL_DEVICE}",
+        dir.join("known_hosts").display()
+    )
+    .unwrap();
     writeln!(config, "    StrictHostKeyChecking accept-new\n    UpdateHostKeys no").unwrap();
     let path = dir.join("ssh_config");
     std::fs::write(&path, config).unwrap();
@@ -239,11 +261,17 @@ fn deleting_the_folder_on_screen_goes_up_to_the_nearest_parent_with_a_toast() {
 
     h.remote(&format!("rm -rf '{}/sub'", scratch.as_str()));
     // The poll finds it gone; the app climbs one listing per level: sub is gone too, scratch lists.
-    let ev = h.pump("the vanished folder's failure", |_, ev| matches!(ev, ServiceEvent::ListFailed { path, .. } if *path == deeper));
+    let ev = h.pump(
+        "the vanished folder's failure",
+        |_, ev| matches!(ev, ServiceEvent::ListFailed { path, .. } if *path == deeper),
+    );
     assert!(matches!(ev, ServiceEvent::ListFailed { error: Error::NotFound(_), .. }), "{ev:?}");
     let sub = scratch.join("sub");
     h.pump("sub's failure", |_, ev| matches!(ev, ServiceEvent::ListFailed { path, .. } if *path == sub));
-    h.pump("the parent's listing", |_, ev| matches!(ev, ServiceEvent::ListingPage { path, done: true, .. } if *path == scratch));
+    h.pump(
+        "the parent's listing",
+        |_, ev| matches!(ev, ServiceEvent::ListingPage { path, done: true, .. } if *path == scratch),
+    );
     let c = h.app.conn().unwrap();
     assert_eq!(c.cwd, scratch);
     assert!(matches!(c.listing, Listing::Ready(_)) && c.find("sub").is_none());

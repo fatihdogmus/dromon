@@ -68,16 +68,26 @@ async fn local_tree_is_depth_first_in_natural_order() {
     write(&root.join("b/deep/y.bin"), 4);
 
     let (scan, counts) = scan_with_counts(&root, "/srv/site").await;
-    let dirs: Vec<_> = scan.dirs.iter().map(|d| match d {
-        DirPlan::Remote(p) => p.to_string(),
-        DirPlan::Local(_) => panic!("a local folder in a local scan"),
-    }).collect();
+    let dirs: Vec<_> = scan
+        .dirs
+        .iter()
+        .map(|d| match d {
+            DirPlan::Remote(p) => p.to_string(),
+            DirPlan::Local(_) => panic!("a local folder in a local scan"),
+        })
+        .collect();
     assert_eq!(dirs, ["/srv/site", "/srv/site/b", "/srv/site/b/deep", "/srv/site/empty"]);
     let files = uploads(&scan);
     let dsts: Vec<_> = files.iter().map(|f| f.1.as_str()).collect();
     assert_eq!(
         dsts,
-        ["/srv/site/A.txt", "/srv/site/b/deep/y.bin", "/srv/site/b/x.bin", "/srv/site/file2.txt", "/srv/site/file10.txt"]
+        [
+            "/srv/site/A.txt",
+            "/srv/site/b/deep/y.bin",
+            "/srv/site/b/x.bin",
+            "/srv/site/file2.txt",
+            "/srv/site/file10.txt"
+        ]
     );
     assert_eq!(files[1].0, root.join("b").join("deep").join("y.bin"));
     assert_eq!(files[4].2, 10);
@@ -127,7 +137,10 @@ async fn local_links_and_specials_follow_the_rules() {
             overwrite: false,
         }
     );
-    assert_eq!(scan.skipped, ["mixed/dangling: a broken link", "mixed/link-dir: a link to a folder", "mixed/pipe: a named pipe"]);
+    assert_eq!(
+        scan.skipped,
+        ["mixed/dangling: a broken link", "mixed/link-dir: a link to a folder", "mixed/pipe: a named pipe"]
+    );
     assert_eq!(scan.dirs.len(), 2);
 
     // The picked item itself is followed when it is a link.

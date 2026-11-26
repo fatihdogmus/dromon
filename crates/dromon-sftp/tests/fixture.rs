@@ -91,11 +91,8 @@ fn pattern(len: usize, seed: u8) -> Vec<u8> {
 async fn write_pipelined(sftp: &Sftp, path: &RemotePath, mode: WriteMode, offset: u64, data: &[u8]) {
     let file = sftp.open_write(path, mode).await.unwrap();
     let chunk = sftp.chunk_size() as usize;
-    let acks: Vec<_> = data
-        .chunks(chunk)
-        .enumerate()
-        .map(|(i, c)| file.write_at(offset + (i * chunk) as u64, c))
-        .collect();
+    let acks: Vec<_> =
+        data.chunks(chunk).enumerate().map(|(i, c)| file.write_at(offset + (i * chunk) as u64, c)).collect();
     for ack in acks {
         ack.await.unwrap();
     }
@@ -106,9 +103,8 @@ async fn write_pipelined(sftp: &Sftp, path: &RemotePath, mode: WriteMode, offset
 async fn read_pipelined(sftp: &Sftp, path: &RemotePath, offset: u64, len: u64) -> Vec<u8> {
     let file = sftp.open_read(path).await.unwrap();
     let chunk = u64::from(sftp.chunk_size());
-    let reads: Vec<_> = (0..len.div_ceil(chunk))
-        .map(|i| file.read_at(offset + i * chunk, chunk.min(len - i * chunk) as u32))
-        .collect();
+    let reads: Vec<_> =
+        (0..len.div_ceil(chunk)).map(|i| file.read_at(offset + i * chunk, chunk.min(len - i * chunk) as u32)).collect();
     let mut out = Vec::new();
     for read in reads {
         out.extend(read.await.unwrap());
@@ -289,7 +285,10 @@ async fn remove_all_deletes_nested_folders_but_never_follows_links() {
     // Links (made as root; removing one only needs the folder to be writable): to a folder
     // outside the tree, to a file inside it, and to nothing.
     let t = tree.as_str();
-    root_sh(&c, &format!("ln -s ../target '{t}/link-dir' && ln -s a.txt '{t}/link-file' && ln -s nowhere '{t}/dangling'"));
+    root_sh(
+        &c,
+        &format!("ln -s ../target '{t}/link-dir' && ln -s a.txt '{t}/link-file' && ln -s nowhere '{t}/dangling'"),
+    );
 
     let mut calls = Vec::new();
     let removed = s.remove_all(&tree, |done, total| calls.push((done, total))).await.unwrap();
@@ -383,19 +382,13 @@ async fn write_read_round_trip_and_mtime() {
     s.open_write(&r, WriteMode::Truncate).await.unwrap().close().await.unwrap();
     assert_eq!(s.stat(&r).await.unwrap().size, 0);
 
-    assert_eq!(
-        s.open_write(&r, WriteMode::CreateNew).await.err(),
-        Some(Error::AlreadyExists(r.clone()))
-    );
+    assert_eq!(s.open_write(&r, WriteMode::CreateNew).await.err(), Some(Error::AlreadyExists(r.clone())));
     let fresh = dir.join("fresh.bin");
     s.open_write(&fresh, WriteMode::CreateNew).await.unwrap().close().await.unwrap();
     let missing = dir.join("missing.bin");
     assert_eq!(s.open_read(&missing).await.err(), Some(Error::NotFound(missing)));
     let locked = p(&format!("{}/locked/f", c.mixed()));
-    assert_eq!(
-        s.open_write(&locked, WriteMode::Truncate).await.err(),
-        Some(Error::PermissionDenied(locked))
-    );
+    assert_eq!(s.open_write(&locked, WriteMode::Truncate).await.err(), Some(Error::PermissionDenied(locked)));
 
     s.set_mtime(&f, 1_000_000_000).await.unwrap();
     assert_eq!(s.stat(&f).await.unwrap().mtime, Some(1_000_000_000));

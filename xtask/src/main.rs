@@ -16,17 +16,51 @@ enum Run {
 
 /// (name, what it runs, usage, what it does).
 const COMMANDS: &[(&str, Run, &str, &str)] = &[
-    ("dev", Run::Script("dev.sh"), "[--mock] [-- APP ARGS]", "live editing: view and theme edits patch into the running app"),
-    ("app", Run::Cargo { before: &["run", "-p", "dromon-app", "--"], after: &[], mock: false }, "[APP ARGS]", "the app, debug build, on your ssh config"),
-    ("demo", Run::Cargo { before: &["run", "-p", "dromon-app", "--"], after: &[], mock: true }, "[APP ARGS]", "the app on the built-in demo: fake hosts and folders, no servers"),
-    ("lint", Run::Cargo { before: &["clippy", "--workspace", "--all-targets"], after: &["--", "-D", "warnings"], mock: false }, "[--locked]", "clippy, as CI runs it"),
-    ("goldens", Run::Script("goldens.sh"), "[--check]", "re-render the UI goldens in tests/goldens (--check: compare, as CI)"),
+    (
+        "dev",
+        Run::Script("dev.sh"),
+        "[--mock] [-- APP ARGS]",
+        "live editing: view and theme edits patch into the running app",
+    ),
+    (
+        "app",
+        Run::Cargo { before: &["run", "-p", "dromon-app", "--"], after: &[], mock: false },
+        "[APP ARGS]",
+        "the app, debug build, on your ssh config",
+    ),
+    (
+        "demo",
+        Run::Cargo { before: &["run", "-p", "dromon-app", "--"], after: &[], mock: true },
+        "[APP ARGS]",
+        "the app on the built-in demo: fake hosts and folders, no servers",
+    ),
+    (
+        "lint",
+        Run::Cargo {
+            before: &["clippy", "--workspace", "--all-targets"],
+            after: &["--", "-D", "warnings"],
+            mock: false,
+        },
+        "[--locked]",
+        "clippy, as CI runs it",
+    ),
+    (
+        "goldens",
+        Run::Script("goldens.sh"),
+        "[--check]",
+        "re-render the UI goldens in tests/goldens (--check: compare, as CI)",
+    ),
     ("flows", Run::Script("flows.sh"), "[OUT DIR]", "render tests/flows/* to strips and trees in target/flows"),
     ("smoke", Run::Script("smoke-app.sh"), "[--window] [--connect]", "smoke-test the dromon binary"),
     ("repro", Run::Script("repro.sh"), "<ISSUE|issue.md>", "replay a bug report headless into target/repro"),
     ("perf", Run::Script("perf.sh"), "[--gate …|all]", "the performance gates, as one table"),
     ("accents", Run::Script("accents.sh"), "", "render the accent candidates side by side in target/accents"),
-    ("package-linux", Run::Script("package-linux.sh"), "[--arch …] [--verify]", "build the release binary and the Linux packages"),
+    (
+        "package-linux",
+        Run::Script("package-linux.sh"),
+        "[--arch …] [--verify]",
+        "build the release binary and the Linux packages",
+    ),
 ];
 
 fn help() {
@@ -50,13 +84,16 @@ fn bash() -> PathBuf {
         !s.contains("\\system32\\") && !s.contains("\\windowsapps\\")
     };
     // A bash.exe on PATH that isn't WSL's; else the one beside git.exe (<Git>/cmd → <Git>/bin).
-    dirs.iter().map(|d| d.join("bash.exe")).find(|p| p.is_file() && not_wsl(p)).or_else(|| {
-        dirs.iter()
-            .filter(|d| d.join("git.exe").is_file())
-            .filter_map(|d| d.parent().map(|git| git.join("bin").join("bash.exe")))
-            .find(|p| p.is_file())
-    })
-    .unwrap_or_else(|| "bash".into())
+    dirs.iter()
+        .map(|d| d.join("bash.exe"))
+        .find(|p| p.is_file() && not_wsl(p))
+        .or_else(|| {
+            dirs.iter()
+                .filter(|d| d.join("git.exe").is_file())
+                .filter_map(|d| d.parent().map(|git| git.join("bin").join("bash.exe")))
+                .find(|p| p.is_file())
+        })
+        .unwrap_or_else(|| "bash".into())
 }
 
 fn main() -> ExitCode {

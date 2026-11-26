@@ -65,7 +65,15 @@ mod tests {
     use super::*;
 
     fn e(name: &str, size: u64, mtime: i64) -> Entry {
-        Entry { name: name.into(), kind: EntryKind::File, size, mtime: Some(mtime), mode: Some(0o644), owner: None, group: None }
+        Entry {
+            name: name.into(),
+            kind: EntryKind::File,
+            size,
+            mtime: Some(mtime),
+            mode: Some(0o644),
+            owner: None,
+            group: None,
+        }
     }
 
     #[test]

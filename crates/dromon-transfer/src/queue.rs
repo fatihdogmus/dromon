@@ -17,8 +17,8 @@ use std::time::Duration;
 use dromon_core::{EntryKind, HostId, RemotePath};
 
 use crate::{
-    ConflictChoice, ConflictView, Existing, FileId, FilePlan, JobId, JobKind, JobRequest, JobView, Progress, Reveal, Scan,
-    Side, SpeedMeter, TaskEvent, TaskState, download_part_name, eta, step,
+    ConflictChoice, ConflictView, Existing, FileId, FilePlan, JobId, JobKind, JobRequest, JobView, Progress, Reveal,
+    Scan, Side, SpeedMeter, TaskEvent, TaskState, download_part_name, eta, step,
 };
 
 /// The settled destination of one top-level item.
@@ -62,7 +62,10 @@ enum ItemState {
     /// `Name` was (or will be) emitted; waiting for `named` (download) or `exists` (the others).
     Naming,
     /// The name is taken at the destination; waiting for the user.
-    Conflict { existing: Existing, incoming: Side },
+    Conflict {
+        existing: Existing,
+        incoming: Side,
+    },
     /// KeepBoth: `FreeRemoteName` was emitted; waiting for `named`.
     Renaming,
     /// `Scan` was (or will be) emitted; waiting for `scanned`.
@@ -406,8 +409,9 @@ impl Queue {
     pub fn add(&mut self, req: JobRequest, _now: Duration) -> JobId {
         let id = JobId(self.next_id);
         self.next_id += 1;
-        let items =
-            (0..req.item_count()).map(|_| Item { state: ItemState::Naming, dst: None, found: 0, tidied: false }).collect();
+        let items = (0..req.item_count())
+            .map(|_| Item { state: ItemState::Naming, dst: None, found: 0, tidied: false })
+            .collect();
         self.jobs.push(Job {
             id,
             hosts: req.hosts().into_iter().cloned().collect(),
@@ -598,7 +602,8 @@ impl Queue {
 
     pub fn file_done(&mut self, job: JobId, file: FileId, now: Duration) {
         let Some(j) = self.live(job) else { return };
-        let Some(f) = j.files.get_mut(file.0 as usize).filter(|f| matches!(f.state, FileState::Pending | FileState::Running))
+        let Some(f) =
+            j.files.get_mut(file.0 as usize).filter(|f| matches!(f.state, FileState::Pending | FileState::Running))
         else {
             return;
         };
@@ -711,7 +716,8 @@ impl Queue {
         j.reset_speed();
         // `step(Retry)` only says Failed → Queued, which would scan everything again; the
         // job continues from where it stopped instead.
-        j.state = if j.all_settled() { TaskState::Running } else { TaskState::Preparing { files_found: j.files_found() } };
+        j.state =
+            if j.all_settled() { TaskState::Running } else { TaskState::Preparing { files_found: j.files_found() } };
         j.advance();
         j.check_finish();
     }
@@ -728,9 +734,9 @@ impl Queue {
         self.jobs.iter().filter(|j| j.state.is_active()).flat_map(|j| &j.items).any(|i| match &i.dst {
             Some(ItemDst::Local(root)) => {
                 root == path
-                    || root.file_name().is_some_and(|n| {
-                        root.with_file_name(download_part_name(&n.to_string_lossy())) == path
-                    })
+                    || root
+                        .file_name()
+                        .is_some_and(|n| root.with_file_name(download_part_name(&n.to_string_lossy())) == path)
             }
             _ => false,
         })

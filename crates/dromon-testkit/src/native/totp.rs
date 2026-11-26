@@ -222,7 +222,8 @@ pub(super) async fn probe(fixture: &Fixture, sshd: &Sshd, totp: &Totp) {
             let secret = format!("{}/.google_authenticator", kbd.home);
             let policy = totp.policy();
             let args = [sshd.os.arg(), sshd.dir.as_str(), policy.as_str(), totp.module.as_str(), secret.as_str()];
-            let details = root_sh(sshd.as_root, "TOTP diagnostics", &script(DIAGNOSE), &args, b"").unwrap_or_else(|e| e);
+            let details =
+                root_sh(sshd.as_root, "TOTP diagnostics", &script(DIAGNOSE), &args, b"").unwrap_or_else(|e| e);
             note(format_args!(
                 "dromon-testkit: TOTP probe for {user} through PAM service {} ({}) failed: {why}\n{}",
                 totp.service,

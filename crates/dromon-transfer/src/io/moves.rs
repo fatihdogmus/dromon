@@ -35,7 +35,8 @@ pub async fn move_remote(sftp: &Sftp, plan: &FilePlan) -> Result<RemotePath> {
         return Ok(dst.clone());
     }
     // Plain rename never replaces anything (OpenSSH refuses an existing target).
-    let target = if sftp.exists(dst).await? { folder.join(&free_remote_name(sftp, &folder, name).await?) } else { dst.clone() };
+    let target =
+        if sftp.exists(dst).await? { folder.join(&free_remote_name(sftp, &folder, name).await?) } else { dst.clone() };
     match sftp.rename(src, &target).await {
         Ok(()) => Ok(target),
         Err(Error::AlreadyExists(_)) => {
