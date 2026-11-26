@@ -1,5 +1,5 @@
 # OpenSSH sshd fixture for Dromon's integration tests: Debian trixie's PAM-enabled OpenSSH.
-# Built and started by `crates/dromon-testkit` (testcontainers); see README.md.
+# Built and started by `crates/dromon-testkit` (testcontainers); see docs/test-servers.md.
 # sftp-server here advertises posix-rename@openssh.com, limits@openssh.com and copy-data.
 #
 # Users (see sshd_config and pam-sshd for how each one logs in):

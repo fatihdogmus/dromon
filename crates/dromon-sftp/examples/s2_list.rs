@@ -8,7 +8,7 @@
 //! ```
 //!
 //! Against the test fixture, `DROMON_FIXTURE_KEEP=1 cargo test -p dromon-sftp --test fixture`
-//! prints the port and key folder to use (see `tests/docker/README.md`).
+//! prints the port and key folder to use (see `docs/test-servers.md`).
 //!
 //! `path` defaults to the login folder; a relative path is taken relative to it. ssh's prompts
 //! (passphrase, host key) go to the terminal: stderr and the tty are left alone.
