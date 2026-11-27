@@ -1,5 +1,5 @@
 //! Settings (§6.8, §8): theme, list density, the download folder, transfers at once per host,
-//! and whether hidden files show by default.
+//! whether hidden files show by default, and whether Dromon checks for updates by itself.
 //!
 //! The values live in each main window's state ([`App::settings`]), the same in all of them.
 //! Each main window shows them on its Settings page (`page.rs`, `views/settings.rs`), which
@@ -60,6 +60,8 @@ pub struct Settings {
     pub transfers_at_once: usize,
     /// Show dotfiles in hosts opened from now on (⌘⇧. still switches them for the session).
     pub show_hidden: bool,
+    /// Check GitHub for a newer Dromon at launch and once a day (`update.rs`).
+    pub check_updates: bool,
 }
 
 impl Default for Settings {
@@ -70,6 +72,7 @@ impl Default for Settings {
             download_folder: None,
             transfers_at_once: AT_ONCE_DEFAULT,
             show_hidden: true,
+            check_updates: true,
         }
     }
 }
@@ -93,6 +96,7 @@ impl Settings {
             SettingsChange::DownloadFolder(folder) => s.download_folder = folder,
             SettingsChange::TransfersAtOnce(n) => s.transfers_at_once = n,
             SettingsChange::ShowHidden(show) => s.show_hidden = show,
+            SettingsChange::CheckUpdates(on) => s.check_updates = on,
         }
         s.clamped()
     }
@@ -107,6 +111,7 @@ pub enum SettingsChange {
     DownloadFolder(Option<PathBuf>),
     TransfersAtOnce(usize),
     ShowHidden(bool),
+    CheckUpdates(bool),
 }
 
 /// What the Settings page shows: the settings, and the folder "default" stands for.
@@ -147,7 +152,9 @@ impl App {
 
     /// The settings remembered last time (`remember`). Prefs from before Settings existed have
     /// no section: the defaults, with ⌘⇧.'s last state (which used to be remembered) as the
-    /// hidden-files default.
+    /// hidden-files default. The service hears whether to check for updates by itself: the
+    /// launch check comes from here, so only a run that remembers its settings (the app, never
+    /// a headless run or a test on `NoStore` without `remember`) checks.
     pub(super) fn restore_settings(&mut self) {
         let saved = self.saved().settings.clone();
         let settings = match saved {
@@ -155,6 +162,7 @@ impl App {
             None => Settings { show_hidden: self.saved().show_hidden.unwrap_or(true), ..Settings::default() },
         };
         self.apply_settings(settings, true);
+        self.auto_updates(self.settings.check_updates);
     }
 
     /// A control on the Settings page: applied at once, remembered, and told to the other main
@@ -164,6 +172,10 @@ impl App {
         let new = self.settings.with(change);
         if new != self.settings {
             let theme = self.settings.theme;
+            // The service's updater is one for every window: told once, from here.
+            if new.check_updates != self.settings.check_updates {
+                self.auto_updates(new.check_updates);
+            }
             self.apply_settings(new, true);
             let settings = self.settings.clone();
             self.save(|s| {

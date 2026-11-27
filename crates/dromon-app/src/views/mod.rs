@@ -145,6 +145,15 @@ pub fn effect(fx: Effect, tx: &mut Tx) {
                 }
             });
         }
+        // Links the app builds itself (a release's GitHub page), never refused; tests and
+        // headless runs open nothing (Rune records them).
+        Effect::OpenUrl(url) => {
+            if let Err(e) = tx.open_url(&url) {
+                eprintln!("dromon: couldn't open the release page: {e}");
+            }
+        }
+        Effect::Quit { relaunch: true } => tx.relaunch(),
+        Effect::Quit { relaunch: false } => tx.quit(),
         Effect::ReadClipboard { as_move } => {
             tx.read_clipboard(move |s: &mut App, content: &rune::ClipboardContent, tx: &mut Tx| {
                 pasted(s, content, as_move, tx)

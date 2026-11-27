@@ -195,6 +195,7 @@ clock, so every transition is a unit test.
 | Inline name field | `state::edit::Edit` | `edit::step` → `EditEffect` |
 | ⌘K palette | `state::palette::Phase` | `palette::step` |
 | Done flourish | `state::transfers::Flourish` | stepped by `views::transfers::poll` |
+| Update (check, toast, install) | `state::update::Phase` | `update::step` → `update::Out` |
 
 ### Agent checklist
 
@@ -363,7 +364,7 @@ Finding the file for a change.
 | `views/` | One module per part of the window; `views/mod.rs` has `view`, `run`, `effect`, `Paint`. |
 | `theme/` | Tokens, type scale, springs, bundled fonts, the contrast audit. See [ui.md](ui.md). |
 | `icons/` | The icon set (`IconPair`, 1× and 2× bodies) and its pixel tests. |
-| `service/` | The service thread: manager (`mod.rs`), connection task (`conn.rs`), lifecycle, auth routing, polling, wake checks, file ops, host files, the transfer engine task. |
+| `service/` | The service thread: manager (`mod.rs`), connection task (`conn.rs`), lifecycle, auth routing, polling, wake checks, file ops, host files, the transfer engine task, the updater (`update*.rs`: checks, verification, the platforms' installers). |
 | `fixture/` | The data-driven fake backend and the demo. |
 | `scenes.rs`, `scenes_settings.rs` | Named states for `--scene`, the goldens and the audits. |
 | `windows.rs` | Rune windows: the main windows' `Fleet`, opening and placing them. |

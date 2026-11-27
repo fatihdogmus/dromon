@@ -97,12 +97,14 @@ fn settings_round_trip_through_the_prefs_file_format() {
         download_folder: Some(folder("dl")),
         transfers_at_once: 6,
         show_hidden: false,
+        check_updates: false,
     };
     let saved = Saved { settings: Some(settings), ..Saved::default() };
     let json = serde_json::to_value(&saved).unwrap();
     let section = &json["settings"];
     assert_eq!((section["theme"].as_str(), section["density"].as_str()), (Some("light"), Some("compact")));
     assert_eq!(section["transfers_at_once"], 6);
+    assert_eq!(section["check_updates"], false);
     let back: Saved = serde_json::from_value(json).unwrap();
     assert_eq!(back, saved);
     // A section missing some keys (another version) takes the defaults for those alone.
@@ -197,12 +199,14 @@ fn a_remembered_limit_is_sent_at_launch_and_the_default_is_not() {
     let sent = Recorder::default();
     s.backend = Box::new(sent.clone());
     s.remember(Saved::default(), Box::new(Recorded::default()));
-    assert!(sent.sent().is_empty(), "the engines start at 3");
+    // The updater hears whether to check by itself at every launch (`update.rs`).
+    let auto = Command::Update(crate::state::service::UpdateCommand::Auto(true));
+    assert_eq!(sent.sent(), std::slice::from_ref(&auto), "the engines start at 3");
     let saved = Saved { settings: Some(Settings { transfers_at_once: 6, ..Settings::default() }), ..Saved::default() };
     let mut s = fixture::app(fixture::demo());
     s.backend = Box::new(sent.clone());
     s.remember(saved, Box::new(Recorded::default()));
-    assert_eq!(sent.sent(), [Command::Transfer(TransferCommand::PerHost(6))]);
+    assert_eq!(sent.sent(), [auto.clone(), Command::Transfer(TransferCommand::PerHost(6)), auto]);
 }
 
 #[test]
@@ -235,7 +239,8 @@ fn the_page_moves_by_its_step() {
     assert_eq!(page::step(on(Browsing), PageEvent::Leave), Page::Files);
     assert_eq!(page::step(Page::Files, PageEvent::Leave), Page::Files);
     assert_eq!(Page::default(), Page::Files);
-    assert_eq!(SettingsSection::ALL.map(SettingsSection::title), ["Appearance", "Transfers", "Browsing"]);
+    assert_eq!(SettingsSection::ALL.map(SettingsSection::title), ["Appearance", "Transfers", "Browsing", "General"]);
+    assert_eq!(SettingsSection::General.key(), "settings-tab-general");
 }
 
 /// Pick a palette row by its key, the query typed first (an empty query may not list it).

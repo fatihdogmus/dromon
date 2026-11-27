@@ -237,6 +237,54 @@ fn the_switch_sets_the_hidden_files_default() {
     assert!(rt.state.settings.show_hidden);
 }
 
+/// A newer version found, which this copy installs itself.
+fn found(s: &mut App) {
+    use crate::state::update::{Method, Offer, Package, UpdateEvent, Version};
+    let offer = Offer {
+        version: Version::parse("9.9.9").unwrap(),
+        page: "https://github.com/fatihdogmus/dromon/releases/tag/9.9.9".into(),
+        method: Method::Install(Package::Dmg),
+    };
+    s.apply(crate::state::ServiceEvent::Update(UpdateEvent::Available(offer)));
+}
+
+#[test]
+fn general_checks_for_updates_and_says_what_it_found() {
+    let mut rt = page(SettingsSection::General);
+    assert_eq!(text_of(&rt, "update-status"), format!("You have Dromon {}", env!("CARGO_PKG_VERSION")));
+    // The demo's backend finds nothing newer, with no network.
+    click(&mut rt, "update-check");
+    assert_eq!(text_of(&rt, "update-status"), format!("Dromon {} is up to date", env!("CARGO_PKG_VERSION")));
+    click(&mut rt, "updates-toggle");
+    assert!(!rt.state.settings.check_updates);
+    click(&mut rt, "updates-toggle");
+    assert!(rt.state.settings.check_updates);
+    // A newer version: the line says so and Update and Release notes come beside Check now.
+    rt.update(|s, _| found(s));
+    settle(&mut rt);
+    assert_eq!(text_of(&rt, "update-status"), "Dromon 9.9.9 is available.");
+    assert!(rt.find("settings-update-install").is_some() && rt.find("settings-update-notes").is_some());
+    let offences = crate::ui_a11y_tests::audit(&tree(&rt));
+    assert!(offences.is_empty(), "{offences:?}");
+}
+
+#[test]
+fn the_update_toast_offers_update_later_and_release_notes() {
+    let mut rt = scene_runtime(scenes::listing);
+    rt.update(|s, _| found(s));
+    settle(&mut rt);
+    assert_eq!(text_of(&rt, "toast-update-text"), "Dromon 9.9.9 is available");
+    for key in ["toast-update-install", "toast-update-later", "toast-update-notes"] {
+        assert!(rt.find(key).is_some(), "{key}");
+    }
+    let offences = crate::ui_a11y_tests::audit(&tree(&rt));
+    assert!(offences.is_empty(), "{offences:?}");
+    click(&mut rt, "toast-update-notes");
+    assert_eq!(rt.take_url_requests(), ["https://github.com/fatihdogmus/dromon/releases/tag/9.9.9"]);
+    click(&mut rt, "toast-update-later");
+    assert!(rt.find("toast-update").is_none(), "Later hides it");
+}
+
 #[test]
 fn the_page_shows_a_change_made_in_another_window() {
     let mut rt = page(SettingsSection::Transfers);

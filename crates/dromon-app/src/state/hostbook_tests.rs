@@ -109,9 +109,9 @@ fn recent_hosts_are_capped_remembered_and_checked_again_when_read_back() {
     assert_eq!(ids.len(), MAX_RECENT - 1);
     assert_eq!(ids[0], id("10.9.0.11:22"));
     assert!(!ids.contains(&id("10.9.0.10:22")));
-    assert!(
-        matches!(&sent.sent()[..], [Command::HostBook(HostBookCommand::Recent(list))] if list.len() == MAX_RECENT - 1)
-    );
+    // (Besides the updater's `Auto`, which every restore sends: `state/update.rs`.)
+    let book: Vec<Command> = sent.sent().into_iter().filter(|c| !matches!(c, Command::Update(_))).collect();
+    assert!(matches!(&book[..], [Command::HostBook(HostBookCommand::Recent(list))] if list.len() == MAX_RECENT - 1));
 }
 
 #[test]

@@ -54,6 +54,14 @@ serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 zeroize.workspace = true
+# Updates (`service/update.rs`): one HTTPS request to GitHub's releases API per check, and the
+# release's files when installing. rustls with ring and webpki's roots: no OpenSSL, no system
+# TLS library. `SHA256SUMS.minisig` is checked with minisign-verify against the release key built
+# into the app, and the download's SHA-256 (ring's, the TLS provider ureq already builds) against
+# `SHA256SUMS`.
+minisign-verify = "0.3"
+ring = "0.17"
+ureq = { version = "3.5", default-features = false, features = ["rustls"] }
 
 [dev-dependencies]
 dromon-testkit.workspace = true

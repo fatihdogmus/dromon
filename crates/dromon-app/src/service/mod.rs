@@ -21,6 +21,10 @@
 //! all of it when the UI goes away. `hostfiles.rs` owns the files: discovery and its watcher,
 //! the saved hosts' `hosts.conf`, and "Add to SSH config".
 //!
+//! Updates (`update.rs`) are a task of their own: checks, downloads and their verification
+//! (`update_verify.rs`), and the platforms' installers (`update_platform.rs`, `update_macos.rs`,
+//! `update_windows.rs`).
+//!
 //! The manager also watches the clocks for a sleep (`wake.rs`; Rune reports no wake or network
 //! change): after one, and when a window gains focus, every live connection checks its session
 //! and a reconnect waiting out its backoff tries at once.
@@ -37,6 +41,14 @@ pub(crate) mod poll;
 /// Folder size walks for the Properties sheet; the fixture backend counts with it too.
 pub(crate) mod sizes;
 mod transfers;
+/// Checking for, checking and installing a newer Dromon.
+mod update;
+#[cfg(any(target_os = "macos", test))]
+mod update_macos;
+mod update_platform;
+mod update_verify;
+#[cfg(any(windows, test))]
+mod update_windows;
 /// Sleep detection and connection checks (spike S6).
 mod wake;
 /// The windows as a host's task sees them; the fixture backend uses it too.
@@ -113,6 +125,10 @@ impl RuneSink {
     fn deliver(handle: &rune::AppHandle<App>, ev: ServiceEvent) {
         handle.update_if(move |app, tx| {
             app.apply(ev);
+            // An update in place: quit (and start the new version).
+            for fx in app.take_update_effects() {
+                crate::views::effect(fx, tx);
+            }
             // A refresh that changed rows animates them (§4.5), though no input caused it.
             if app.take_animate() {
                 tx.animated();
@@ -266,10 +282,16 @@ async fn serve<S: Sink>(mut commands: Commands, sink: S, cfg: Config, mut wakes:
     let mut conns: HashMap<HostId, ConnHandle> = HashMap::new();
     // How each window shows, as it last said; nothing polls for a window until it says.
     let mut windows: BTreeMap<WindowId, Visibility> = BTreeMap::new();
+    // Started by the first update command, which only the app sends (`update.rs`).
+    let mut updater: Option<update::Updater> = None;
     loop {
         tokio::select! {
             cmd = commands.recv() => match cmd {
                 Some((_, Command::HostBook(cmd))) => book.command(cmd, &mut known),
+                Some((from, Command::Update(cmd))) => {
+                    let updater = updater.get_or_insert_with(|| update::start(sink.clone(), update::Setup::for_app()));
+                    let _ = updater.send((from, cmd));
+                }
                 Some((from, cmd)) => dispatch(from, cmd, &known, &mut conns, &shared, &sink, &mut windows),
                 None => break,
             },
@@ -389,7 +411,7 @@ fn dispatch<S: Sink>(
             }
         }
         // The manager's loop takes these first.
-        Command::HostBook(_) => {}
+        Command::HostBook(_) | Command::Update(_) => {}
     }
 }
 

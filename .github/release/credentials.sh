@@ -6,6 +6,8 @@
 #   Linux (GPG)  required for a release (it costs nothing); a dry run without it warns.
 #   Windows      WINDOWS_SIGNING = azure | sslcom | signpath; unset ships the MSI unsigned.
 #   macOS        Developer ID + notary key; none ships the app ad-hoc signed and unnotarized.
+#   Updates      MINISIGN_SECRET_KEY, required for a release (the app's updater installs only
+#                a minisign-signed SHA256SUMS); a dry run without it warns and skips it.
 #
 # A platform whose credentials are set only in part fails the run (a half-configured backend is
 # a mistake, not a choice). Repository variables DROMON_REQUIRE_SIGNED_WINDOWS and
@@ -13,7 +15,7 @@
 # unsigned (a dry run warns).
 #
 # Outputs: windows (none|azure|sslcom|signpath), macos (true|false), apple-team-id, gpg
-# (true|false), gpg-fingerprint.
+# (true|false), gpg-fingerprint, minisign (true|false).
 # shellcheck source-path=SCRIPTDIR source=lib.sh
 . "$(dirname "$0")/lib.sh"
 
@@ -93,6 +95,16 @@ else
   gpg=true
   summary "- Linux: packages and SHA256SUMS GPG-signed by $fingerprint."
 fi
+
+# ---- Updates (minisign) --------------------------------------------------------------------
+if [ "${HAS_MINISIGN_SECRET_KEY:-}" = true ]; then
+  minisign=true
+  summary "- Updates: SHA256SUMS minisign-signed with the key the app trusts (packaging/update/release-key.pub)."
+else
+  minisign=false
+  required "Updates: no MINISIGN_SECRET_KEY; SHA256SUMS gets no minisign signature, so the app installs no update from this release."
+  summary "- :warning: Updates: no minisign key; the app's updater would refuse this release."
+fi
 summary "- All files: Sigstore build-provenance attestations (published releases only)."
 
 output windows "$windows"
@@ -100,3 +112,4 @@ output macos "$macos"
 output apple-team-id "$([ "$macos" != true ] || echo "$APPLE_TEAM_ID")"
 output gpg "$gpg"
 output gpg-fingerprint "$fingerprint"
+output minisign "$minisign"

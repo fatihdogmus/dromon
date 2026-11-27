@@ -5,7 +5,7 @@
 #
 # Environment: VERSION, MODE (release|check), GITHUB_REPOSITORY, GITHUB_SERVER_URL,
 # WINDOWS_SIGNING (none|azure|sslcom|signpath), MACOS_SIGNED, GPG_SIGNED (true|false),
-# GPG_FINGERPRINT.
+# GPG_FINGERPRINT, MINISIGN_SIGNED (true|false).
 # shellcheck source-path=SCRIPTDIR source=lib.sh
 . "$(dirname "$0")/lib.sh"
 
@@ -17,6 +17,7 @@ v=${VERSION:?}
 windows=${WINDOWS_SIGNING:-none}
 macos=${MACOS_SIGNED:-false}
 gpg=${GPG_SIGNED:-false}
+minisign=${MINISIGN_SIGNED:-false}
 download="$server/$repo/releases/download/$v"
 
 case "$windows" in
@@ -52,7 +53,7 @@ cat <<EOF
 |---|---|---|---|
 $rows
 
-Every file has a [build provenance attestation]($server/$repo/attestations) (Sigstore): it was built by this repository's release workflow, run from \`main\`, at tag \`$v\`. \`SHA256SUMS\` lists every file's SHA-256$([ "$gpg" != true ] || echo "; \`SHA256SUMS.asc\` is its GPG signature").
+Every file has a [build provenance attestation]($server/$repo/attestations) (Sigstore): it was built by this repository's release workflow, run from \`main\`, at tag \`$v\`. \`SHA256SUMS\` lists every file's SHA-256$([ "$gpg" != true ] || echo "; \`SHA256SUMS.asc\` is its GPG signature")$([ "$minisign" != true ] || echo "; \`SHA256SUMS.minisig\` is its minisign signature, which Dromon's updater checks before it installs anything").
 
 ## Check a download
 
@@ -82,6 +83,19 @@ else
 Any file, against \`SHA256SUMS\` (not GPG-signed in this build; the attestation above is the signed proof):
 
 \`\`\`sh
+sha256sum --check --ignore-missing SHA256SUMS
+\`\`\`
+EOF
+fi
+
+if [ "$minisign" = true ]; then
+  cat <<EOF
+
+Any file, with [minisign](https://jedisct1.github.io/minisign/) and the key Dromon's updater trusts (\`packaging/update/release-key.pub\` in the repository):
+
+\`\`\`sh
+curl -L -o dromon-update-key.pub $server/$repo/raw/$v/packaging/update/release-key.pub
+minisign -V -p dromon-update-key.pub -m SHA256SUMS -x SHA256SUMS.minisig   # "Trusted comment: dromon $v"
 sha256sum --check --ignore-missing SHA256SUMS
 \`\`\`
 EOF
