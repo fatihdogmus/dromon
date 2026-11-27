@@ -32,6 +32,7 @@ fn a_rows_menu_and_its_disabled_items() {
         shape(&s, &row),
         [
             ("open", true),
+            ("edit", true),
             ("download", true),
             ("terminal", true),
             ("—", false),
@@ -66,7 +67,7 @@ fn a_rows_menu_and_its_disabled_items() {
     // Reconnecting: everything that touches the server is off; copy, copy path and Properties
     // (what the listing knows) stay.
     s.apply(ServiceEvent::Status { host: prod(), status: ConnStatus::Reconnecting { attempt: 1 } });
-    for id in ["open", "download", "terminal", "paste", "new-folder", "rename", "delete"] {
+    for id in ["open", "edit", "download", "terminal", "paste", "new-folder", "rename", "delete"] {
         assert!(!enabled(&s, id), "{id}");
     }
     assert!(enabled(&s, "copy") && enabled(&s, "cut") && enabled(&s, "copy-path") && enabled(&s, "properties"));

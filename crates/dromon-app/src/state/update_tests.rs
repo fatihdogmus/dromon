@@ -186,7 +186,7 @@ fn checks_that_find_nothing_or_fail_show_no_toast() {
 fn update_installs_at_once_without_transfers() {
     let mut u = Update::default();
     ev(&mut u, UpdateEvent::Available(installable()));
-    assert_eq!(step(&mut u, Input::Update { transfers: 0 }), [Out::Send(UpdateCommand::Install)]);
+    assert_eq!(step(&mut u, Input::Update { stops: 0 }), [Out::Send(UpdateCommand::Install)]);
     assert_eq!(u.phase, Phase::Installing(installable()));
     let toast = u.toast().unwrap();
     assert_eq!((toast.text.as_str(), toast.tone, toast.buttons.len()), ("Updating to Dromon 0.3.0…", Tone::Busy, 0));
@@ -203,13 +203,13 @@ fn update_installs_at_once_without_transfers() {
 fn with_transfers_running_update_asks_first() {
     let mut u = Update::default();
     ev(&mut u, UpdateEvent::Available(installable()));
-    assert!(step(&mut u, Input::Update { transfers: 2 }).is_empty(), "nothing installs yet");
+    assert!(step(&mut u, Input::Update { stops: 2 }).is_empty(), "nothing installs yet");
     assert!(u.confirming());
     assert!(u.toast().is_none(), "the sheet asks instead");
     // Cancel keeps going, as quitting's does.
     step(&mut u, Input::Cancel);
     assert_eq!(u.phase, Phase::Available(installable()));
-    step(&mut u, Input::Update { transfers: 2 });
+    step(&mut u, Input::Update { stops: 2 });
     // News meanwhile doesn't take the question away.
     ev(&mut u, UpdateEvent::Available(installable()));
     assert!(u.confirming());
@@ -221,7 +221,7 @@ fn with_transfers_running_update_asks_first() {
 fn a_failed_install_says_why_and_offers_it_again() {
     let mut u = Update::default();
     ev(&mut u, UpdateEvent::Available(installable()));
-    step(&mut u, Input::Update { transfers: 0 });
+    step(&mut u, Input::Update { stops: 0 });
     ev(&mut u, UpdateEvent::InstallFailed("its checksums aren't signed with Dromon's release key".into()));
     let toast = u.toast().unwrap();
     assert_eq!(toast.tone, Tone::Error);
@@ -230,7 +230,7 @@ fn a_failed_install_says_why_and_offers_it_again() {
     assert_eq!(u.buttons(), [Button::Update, Button::Notes]);
     step(&mut u, Input::Later);
     assert!(u.toast().is_none());
-    assert_eq!(step(&mut u, Input::Update { transfers: 0 }), [Out::Send(UpdateCommand::Install)], "again");
+    assert_eq!(step(&mut u, Input::Update { stops: 0 }), [Out::Send(UpdateCommand::Install)], "again");
 }
 
 #[test]
@@ -241,7 +241,7 @@ fn copies_that_dont_install_themselves_offer_the_command_or_the_page() {
     assert_eq!(toast.text, "Dromon 0.3.0 is available. Update with brew upgrade --cask dromon");
     assert_eq!(toast.buttons, [Button::Copy, Button::Later, Button::Notes]);
     assert_eq!(step(&mut u, Input::Copy), [Out::Copy(BREW_UPGRADE.into())]);
-    assert!(step(&mut u, Input::Update { transfers: 0 }).is_empty(), "never installs it itself");
+    assert!(step(&mut u, Input::Update { stops: 0 }).is_empty(), "never installs it itself");
     let page = "https://github.com/fatihdogmus/dromon/releases/tag/0.3.0";
     assert_eq!(step(&mut u, Input::Notes), [Out::Open(page.into())]);
 
@@ -249,7 +249,7 @@ fn copies_that_dont_install_themselves_offer_the_command_or_the_page() {
     let mut u = Update::default();
     ev(&mut u, UpdateEvent::Available(offer(Method::Page(Manual::NoKey))));
     assert_eq!(u.toast().unwrap().buttons, [Button::Later, Button::Notes]);
-    assert!(step(&mut u, Input::Update { transfers: 0 }).is_empty());
+    assert!(step(&mut u, Input::Update { stops: 0 }).is_empty());
     assert!(step(&mut u, Input::Copy).is_empty());
     assert_eq!(u.buttons(), [Button::Notes]);
     let status = u.status(&v("0.2.0"));
@@ -369,6 +369,32 @@ fn the_update_sheet_is_modal_and_escape_cancels_it() {
     update(&mut s, UpdateAction::Confirm);
     assert_eq!(updates(&rec), [UpdateCommand::Install]);
     assert_eq!(s.downloads, PathBuf::from("Downloads"), "nothing else changed");
+}
+
+#[test]
+fn an_edit_not_on_the_server_yet_makes_update_ask_and_none_lets_it_go_on() {
+    use crate::state::{EditId, RemoteEditEvent};
+    let (mut s, rec) = recorded();
+    // index.html is being edited (its copy open in the editor).
+    let id = EditId(7);
+    let (host, path) = (HostId("prod".into()), dromon_core::RemotePath::new("/var/www/site/index.html"));
+    let local = PathBuf::from("/cache/editing/prod-1/index.html");
+    s.apply(ServiceEvent::RemoteEdit(RemoteEditEvent::Opened { id, host: host.clone(), path, local }));
+    s.apply(ServiceEvent::Update(UpdateEvent::Available(installable())));
+    assert_eq!(s.edits.unsaved(), 0, "open in the editor, nothing to upload");
+    // A save uploading: the sheet asks, with no transfer running.
+    s.apply(ServiceEvent::RemoteEdit(RemoteEditEvent::Uploading { id, host: host.clone() }));
+    assert_eq!((s.transfers.active(), s.edits.unsaved()), (0, 1));
+    update(&mut s, UpdateAction::Update);
+    assert!(s.update.confirming(), "the edit's save would stop");
+    assert!(updates(&rec).is_empty());
+    update(&mut s, UpdateAction::Cancel);
+    // Saved: nothing stops, and Update installs at once.
+    let to = dromon_core::RemotePath::new("/var/www/site/index.html");
+    s.apply(ServiceEvent::RemoteEdit(RemoteEditEvent::Saved { id, host, to }));
+    update(&mut s, UpdateAction::Update);
+    assert!(!s.update.confirming(), "nothing unsaved: straight on");
+    assert_eq!(updates(&rec), [UpdateCommand::Install]);
 }
 
 #[test]

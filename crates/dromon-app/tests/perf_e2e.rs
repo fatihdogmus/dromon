@@ -142,6 +142,7 @@ fn perf_first_rows_of_a_10k_folder() {
         hosts_file: None,
         hosts: Vec::new(),
         without_env: vec!["SSH_AUTH_SOCK".into()],
+        editing_root: None,
     };
     service::start(commands, TestSink(tx), cfg).expect("start the service thread");
     let mut runtime = dromon_app::app().headless_runtime(SIZE, Env::new(true, 2.0));

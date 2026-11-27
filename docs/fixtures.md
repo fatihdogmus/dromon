@@ -233,6 +233,25 @@ In the demo, `index.html` is HTML, `package-lock.json` (412 KB) is cut after its
 `server.log` (4.8 MB) shows its last 256 KB, `favicon.ico` and `/srv/media/photos` are pictures,
 and `backup-2026-11-01.tar.gz` has no preview.
 
+### Editing in a local editor
+
+Edit (⌘E) works on a fixture without a file on disk or an editor, the same on every run
+(`fixture/remote_edit.rs`), and nothing else needs to be written down for it:
+
+- Edit on a file of the tree answers at once with its "copy", a made-up path under
+  `dromon-editing/<host>/<path>` that nothing writes (a windowed run has nothing to open there).
+  A folder, a missing file or a host that isn't connected fails as the service would.
+- There's no clock and no editor: each time a window gains focus (`Command::Poll`: in a script
+  `{"focus": false}` then `{"focus": true}`, as if the user came back from saving) every file
+  being edited on that host is saved. A save checks the tree first, as the service checks the
+  server: when the file has another size or date than the edit last downloaded or uploaded, it's
+  a conflict and the sheet asks. The poll applies its step of `changes` before the save, so a
+  `{"modify": …}` of the edited file brings the conflict on that focus.
+- An upload lands in the tree as a file of the size the edit last downloaded, dated the
+  fixture's `now`; Keep both lands under the next free name (`notes (1).txt`) and the edit stays
+  on its path; Discard takes the tree's copy; a folder that can't be written fails the save
+  (Retry). Stop editing and Disconnect end edits.
+
 ### Entries
 
 `{"name": "index.html", "kind": "file", "size": 14812, "mtime": "2026-11-24T18:00:00Z", "mode": "0644"}`

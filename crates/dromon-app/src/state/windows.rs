@@ -12,7 +12,8 @@
 //! - ⌘N opens a window on the welcome state ("Pick a host"), cascaded from the one it came from
 //!   (`crate::windows` places it).
 //! - ⌘W closes the window. Closing the last one quits the app, on macOS too; only then do
-//!   running transfers ask first ("N transfers in progress").
+//!   running transfers and edited files' saves not on the server yet ask first ("N transfers
+//!   in progress").
 //! - One window leads ([`App::leads`]): the first one open. App-wide signs, like the Dock
 //!   badge, taskbar progress and notifications, go through it alone, so there's one of each:
 //!   every window keeps its transfers' `Watch` current, and only the leader's speaks. When it
@@ -138,6 +139,7 @@ impl App {
         app.wall_ms = self.wall_ms;
         app.downloads = self.downloads.clone();
         app.transfers.jobs = self.transfers.jobs.clone();
+        app.edits = self.edits.for_window();
         // It times the jobs from when this window saw them start, and speaks once it leads.
         app.transfers.watch = self.transfers.watch.follower();
         Some(app)

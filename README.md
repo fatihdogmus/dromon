@@ -138,6 +138,8 @@ Linux needs `libxkbcommon-dev` and `libwayland-dev`. Want to look around without
 
 **Files.** Browse, sort, filter, search by name through every subfolder, new folder, rename, delete, copy path. Copy, cut and paste work across hosts and windows, and you can drag rows onto a folder, a breadcrumb or another host. *Open in Terminal* opens your own terminal app already ssh'd into the folder (pick the app under Settings → General). Right-click for everything else.
 
+**Edit in your own editor.** ⌘E on a text file opens it in the app your system uses for it, and every save there goes back to the server. If someone changed the file on the server in the meantime, Dromon asks first: replace theirs, keep both, or take theirs. The transfers popover lists what you're editing, with *Stop editing*; the local copies stay private and are removed when you stop, disconnect or quit.
+
 **Transfers.** Downloads and uploads of files and whole folders, with resume, Chrome-style `name (1)` renaming or a Replace / Keep both / Skip choice on clashes. Progress in the toolbar, a badge in the Dock or taskbar, and a notification when a long job finishes while you're elsewhere.
 
 **Made to fit in.** Several windows, light and dark themes, compact or comfortable rows, your own download folder and number of parallel transfers. Respects reduce motion and increased contrast, and every control works with the keyboard and screen readers.
@@ -159,6 +161,7 @@ Linux needs `libxkbcommon-dev` and `libwayland-dev`. Want to look around without
   <tr><td><kbd>⌘⇧K</kbd></td><td>Quick connect</td><td><kbd>⌘⇧J</kbd></td><td>Show transfers</td></tr>
   <tr><td><kbd>⌘⇧.</kbd></td><td>Show hidden files</td><td><kbd>⌘N</kbd> · <kbd>⌘,</kbd></td><td>New window · Settings</td></tr>
   <tr><td><kbd>Space</kbd></td><td>Quick preview: an image, a text file, a log's end</td><td><kbd>⌘⇧T</kbd></td><td>Open in Terminal: your terminal app, signed in, in this folder</td></tr>
+  <tr><td><kbd>⌘E</kbd></td><td>Edit a text file in your editor; each save uploads it</td><td></td><td></td></tr>
 </table>
 
 On Windows and Linux, <kbd>Ctrl</kbd> takes the place of <kbd>⌘</kbd>; Delete deletes and <kbd>F5</kbd> refreshes. Or just start typing a file's name to jump to it.

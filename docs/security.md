@@ -23,6 +23,7 @@ This guide uses typed sections with real fields, not title-only labels.
 - [Reference: The Askpass Helper and Its IPC](#reference-the-askpass-helper-and-its-ipc)
 - [Decision: ssh Arguments Only Through dromon-ssh](#decision-ssh-arguments-only-through-dromon-ssh)
 - [Decision: Host Keys Are ssh's Call](#decision-host-keys-are-sshs-call)
+- [Decision: Local Copies of Files Being Edited](#decision-local-copies-of-files-being-edited)
 - [Standard: Tracing and Logs](#standard-tracing-and-logs)
 - [Reference: The Release Signing Boundary](#reference-the-release-signing-boundary)
 - [Decision: Updates Install Only What the Release Key Signed](#decision-updates-install-only-what-the-release-key-signed)
@@ -226,6 +227,57 @@ Dromon behaves like the user's ssh, `StrictHostKeyChecking` and all.
 - Does the change leave `known_hosts` to ssh?
 - Is a host-key prompt still always shown to the user?
 
+## Decision: Local Copies of Files Being Edited
+
+**Status:** Accepted
+**Scope:** `dromon-app/src/service/remote_edit.rs`, `state/remote_edit.rs`, `views/mod.rs` (`Effect::OpenFile`)
+
+### Context
+
+Editing in a local editor (⌘E) needs a copy of a remote file on disk for the user's app to
+open, and remote files can hold secrets (an `.env`, a config). Quick preview never writes one;
+this feature has to.
+
+### Decision
+
+Copies live only in a private folder of the app's cache, only as long as the edit, and nothing
+about their contents is logged or traced.
+
+### Rules and examples
+
+- **Where.** `<the app's cache folder>/editing/<run>/<host>-<hash of host and path>/<file name>`
+  (`rune::dirs::AppDirs`): one folder per service run, one per edited file in it, the file's own
+  name kept so the editor shows it (on Windows, what its names can't hold becomes `_`). The
+  folder is `service::Config::editing_root`: only the real app's `Config::for_app` names the
+  cache folder; a test passes its own temporary folder, or `None`, where an edit fails at once,
+  so no test ever writes to or sweeps the user's cache.
+- **Who can read them.** Every folder from `editing` down is `0700` and each copy `0600` on
+  Unix, so what an editor writes there (its temporary files, a renamed save) stays private too.
+  A link in a folder's place is refused. On Windows the user's local cache folder is private to
+  them already and what's made in it inherits that.
+- **How long.** An edit's folder goes when it stops (Stop editing), when its host disconnects
+  and when the service stops (quitting). Each run holds a lock on `<run>.lock` while it lives;
+  at start the service removes every run folder whose lock nobody holds (a crash, or a quit
+  that ended before the service could clean up), never a living run's (another Dromon's).
+- **Only the service thread touches them.** The UI thread never reads or writes a copy: it
+  gets the copy's path in `RemoteEditEvent::Opened` and hands it to Rune's `Tx::open_path`
+  (`Effect::OpenFile`), which opens the system's default app off the UI thread (no shell).
+- **Nothing logged.** Events carry ids, paths, sizes and dates, never bytes; trace lines name
+  the kind, host and id only (`RemoteEditOpened host=prod id=…`), never a path or an error.
+  Dromon's own line when a copy can't be opened names no path (Rune's stderr line, when the
+  system's opener fails later, names the local copy's path; never its contents).
+
+### Consequences
+
+A crash can leave a copy on disk until Dromon starts again. Users who need a file never to
+touch the disk can still use quick preview, which keeps it in memory.
+
+### Agent checklist
+
+- Does any new code write a copy outside the edit's folder, or log its path or contents?
+- Is every new folder made with `private_dir`, and every copy restricted to the user?
+- Does a new test's `Config` keep `editing_root` out of the user's cache folder?
+
 ## Standard: Tracing and Logs
 
 **Scope:** `DROMON_TRACE`, connection logs, `eprintln!` anywhere
@@ -243,6 +295,8 @@ Make runs observable without exposing what users or servers sent.
 - The live watch's output names events only (`--format %e`), never files, and its trace line
   (`Live host=… state=…`) never names the folder.
 - Notifications show no more than the transfers popover does.
+- Files being edited in a local editor are never logged or traced beyond their kind, host and
+  id ([Local Copies of Files Being Edited](#decision-local-copies-of-files-being-edited)).
 
 ### Agent checklist
 

@@ -89,6 +89,7 @@ impl Harness {
             hosts_file: Some(hosts_conf.clone()),
             hosts: Vec::new(),
             without_env: vec!["SSH_AUTH_SOCK".into()],
+            editing_root: None,
         };
         service::start(commands, TestSink(tx), cfg).expect("start the service thread");
         let mut rt = dromon_app::app().headless_runtime(SIZE, Env::new(true, 1.0));

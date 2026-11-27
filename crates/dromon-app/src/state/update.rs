@@ -12,7 +12,8 @@
 //! - A newer release shows a toast, "Dromon 0.3.0 is available", with Update (Copy command for a
 //!   package manager's install), Later and Release notes. A check that fails on its own says so
 //!   on the Settings page only.
-//! - Update never runs under transfers: while some run, a sheet asks first, as quitting does.
+//! - Update never runs under transfers or edits not on the server yet: while some are, a sheet
+//!   asks first, as quitting does.
 //! - Once the new version is in place the app quits, starting the new one on macOS.
 //!
 //! Every window mirrors the service's news ([`UpdateEvent`] goes to all of them, `Installed` to
@@ -275,7 +276,7 @@ pub enum Phase {
     UpToDate,
     CheckFailed(String),
     Available(Offer),
-    /// Update was pressed while transfers run: the sheet asks.
+    /// Update was pressed while transfers run or edits aren't saved: the sheet asks.
     Confirm(Offer),
     Installing(Offer),
     InstallFailed {
@@ -318,9 +319,10 @@ pub struct Update {
 pub enum Input {
     Event(UpdateEvent),
     CheckNow,
-    /// Update, with `transfers` running.
+    /// Update, while it would stop `stops` things: transfers running, and edits whose change
+    /// isn't on the server yet.
     Update {
-        transfers: usize,
+        stops: usize,
     },
     /// The sheet's Update anyway.
     Confirm,
@@ -347,9 +349,9 @@ pub fn step(u: &mut Update, input: Input) -> Vec<Out> {
     match input {
         Input::Event(ev) => return event(u, ev),
         Input::CheckNow if !u.phase.busy() => return vec![Out::Send(UpdateCommand::Check)],
-        Input::Update { transfers } => {
+        Input::Update { stops } => {
             let Some(offer) = installable(&u.phase) else { return Vec::new() };
-            if transfers > 0 {
+            if stops > 0 {
                 u.phase = Phase::Confirm(offer);
                 return Vec::new();
             }
@@ -575,7 +577,7 @@ impl App {
     pub(super) fn update_action(&mut self, action: UpdateAction, fx: &mut Vec<Effect>) {
         let input = match action {
             UpdateAction::CheckNow => Input::CheckNow,
-            UpdateAction::Update => Input::Update { transfers: self.transfers.active() },
+            UpdateAction::Update => Input::Update { stops: self.transfers.active() + self.edits.unsaved() },
             UpdateAction::Confirm => Input::Confirm,
             UpdateAction::Cancel => Input::Cancel,
             UpdateAction::Later => Input::Later,

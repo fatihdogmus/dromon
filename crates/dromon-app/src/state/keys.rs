@@ -53,6 +53,9 @@ pub enum Shortcut {
     /// ⌘⇧T (Ctrl+Shift+T elsewhere): "Open in Terminal", in the cursor row if it's a folder,
     /// else in the folder on screen.
     OpenTerminal,
+    /// ⌘E (Ctrl+E elsewhere): edit the cursor row's file in a local editor. Never while a text
+    /// field has focus.
+    EditFile,
     /// ⌘, (Ctrl+, elsewhere): the Settings page.
     Settings,
     /// ⌘N (Ctrl+N elsewhere): another main window.
@@ -177,6 +180,7 @@ pub fn shortcut(ev: &KeyEvent, platform: KeyPlatform) -> Option<Shortcut> {
         Key::Command('f') => Shortcut::Filter,
         Key::Command('d') if !m.shift && !m.alt => Shortcut::Download,
         Key::Command('u') if !m.shift && !m.alt => Shortcut::Upload,
+        Key::Command('e') if !m.shift && !m.alt => Shortcut::EditFile,
         Key::Command(',') if !m.shift && !m.alt => Shortcut::Settings,
         Key::Command('n') if !m.shift && !m.alt => Shortcut::NewWindow,
         Key::Command('w') if !m.shift && !m.alt => Shortcut::CloseWindow,
@@ -388,6 +392,24 @@ mod tests {
             assert_eq!(on(Key::Command('n'), shift(primary), p), Some(Shortcut::File(FileKey::NewFolder)));
             assert_eq!(on(Key::Command('k'), shift(primary), p), Some(Shortcut::QuickConnect));
             assert_eq!(on(Key::Command('j'), shift(primary), p), Some(Shortcut::ShowTransfers));
+        }
+    }
+
+    #[test]
+    fn edit_is_cmd_e_and_clashes_with_nothing() {
+        let ctrl = Mods { ctrl: true, logo: false, ..CMD };
+        let shift = |m: Mods| Mods { shift: true, ..m };
+        let alt = |m: Mods| Mods { alt: true, ..m };
+        for p in [KeyPlatform::Mac, KeyPlatform::Windows, KeyPlatform::Linux] {
+            let primary = if p == KeyPlatform::Mac { CMD } else { ctrl };
+            assert_eq!(on(Key::Command('e'), primary, p), Some(Shortcut::EditFile), "{p:?}");
+            assert_eq!(on(Key::Command('e'), shift(primary), p), None, "{p:?}: ⌘⇧E is left alone");
+            assert_eq!(on(Key::Command('E'), shift(primary), p), None, "{p:?}: Shift applied");
+            assert_eq!(on(Key::Command('e'), alt(primary), p), None, "{p:?}: ⌥⌘E is left alone");
+            assert_eq!(on(Key::Text("e".into()), NONE, p), Some(Shortcut::Type("e".into())), "{p:?}: e still types");
+            // Its neighbours keep theirs.
+            assert_eq!(on(Key::Command('d'), primary, p), Some(Shortcut::Download));
+            assert_eq!(on(Key::Command('f'), primary, p), Some(Shortcut::Filter));
         }
     }
 

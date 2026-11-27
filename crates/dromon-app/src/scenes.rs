@@ -19,6 +19,8 @@ use crate::theme::Appearance;
 
 #[path = "scenes_preview.rs"]
 mod preview;
+#[path = "scenes_remote_edit.rs"]
+mod remote_edit;
 #[path = "scenes_settings.rs"]
 mod settings;
 #[path = "scenes_update.rs"]
@@ -707,6 +709,9 @@ pub const SCENES: &[Scene] = &[
     ("transfers", transfers),
     ("transfers-uploads", transfers_uploads),
     ("transfer-conflict", transfer_conflict),
+    ("editing", remote_edit::editing),
+    ("edit-conflict", remote_edit::edit_conflict),
+    ("edit-conflict-light", remote_edit::edit_conflict_light),
     ("drop-list", drop_list),
     ("drop-folder", drop_folder),
     ("toolbar-ring", toolbar_ring),

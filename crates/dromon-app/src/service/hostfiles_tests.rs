@@ -77,6 +77,7 @@ impl Files {
             hosts_file: Some(hosts_conf.clone()),
             hosts: Vec::new(),
             without_env: Vec::new(),
+            editing_root: None,
         };
         let (book, updates) = Book::start(&cfg);
         let (tx, events) = mpsc::unbounded_channel();

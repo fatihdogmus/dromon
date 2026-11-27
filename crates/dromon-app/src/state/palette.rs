@@ -21,6 +21,7 @@ use rune::TextEdit;
 use super::fuzzy;
 use super::keys::{Shortcut, host_chord};
 use super::menu::{TERMINAL_CHORD, delete_chord};
+use super::remote_edit::{EDIT_CHORD, RemoteEditAction};
 use super::{Action, App, Effect, FileAction, Listing, SearchAction, TransferCommand, hosts};
 
 #[cfg(test)]
@@ -359,6 +360,10 @@ impl App {
         // Past an empty query's cap: typing finds it ("search", "sub…").
         let search = Action::Search(SearchAction::Open);
         add(opened && listed, "search", "Search in subfolders…", Some("mod+shift+f"), search);
+        // The cursor's row, when it's a text file (`remote_edit.rs`).
+        let row = self.cursor_row().filter(|name| self.editable(name));
+        let edit = Action::RemoteEdit(RemoteEditAction::Edit(row.clone()));
+        add(row.is_some(), "edit", "Edit in local editor", Some(EDIT_CHORD), edit);
         for cmd in &mut out {
             if matches!(cmd.id, "log" | "disconnect") {
                 cmd.detail = host.clone();

@@ -84,8 +84,8 @@ Picking the right surface for new UI.
 
 | Surface | Behaviour |
 | --- | --- |
-| Sheet | Drops from the toolbar edge over a veil that makes the window inert. One at a time; prompts that arrive meanwhile wait in order. Escape cancels, Return presses the default button (`default_button`). Sign in, host key, yes/no, connection log, delete, Add to SSH config, conflict, quit. |
-| Popover | Grows from its trigger on `raised`, modal: Escape or a press outside closes it. Quick connect, transfers. |
+| Sheet | Drops from the toolbar edge over a veil that makes the window inert. One at a time; prompts that arrive meanwhile wait in order. Escape cancels, Return presses the default button (`default_button`). Sign in, host key, yes/no, connection log, delete, Add to SSH config, conflict, edit conflict (`views/editing.rs`: a file being edited changed on the server), quit. |
+| Popover | Grows from its trigger on `raised`, modal: Escape or a press outside closes it. Quick connect, transfers (headed by its Editing section while files are being edited in a local editor, `views/editing.rs`). |
 | Palette | ⌘K, 560 pt, a third of the way down; groups Hosts, Go to folder…, Actions. Its phases are `state::palette::Phase`. Actions that can't run now are not listed (never greyed). |
 | Toast | Bottom centre, blocks nothing. ssh's notices first, then the app's (delete progress, "folder was removed"). |
 | Preview panel | Space on a file row (`views/preview.rs`, `state/preview.rs`): a card over the right 60 % of the list that leaves the rows on its left in reach, so ↑/↓, a click or typing move the cursor and the preview follows. Springs in on `snap`, out on `move`, at once under reduce motion. A dialog, but not a Rune modal (that would make the rows inert): it takes the keyboard on opening and its own `on_key` keeps Tab among its controls; Space or Escape closes it and hands the keyboard back to the rows. While it's open the list's other shortcuts wait (`App::preview_shortcut`). A text shows in the mono face as virtual rows of 16-line blocks (one text for the lines, one for their numbers, hidden from screen readers, inside a region named "Contents of <name>, N lines"), so only the blocks on screen are laid out; lines don't wrap, and the content is as wide as the widest line. A line over 2,000 characters is cut there with " …" (`state::preview::LONG_LINE`), and a note under the header says so beside the one for a text cut to 256 KB. Moving the cursor reads the next file at once, but its text shows only once the cursor has rested 150 ms (`state::preview::REST`, on the poll's clock), so ↓ held lays out none of the texts it passes; Space opening the panel, images and details don't wait. |
@@ -150,7 +150,7 @@ in tests and headless runs, so goldens, flows and tests see the drawn menu on ev
 
 - Add an item to the model once; both paths show it. Item keys are `ctx-<id>`.
 - Items that change the server, and Open in Terminal, are disabled while the host isn't
-  connected; Paste also needs a clip.
+  connected; Paste also needs a clip; Edit also needs a file quick preview reads as text.
 - Shortcut hints are chord specs (`mod+c`, `mod+shift+n`, `mod+alt+c`) rendered by
   `widgets::chord`, so one string reads ⌘C on macOS and Ctrl+C elsewhere.
 
@@ -419,8 +419,9 @@ Writing a script that drives the app.
 | Hosts and navigation | `host-<alias>` (a recent host's id is `[user@]host:port`), `rows/<name>`, `crumb-<n>`, `col-Name`, `col-Size`, `tb-back`, `tb-forward` |
 | Sheets and states | `sheet-input`, `sheet-submit`, `sheet-cancel`, `sheet-no`, `state-go-up`, `state-retry`, `state-show-log`, `status-conn`, `log-disconnect`, `log-close` |
 | Transfers | `tb-transfers`, `tr-tab-downloads`, `tr-tab-uploads`, `tr-<id>`, `tr-pause-<id>`, `tr-resume-<id>`, `tr-cancel-<id>`, `tr-retry-<id>`, `tr-resolve-<id>`, `tr-clear`; the conflict sheet's `conflict-replace`, `conflict-keep-both`, `conflict-skip`, `conflict-apply-all` |
+| Editing | the popover's section `editing`, rows `edit-<id>` (`edit-title-<id>`, `edit-line-<id>`), `edit-stop-<id>`, `edit-resolve-<id>`, `edit-retry-<id>`; the edit conflict sheet `edit-conflict` with `edit-conflict-replace`, `edit-conflict-discard`, `edit-conflict-keep-both`, `edit-conflict-server-*`, `edit-conflict-local-*`; a failed save's toast `toast-note-<n>-retry` |
 | File operations | `new-folder`, `edit-input`, `edit-error-text`, `delete-confirm`, `delete-cancel`, toasts `toast-op-<id>` (`-text`, `-dismiss`), the drop and drag pill `drop-pill` (`-text`) |
-| Context menus | `ctx-menu` with items `ctx-<id>` (`ctx-open`, `ctx-download`, `ctx-terminal`, `ctx-copy`, `ctx-cut`, `ctx-paste`, `ctx-copy-path`, `ctx-rename`, `ctx-delete`, `ctx-new-folder`, `ctx-refresh`, `ctx-hidden`); a host's menu `ctx-host-connect`, `ctx-host-disconnect`, `ctx-host-add-to-config`, `ctx-host-edit`, `ctx-host-remove`, `ctx-host-save` |
+| Context menus | `ctx-menu` with items `ctx-<id>` (`ctx-open`, `ctx-edit`, `ctx-download`, `ctx-terminal`, `ctx-copy`, `ctx-cut`, `ctx-paste`, `ctx-copy-path`, `ctx-rename`, `ctx-delete`, `ctx-new-folder`, `ctx-refresh`, `ctx-hidden`); a host's menu `ctx-host-connect`, `ctx-host-disconnect`, `ctx-host-add-to-config`, `ctx-host-edit`, `ctx-host-remove`, `ctx-host-save` |
 | Quick connect | `sb-quick-connect`, `welcome-quick-connect`, `quick`, `quick-<field>-input` and `quick-<field>-error` for `host`, `user`, `port`, `alias`, `identity`, `jump`; `quick-more`, `quick-pick-identity`, `quick-save`, `quick-connect`; the Add to SSH config sheet `add-config` (`-block-text`, `-target`, `-backup`, `-confirm`, `-cancel`) |
 | Filter and search | `tb-filter` (closed), `tb-filter-input`, `tb-filter-clear`, the scope switch `tb-scope` with `tb-scope-folder` and `tb-scope-subfolders`; results `search-grid`, `rows/hit-<n>`, `search-status-text`, `search-unreadable`, `search-empty`; a result's menu items `ctx-download`, `ctx-copy-path`, `ctx-properties` |
 | Palette | `tb-palette`, `palette-input`, `palette-group-hosts`, `palette-group-folders`, `palette-group-actions`, rows `pal-host-<id>`, `pal-go`, `pal-folder-<path>`, `pal-<action>`; `palette-empty` |

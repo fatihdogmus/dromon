@@ -17,6 +17,8 @@
 //! - `changes.rs`: a server's scripted changes "made elsewhere", applied one step per poll or
 //!   refresh, which the backend answers as the service's polling would (§4.5).
 //! - `preview.rs`: what files hold when previewed (Space): generated from their names and sizes.
+//! - `remote_edit.rs`: files being edited in a local editor: made-up copies, saved each time a
+//!   window gains focus.
 //!
 //! `dromon --fixture <file.json>` runs the app on a fixture: no service thread, no ssh, no ssh
 //! config; the fixture file is the only thing it reads.
@@ -27,6 +29,7 @@ mod generate;
 mod hostbook;
 mod parse;
 mod preview;
+mod remote_edit;
 mod search;
 mod sizes;
 pub mod transfers;

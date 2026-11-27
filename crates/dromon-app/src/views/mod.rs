@@ -8,6 +8,7 @@ mod delete;
 mod drag;
 mod drop;
 mod edit;
+mod editing;
 mod list;
 mod menu;
 mod palette;
@@ -107,14 +108,16 @@ pub const ROWS: &str = "rows";
 
 /// The app's poll (`AppSpec::poll`, at the start of every frame): the transfers' and a waiting
 /// search's (`search.rs`), then the preview's: a text that waited for the cursor to rest, an
-/// image that finished decoding (the view runs again to show it, or say its size).
+/// image that finished decoding (the view runs again to show it, or say its size); then the
+/// toasts of saved edits that have been up long enough go.
 pub fn poll(s: &mut App, clock: f64, tx: &mut Tx) -> bool {
     let changed = search::poll(s, clock, tx);
     let preview = s.preview_tick(clock);
-    if let Some(due) = preview.wake {
+    let edits = s.remote_edit_tick(clock);
+    for due in [preview.wake, edits.wake].into_iter().flatten() {
         tx.wake_at(due);
     }
-    preview.changed | changed
+    preview.changed | edits.changed | changed
 }
 
 /// `AppSpec::setup`: Rune's waker, so a preview's image that finished decoding on Rune's
@@ -214,6 +217,13 @@ pub fn effect(fx: Effect, tx: &mut Tx) {
         Effect::OpenUrl(url) => {
             if let Err(e) = tx.open_url(&url) {
                 eprintln!("dromon: couldn't open the release page: {e}");
+            }
+        }
+        // A copy the service just downloaded, in its private folder; tests and headless runs
+        // open nothing (Rune records it). The error never names the path.
+        Effect::OpenFile(path) => {
+            if let Err(e) = tx.open_path(&path) {
+                eprintln!("dromon: couldn't open a file to edit: {e}");
             }
         }
         Effect::Quit { relaunch: true } => tx.relaunch(),

@@ -64,8 +64,9 @@ fn items(rt: &Runtime<App>) -> Vec<String> {
 }
 
 /// A row's menu, by label.
-const ROW_ITEMS: [&str; 11] = [
+const ROW_ITEMS: [&str; 12] = [
     "Open",
+    "Edit",
     "Download",
     "Open in Terminal",
     "Copy",
@@ -314,6 +315,7 @@ fn the_native_menu_has_the_same_items_and_shortcut_hints() {
         ids,
         [
             "open",
+            "edit",
             "download",
             "terminal",
             "—",

@@ -19,7 +19,7 @@ Status: planning, v1 scope locked · Last updated: 2026-11-25 · License: MIT
 
 ### Non-goals for v1
 - Split or dual panes
-- Editing remote files in place (a quick preview exists: Space shows an image, or a text file's start or a log's end, without downloading it)
+- Editing remote files inside the app (a quick preview exists: Space shows an image, or a text file's start or a log's end, without downloading it; and ⌘E opens a text file in the user's own editor, uploading each save)
 - Permission (chmod/chown) editing
 - Dragging files *out* of the app into Finder or Explorer (needs OS file promises, which Rune doesn't support)
 - FTP, WebDAV, S3, cloud storage
@@ -509,6 +509,7 @@ Rules:
 | Refresh | ⌘R (also F5 on Windows and Linux) |
 | Toggle hidden files | ⌘⇧. (Ctrl+H on Linux) |
 | Download selection | ⌘D |
+| Edit in local editor (a text file) | ⌘E |
 | Show transfers | ⌘⇧J |
 | New folder | ⌘⇧N |
 | Rename | F2 |
@@ -580,7 +581,7 @@ Rules:
 - Quick Look–style previews: done for images, text and logs (Space); PDF, audio and video still to come
 - Windows 10 support
 - Localization
-- Editing a remote file in a local editor with automatic re-upload on save
+- Editing a remote file in a local editor with automatic re-upload on save: done for text files (⌘E, the system's default app, a conflict check before each upload); "Edit With…" (choosing the app) still to come
 
 ---
 

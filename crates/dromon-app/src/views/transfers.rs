@@ -286,6 +286,8 @@ pub fn popover(s: &App, p: Paint) -> Option<El> {
         .origin(1.0, 0.0)
         .transition(Transition::scale(0.96).combined(Transition::opacity()))
         .transition_motion(motion::MOVE, motion::MOVE)
+        // Files being edited in a local editor, while there are any (`editing.rs`).
+        .children(super::editing::section(s, p))
         .child(tabs(s, p))
         .child(jobs(s, p))
         .child(footer(s, p))
