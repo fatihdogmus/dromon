@@ -20,7 +20,7 @@ use rune::TextEdit;
 
 use super::fuzzy;
 use super::keys::{Shortcut, host_chord};
-use super::menu::delete_chord;
+use super::menu::{TERMINAL_CHORD, delete_chord};
 use super::{Action, App, Effect, FileAction, Listing, TransferCommand, hosts};
 
 #[cfg(test)]
@@ -343,6 +343,7 @@ impl App {
         add(true, "show-transfers", "Show transfers", Some("mod+shift+j"), Action::ToggleTransfers);
         add(true, "hidden", "Toggle hidden files", Some("mod+shift+period"), Action::ToggleHidden);
         add(c.is_some(), "log", "Show connection log", None, Action::OpenLog);
+        add(interactive, "terminal", "Open in Terminal", Some(TERMINAL_CHORD), Action::OpenTerminal(self.cursor_row()));
         if let Some(live) = live {
             add(true, "disconnect", "Disconnect", None, Action::Disconnect(live.host.clone()));
         }

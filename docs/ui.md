@@ -117,8 +117,8 @@ in tests and headless runs, so goldens, flows and tests see the drawn menu on ev
 ### Rules and examples
 
 - Add an item to the model once; both paths show it. Item keys are `ctx-<id>`.
-- Items that change the server are disabled while the host isn't connected; Paste also needs a
-  clip.
+- Items that change the server, and Open in Terminal, are disabled while the host isn't
+  connected; Paste also needs a clip.
 - Shortcut hints are chord specs (`mod+c`, `mod+shift+n`, `mod+alt+c`) rendered by
   `widgets::chord`, so one string reads ⌘C on macOS and Ctrl+C elsewhere.
 
@@ -388,7 +388,7 @@ Writing a script that drives the app.
 | Sheets and states | `sheet-input`, `sheet-submit`, `sheet-cancel`, `sheet-no`, `state-go-up`, `state-retry`, `state-show-log`, `status-conn`, `log-disconnect`, `log-close` |
 | Transfers | `tb-transfers`, `tr-tab-downloads`, `tr-tab-uploads`, `tr-<id>`, `tr-pause-<id>`, `tr-resume-<id>`, `tr-cancel-<id>`, `tr-retry-<id>`, `tr-resolve-<id>`, `tr-clear`; the conflict sheet's `conflict-replace`, `conflict-keep-both`, `conflict-skip`, `conflict-apply-all` |
 | File operations | `new-folder`, `edit-input`, `edit-error-text`, `delete-confirm`, `delete-cancel`, toasts `toast-op-<id>` (`-text`, `-dismiss`), the drop and drag pill `drop-pill` (`-text`) |
-| Context menus | `ctx-menu` with items `ctx-<id>` (`ctx-open`, `ctx-download`, `ctx-copy`, `ctx-cut`, `ctx-paste`, `ctx-copy-path`, `ctx-rename`, `ctx-delete`, `ctx-new-folder`, `ctx-refresh`, `ctx-hidden`); a host's menu `ctx-host-connect`, `ctx-host-disconnect`, `ctx-host-add-to-config`, `ctx-host-edit`, `ctx-host-remove`, `ctx-host-save` |
+| Context menus | `ctx-menu` with items `ctx-<id>` (`ctx-open`, `ctx-download`, `ctx-terminal`, `ctx-copy`, `ctx-cut`, `ctx-paste`, `ctx-copy-path`, `ctx-rename`, `ctx-delete`, `ctx-new-folder`, `ctx-refresh`, `ctx-hidden`); a host's menu `ctx-host-connect`, `ctx-host-disconnect`, `ctx-host-add-to-config`, `ctx-host-edit`, `ctx-host-remove`, `ctx-host-save` |
 | Quick connect | `sb-quick-connect`, `welcome-quick-connect`, `quick`, `quick-<field>-input` and `quick-<field>-error` for `host`, `user`, `port`, `alias`, `identity`, `jump`; `quick-more`, `quick-pick-identity`, `quick-save`, `quick-connect`; the Add to SSH config sheet `add-config` (`-block-text`, `-target`, `-backup`, `-confirm`, `-cancel`) |
 | Palette | `tb-palette`, `palette-input`, `palette-group-hosts`, `palette-group-folders`, `palette-group-actions`, rows `pal-host-<id>`, `pal-go`, `pal-folder-<path>`, `pal-<action>`; `palette-empty` |
 | Polling | a refresh's new rows carry `fresh-<n>`; the vanished-folder toast is `toast-note-<n>` (`-text`) |
