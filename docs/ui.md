@@ -88,6 +88,7 @@ Picking the right surface for new UI.
 | Popover | Grows from its trigger on `raised`, modal: Escape or a press outside closes it. Quick connect, transfers. |
 | Palette | ⌘K, 560 pt, a third of the way down; groups Hosts, Go to folder…, Actions. Its phases are `state::palette::Phase`. Actions that can't run now are not listed (never greyed). |
 | Toast | Bottom centre, blocks nothing. ssh's notices first, then the app's (delete progress, "folder was removed"). |
+| Preview panel | Space on a file row (`views/preview.rs`, `state/preview.rs`): a card over the right 60 % of the list that leaves the rows on its left in reach, so ↑/↓, a click or typing move the cursor and the preview follows. Springs in on `snap`, out on `move`, at once under reduce motion. A dialog, but not a Rune modal (that would make the rows inert): it takes the keyboard on opening and its own `on_key` keeps Tab among its controls; Space or Escape closes it and hands the keyboard back to the rows. While it's open the list's other shortcuts wait (`App::preview_shortcut`). A text shows in the mono face as virtual rows of 16-line blocks (one text for the lines, one for their numbers, hidden from screen readers, inside a region named "Contents of <name>, N lines"), so only the blocks on screen are laid out; lines don't wrap, and the content is as wide as the widest line. A line over 2,000 characters is cut there with " …" (`state::preview::LONG_LINE`), and a note under the header says so beside the one for a text cut to 256 KB. Moving the cursor reads the next file at once, but its text shows only once the cursor has rested 150 ms (`state::preview::REST`, on the poll's clock), so ↓ held lays out none of the texts it passes; Space opening the panel, images and details don't wait. |
 
 - Confirm only what is destructive (delete, Replace, quitting with transfers running); the safe
   choice is the default button.
@@ -424,6 +425,7 @@ Writing a script that drives the app.
 | Filter and search | `tb-filter` (closed), `tb-filter-input`, `tb-filter-clear`, the scope switch `tb-scope` with `tb-scope-folder` and `tb-scope-subfolders`; results `search-grid`, `rows/hit-<n>`, `search-status-text`, `search-unreadable`, `search-empty`; a result's menu items `ctx-download`, `ctx-copy-path`, `ctx-properties` |
 | Palette | `tb-palette`, `palette-input`, `palette-group-hosts`, `palette-group-folders`, `palette-group-actions`, rows `pal-host-<id>`, `pal-go`, `pal-folder-<path>`, `pal-<action>`; `palette-empty` |
 | Polling | a refresh's new rows carry `fresh-<n>`; the vanished-folder toast is `toast-note-<n>` (`-text`) |
+| Preview | the panel `preview` (Space: `{"type": "key", "name": " "}`), `preview-title`, `preview-meta`, `preview-download`, `preview-close`; its text `preview-lines` (the region; block `b` is `preview-lines/<b>`, its lines `…/lines`, their numbers `…/n`), the notes `preview-cut` and `preview-long`, `preview-image`, `preview-loading`, `preview-note`, `preview-kind-value` |
 
 Events the flows use: `tap` and `double-click` on a `key`, `type` (text), `key`, `paste`,
 `mark`, and:

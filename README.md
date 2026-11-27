@@ -158,7 +158,7 @@ Linux needs `libxkbcommon-dev` and `libwayland-dev`. Want to look around without
   <tr><td><kbd>⌘1</kbd>…<kbd>⌘9</kbd></td><td>Switch host</td><td><kbd>⌘⌫</kbd></td><td>Delete</td></tr>
   <tr><td><kbd>⌘⇧K</kbd></td><td>Quick connect</td><td><kbd>⌘⇧J</kbd></td><td>Show transfers</td></tr>
   <tr><td><kbd>⌘⇧.</kbd></td><td>Show hidden files</td><td><kbd>⌘N</kbd> · <kbd>⌘,</kbd></td><td>New window · Settings</td></tr>
-  <tr><td><kbd>⌘⇧T</kbd></td><td>Open in Terminal: your terminal app, signed in, in this folder</td><td></td><td></td></tr>
+  <tr><td><kbd>Space</kbd></td><td>Quick preview: an image, a text file, a log's end</td><td><kbd>⌘⇧T</kbd></td><td>Open in Terminal: your terminal app, signed in, in this folder</td></tr>
 </table>
 
 On Windows and Linux, <kbd>Ctrl</kbd> takes the place of <kbd>⌘</kbd>; Delete deletes and <kbd>F5</kbd> refreshes. Or just start typing a file's name to jump to it.

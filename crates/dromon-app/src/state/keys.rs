@@ -35,6 +35,9 @@ pub enum Shortcut {
     },
     /// Printable text with no command modifier: type-to-select.
     Type(String),
+    /// Space with no modifier: the cursor row's quick preview, open or closed; it types while
+    /// type-to-select is collecting letters (`App::shortcut`).
+    Preview,
     /// File operations (§7). Never while a text field has focus.
     File(FileKey),
     /// ⌘⇧K (Ctrl+Shift+K elsewhere): the quick-connect popover.
@@ -198,6 +201,7 @@ pub fn shortcut(ev: &KeyEvent, platform: KeyPlatform) -> Option<Shortcut> {
         Key::PageDown => Shortcut::Page { down: true, extend: m.shift },
         Key::Home => Shortcut::End { last: false, extend: m.shift },
         Key::End => Shortcut::End { last: true, extend: m.shift },
+        Key::Text(t) if t == " " && !m.cmd && !m.ctrl && !m.alt && !m.shift => Shortcut::Preview,
         Key::Text(t) if !m.cmd && !m.ctrl && !m.alt && !t.trim().is_empty() && t.chars().all(|c| !c.is_control()) => {
             Shortcut::Type(t.clone())
         }
@@ -427,7 +431,18 @@ mod tests {
         assert_eq!(k(Key::End, SHIFT), Some(Shortcut::End { last: true, extend: true }));
         assert_eq!(k(Key::Text("r".into()), NONE), Some(Shortcut::Type("r".into())));
         assert_eq!(k(Key::Text("R".into()), SHIFT), Some(Shortcut::Type("R".into())));
-        assert_eq!(k(Key::Text(" ".into()), NONE), None);
         assert_eq!(k(Key::Text("r".into()), ALT), None);
+    }
+
+    #[test]
+    fn space_is_the_quick_preview_on_each_platform() {
+        let ctrl = Mods { ctrl: true, logo: false, ..CMD };
+        for p in [KeyPlatform::Mac, KeyPlatform::Windows, KeyPlatform::Linux] {
+            assert_eq!(on(Key::Text(" ".into()), NONE, p), Some(Shortcut::Preview), "{p:?}");
+            assert_eq!(on(Key::Text(" ".into()), SHIFT, p), None, "{p:?}: ⇧Space is left alone");
+            assert_eq!(on(Key::Text(" ".into()), ALT, p), None, "{p:?}");
+            assert_eq!(on(Key::Text(" ".into()), if p == KeyPlatform::Mac { CMD } else { ctrl }, p), None);
+            assert_eq!(on(Key::Text("  ".into()), NONE, p), None, "only one Space");
+        }
     }
 }

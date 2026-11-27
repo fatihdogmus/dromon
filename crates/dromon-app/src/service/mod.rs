@@ -18,10 +18,11 @@
 //! (`conn.rs`), whose lifecycle is the pure machine in `lifecycle.rs` and whose prompts go
 //! through `auth.rs`; its file operations (new folder, rename, delete) run in `fileops.rs`
 //! on its SFTP session, its folder walks (the Properties sheet's sizes, search in subfolders)
-//! in `sizes.rs` and `search.rs`, and live updates of its folder on screen, through a second
-//! ssh session, in `live.rs`. The password store lives here only: cleared per host on
-//! Disconnect, and all of it when the UI goes away. `hostfiles.rs` owns the files: discovery
-//! and its watcher, the saved hosts' `hosts.conf`, and "Add to SSH config".
+//! in `sizes.rs` and `search.rs`, quick preview reads in `preview.rs`, and live updates of its
+//! folder on screen, through a second ssh session, in `live.rs`. The password store lives here
+//! only: cleared per host on Disconnect, and all of it when the UI goes away. `hostfiles.rs`
+//! owns the files: discovery and its watcher, the saved hosts' `hosts.conf`, and "Add to SSH
+//! config".
 //!
 //! Updates (`update.rs`) are a task of their own: checks, downloads and their verification
 //! (`update_verify.rs`), and the platforms' installers (`update_platform.rs`, `update_macos.rs`,
@@ -42,6 +43,8 @@ pub(crate) mod lifecycle;
 mod live;
 /// Adaptive polling of the folder on screen (§4.5); the fixture backend's polls use it too.
 pub(crate) mod poll;
+/// Quick preview reads: one range of one file.
+mod preview;
 /// Search in subfolders, on the same walk; the fixture backend matches with it too.
 pub(crate) mod search;
 /// Folder walks, and the Properties sheet's sizes; the fixture backend counts with it too.
@@ -388,6 +391,7 @@ fn dispatch<S: Sink>(
                 let _ = c.cmds.send(ConnCmd::PollNow(from));
             }
         }
+        Command::Preview(cmd) => preview::route(from, cmd, conns, sink),
         Command::Search(cmd) => search::route(from, cmd, conns, sink),
         Command::ShowPrompts { host } => {
             if let Some(c) = conns.get(&host) {

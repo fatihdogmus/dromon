@@ -303,9 +303,10 @@ Checking that a change didn't slow the app down.
 | `first-rows` | First page of a 10,000-entry folder to its first painted frame | 150 ms |
 | `throughput` | Engine I/O vs `scp` on a large file and on many small files | 80 % of scp |
 | `soak` | A large file down and up, SHA-1 checked, memory sampled (not in the default set) | no growth, no mismatch |
+| `preview` | Quick preview of a 256 KB text (not in the default set): frames with the panel open, the pointer over it, the text scrolled 24 and 280 pt a frame, p99; then single frames: a text arriving after Space, the next file's text arriving while the cursor may still move and showing once it rested, Up to a text the panel kept, and a minified file's one 256 KB line; the Down key and Down again listed as info. The window's first preview is listed as info only: a window rasterises its first mono glyphs once, which a later preview doesn't pay | p99 rows: half a 120 Hz frame (a whole one is a wide miss); single frames: a whole 120 Hz frame |
 
-`cargo perf [--gate frames,first-rows,throughput,soak|all]` prints one table and exits 1 on a
-wide miss. Release builds; the perf tests are `#[ignore]` and the script runs them.
+`cargo perf [--gate frames,first-rows,throughput,soak,preview|all]` prints one table and exits 1
+on a wide miss. Release builds; the perf tests are `#[ignore]` and the script runs them.
 
 ### Agent note
 

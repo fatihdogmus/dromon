@@ -204,6 +204,7 @@ clock, so every transition is a unit test.
 | Inline name field | `state::edit::Edit` | `edit::step` → `EditEffect` |
 | ⌘K palette | `state::palette::Phase` | `palette::step` |
 | Search in subfolders | `state::search::Phase` | `search::step` → `search::Out` |
+| Quick preview | `state::preview::Phase` | `preview::step` → `preview::Fx` |
 | Done flourish | `state::transfers::Flourish` | stepped by `views::transfers::poll` |
 | Update (check, toast, install) | `state::update::Phase` | `update::step` → `update::Out` |
 

@@ -20,6 +20,7 @@ use dromon_transfer::{ConflictChoice, JobId, JobRequest, JobView, TaskState};
 
 pub use super::hostbook::{HostBookCommand, HostBookEvent};
 pub use super::ops::{FileOp, FileOpEvent, FileOpKind, OpId};
+pub use super::preview::{PreviewBytes, PreviewCommand, PreviewEvent, PreviewId, PreviewRange};
 pub use super::properties::{SizeCommand, SizeEvent, SizeId, SizeTotal};
 pub use super::search::{Found, SearchCommand, SearchEvent, SearchId};
 pub use super::update::{UpdateCommand, UpdateEvent};
@@ -64,6 +65,8 @@ pub enum Command {
     /// Poll the sending window's folder on screen on `host` now (it just gained focus):
     /// answered like any poll, with `Refreshed` or `ListFailed` when it changed, else nothing.
     Poll { host: HostId },
+    /// Quick preview, Space (`state/preview.rs`); answered with `Preview` events.
+    Preview(PreviewCommand),
     /// Search in subfolders (`state/search.rs`); answered with `Search` events.
     Search(SearchCommand),
     /// The reconnecting banner's Sign in (§3.9): the host's open, unanswered prompts again, to
@@ -202,6 +205,8 @@ pub enum ServiceEvent {
         host: HostId,
         start: RemotePath,
     },
+    /// What a quick preview read brought, or why it couldn't (`state/preview.rs`).
+    Preview(PreviewEvent),
     /// ssh asks something only the user can answer: show a sheet (or, for a notice, a toast).
     Prompt(Prompt),
     /// The prompt went away without an answer from here (ssh hung up, a notice ended).
@@ -262,6 +267,7 @@ pub fn trace_line(ev: &ServiceEvent) -> String {
         },
         ServiceEvent::Log { host, .. } => format!("Log host={host}"),
         ServiceEvent::Opened { host, .. } => format!("Opened host={host}"),
+        ServiceEvent::Preview(ev) => super::preview::trace_line(ev),
         ServiceEvent::Prompt(p) => format!("Prompt host={} id={}", p.host, p.id.0),
         ServiceEvent::PromptClosed(id) => format!("PromptClosed id={}", id.0),
         ServiceEvent::Refreshed { host, entries, .. } => format!("Refreshed host={host} entries={}", entries.len()),
@@ -429,6 +435,30 @@ mod tests {
             ["FolderSizeProgress host=prod id=5", "FolderSizeDone host=prod id=5", "FolderSizeFailed host=prod id=6"]
         );
         assert_eq!(total.items(), 3);
+    }
+
+    #[test]
+    fn preview_trace_lines_and_bytes_count_and_never_show_the_contents() {
+        let host = HostId("prod".into());
+        let bytes = PreviewBytes(b"DB_PASSWORD=secret\n".as_slice().into());
+        let events = [
+            PreviewEvent::Done { id: PreviewId(4), host: host.clone(), bytes: bytes.clone(), total: 1204 },
+            PreviewEvent::Failed { id: PreviewId(5), host, error: Error::NotFound(RemotePath::new("/secret")) },
+        ]
+        .map(ServiceEvent::Preview);
+        let lines: Vec<String> = events.iter().map(trace_line).collect();
+        assert_eq!(lines, ["Preview host=prod id=4 bytes=19 total=1204", "PreviewFailed host=prod id=5"]);
+        assert_eq!(format!("{bytes:?}"), "PreviewBytes(<19 bytes>)");
+        assert!(!format!("{:?}", events[0]).contains("secret"), "{:?}", events[0]);
+    }
+
+    #[test]
+    fn a_preview_range_is_the_head_or_the_tail_of_what_there_is() {
+        assert_eq!(PreviewRange::Head(10).span(4), (0, 4));
+        assert_eq!(PreviewRange::Head(10).span(25), (0, 10));
+        assert_eq!(PreviewRange::Tail(10).span(25), (15, 10));
+        assert_eq!(PreviewRange::Tail(10).span(4), (0, 4));
+        assert_eq!(PreviewRange::Tail(10).span(0), (0, 0));
     }
 
     #[test]

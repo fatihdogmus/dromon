@@ -211,6 +211,28 @@ noted ("1 folder couldn't be read") and `"connection-lost"` stops the search and
 connection, as for a folder size. In the demo, `*.json` from `/var/www/site` finds three files
 in two folders.
 
+### What files hold (quick preview)
+
+A fixture lists files; it doesn't hold them. When one is previewed (Space), the backend makes
+up its contents from its name and listed size, the same on every run (`fixture/preview.rs`), and
+answers at once with the range asked for. Nothing else needs to be written down for it:
+
+- Images, by the name the app previews them by (png, jpg, jpeg, gif, webp, avif, svg, ico), hold
+  a small generated picture whatever their extension: an SVG of 960 × 640 (a sky, a sun and
+  hills, in colours picked by the name), or a 64 × 64 badge for an `.ico`. Their size stays the
+  listing's, so the 20 MB rule goes by `size`.
+- Files the app doesn't read as text (archives, media, programs and the like, by name) and
+  `.DS_Store` hold bytes with NULs in them: the panel shows their details.
+- Everything else is text of exactly its listed size, in lines of 64 bytes made up by kind: log
+  lines for a `.log` or anything under `/var/log`, JSON, HTML, Markdown, code or plain prose. Any
+  range of it is that range of the whole file, so a head and a log's tail both read naturally.
+- A path that isn't a file fails as the server would (`NotFound`), and a host that isn't
+  connected with the connection lost.
+
+In the demo, `index.html` is HTML, `package-lock.json` (412 KB) is cut after its first 256 KB,
+`server.log` (4.8 MB) shows its last 256 KB, `favicon.ico` and `/srv/media/photos` are pictures,
+and `backup-2026-11-01.tar.gz` has no preview.
+
 ### Entries
 
 `{"name": "index.html", "kind": "file", "size": 14812, "mtime": "2026-11-24T18:00:00Z", "mode": "0644"}`

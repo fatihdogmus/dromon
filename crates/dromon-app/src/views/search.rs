@@ -213,8 +213,8 @@ pub fn summary(r: &Search) -> String {
     s
 }
 
-/// The app's poll (`AppSpec::poll`, at the start of each frame): the transfers' (the done
-/// flourish, what's announced), then a search waiting for typing to pause starts once it's due.
+/// The transfers' poll (the done flourish, what's announced), then a search waiting for typing
+/// to pause starts once it's due; part of the app's poll (`views::poll`).
 pub fn poll(s: &mut App, clock: f64, tx: &mut Tx) -> bool {
     let changed = transfers::poll(s, clock, tx);
     match s.ui.search.due() {

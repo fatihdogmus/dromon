@@ -38,6 +38,7 @@ use super::fileops::{FileOps, Finished};
 use super::lifecycle::{Effect, Event, Lifecycle, Phase, step};
 use super::live::{self, Heard, Updates};
 use super::poll::Outcome;
+use super::preview::{PreviewCmd, Reads};
 use super::search::SearchCmd;
 use super::sizes::{SizeCmd, Walks};
 use super::transfers::EngineMsg;
@@ -66,6 +67,8 @@ pub enum ConnCmd {
     Live(bool),
     /// Poll the window's folder on screen now, if it's polled at all (it gained focus).
     PollNow(WindowId),
+    /// A quick preview read for the window, or stopping one (`preview.rs`).
+    Preview(WindowId, PreviewCmd),
     /// A search in subfolders for the window, or stopping one (`search.rs`).
     Search(WindowId, SearchCmd),
     /// The window's Sign in: the host's open prompts, shown there.
@@ -121,6 +124,7 @@ pub fn start<S: Sink>(spec: HostSpec, shared: Shared, sink: S) -> ConnHandle {
         ops: FileOps::default(),
         walks: Walks::default(),
         searches: Walks::default(),
+        reads: Reads::default(),
         epoch: 0,
         live,
     };
@@ -182,6 +186,8 @@ struct Task<S: Sink> {
     walks: Walks<SizeId>,
     /// Searches in subfolders (`search.rs`), walked the same way.
     searches: Walks<SearchId>,
+    /// Quick preview reads (`preview.rs`).
+    reads: Reads,
     /// Counts SFTP sessions that came up: an operation's lost connection only ends the
     /// session it ran on.
     epoch: u64,
@@ -365,6 +371,7 @@ impl<S: Sink> Task<S> {
             ConnCmd::Verbose(on) => self.set_verbose(on).await,
             ConnCmd::Size(window, cmd) => self.walks.command(window, cmd, self.sftp(), &self.host, &self.sink),
             ConnCmd::Search(window, cmd) => self.searches.command(window, cmd, self.sftp(), &self.host, &self.sink),
+            ConnCmd::Preview(window, cmd) => self.reads.command(window, cmd, self.sftp(), &self.host, &self.sink),
             // The loop's `live_sync` starts or stops the watch.
             ConnCmd::Live(on) => self.live.on = on,
         }

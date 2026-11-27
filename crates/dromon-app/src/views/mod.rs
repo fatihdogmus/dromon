@@ -11,6 +11,7 @@ mod edit;
 mod list;
 mod menu;
 mod palette;
+mod preview;
 mod properties;
 mod quick;
 mod quit;
@@ -30,8 +31,12 @@ use rune::{ChromeInsets, Cx, El, Tx, col, row};
 /// The native context menu for a menu's entries (tests read it).
 #[cfg(test)]
 pub use menu::popup as menu_popup;
-/// The app's poll (the done flourish, a search waiting to start).
-pub use search::poll;
+/// The keys of the preview panel and its buttons (tests find them).
+#[cfg(test)]
+pub use preview::{
+    ADVANCE as PREVIEW_ADVANCE, CLOSE as PREVIEW_CLOSE, DOWNLOAD as PREVIEW_DOWNLOAD, LINE_H as PREVIEW_LINE_H,
+    LINES as PREVIEW_LINES, PANEL as PREVIEW,
+};
 /// The hookup to the taskbar and notifications.
 pub use transfers::{OsLink, connect_window};
 
@@ -99,6 +104,24 @@ pub fn access(s: &App, cx: &Cx<App>) -> Access {
 /// Key of the list's scroll viewport, and of the stack of rows in it.
 pub const LIST: &str = "list";
 pub const ROWS: &str = "rows";
+
+/// The app's poll (`AppSpec::poll`, at the start of every frame): the transfers' and a waiting
+/// search's (`search.rs`), then the preview's: a text that waited for the cursor to rest, an
+/// image that finished decoding (the view runs again to show it, or say its size).
+pub fn poll(s: &mut App, clock: f64, tx: &mut Tx) -> bool {
+    let changed = search::poll(s, clock, tx);
+    let preview = s.preview_tick(clock);
+    if let Some(due) = preview.wake {
+        tx.wake_at(due);
+    }
+    preview.changed | changed
+}
+
+/// `AppSpec::setup`: Rune's waker, so a preview's image that finished decoding on Rune's
+/// workers wakes the window.
+pub fn setup(s: &mut App, waker: rune::Waker) {
+    s.ui.preview.set_waker(waker);
+}
 
 /// Runs an action from a handler and carries out its effects.
 pub fn run(s: &mut App, action: Action, tx: &mut Tx) {
@@ -200,6 +223,14 @@ pub fn effect(fx: Effect, tx: &mut Tx) {
                 pasted(s, content, as_move, tx)
             })
         }
+        // Its Close: Space, Return and Escape all close it from there; Tab goes on to Download.
+        Effect::FocusPreview => tx.focus_when_shown(preview::CLOSE, false),
+        Effect::FocusList => {
+            if tx.focus_within(preview::PANEL) {
+                let ring = tx.focus_visible();
+                tx.focus(ROWS, ring);
+            }
+        }
     }
 }
 
@@ -283,5 +314,6 @@ fn content(s: &App, p: Paint) -> El {
             _ => drop::area(s, c, list::view(s, c, p), p),
         },
     };
-    col().key("content").w_full().grow(1.0).min_h(0.0).fill(p.t.canvas).child(body)
+    // The preview panel over the list, the rows on its left still in reach.
+    col().key("content").w_full().grow(1.0).min_h(0.0).fill(p.t.canvas).child(body).children(preview::layer(s, p))
 }

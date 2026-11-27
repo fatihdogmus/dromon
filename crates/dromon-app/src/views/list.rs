@@ -140,11 +140,12 @@ fn header(c: &ConnView, p: Paint) -> El {
         .child(columns(name, size_cell, modified))
 }
 
-/// Keys the rows take while they have the keyboard: type-to-select (a focused control keeps
-/// typed letters from the window's `on_key`, which takes the rest: arrows, Return, ⌘ keys).
+/// Keys the rows take while they have the keyboard: type-to-select and Space's preview (a
+/// focused control keeps typed letters and Space from the window's `on_key`, which takes the
+/// rest: arrows, Return, ⌘ keys).
 fn rows_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
     match keys::shortcut(ev, KeyPlatform::current()) {
-        Some(sc @ Shortcut::Type(_)) => {
+        Some(sc @ (Shortcut::Type(_) | Shortcut::Preview)) => {
             for fx in s.shortcut(sc, tx.clock()) {
                 effect(fx, tx);
             }

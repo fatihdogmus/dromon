@@ -733,6 +733,7 @@ impl Core {
             // Fixture servers have no live updates: their hosts stay polled (`Live::Off`).
             Command::LiveUpdates { .. } => {}
             Command::Poll { host } => self.poll(&host, &mut out),
+            Command::Preview(cmd) => self.preview(cmd, &mut out),
             Command::Search(cmd) => self.search(cmd, &mut out),
             Command::ShowPrompts { host } => self.show_prompts(&host, &mut out),
             Command::Transfer(cmd) => self.transfer(cmd, &mut out),

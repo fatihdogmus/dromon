@@ -14,13 +14,24 @@
 //!   page: the worst page and the total.
 //! - `refresh`: a poll's `Refreshed` of the 100,000-entry folder with one file added (the
 //!   listing diff, the sort, the rows), as one frame.
+//! - `preview`: the quick preview (Space) of text files whose reads bring a full
+//!   `TEXT_LIMIT` head (256,000 bytes of JSON- or log-like lines of varying length), fed as the
+//!   service feeds it (`ServiceEvent::Preview`). The frame the text arrives in (its first
+//!   layout), in a new window (`arrive-cold`: its first text in the mono face) and in a window
+//!   whose panel already showed another text and was closed (`arrive-warm`); steady frames with the panel open and nothing changing, and with the pointer
+//!   moving over the text; the text wheel-scrolled 24 pt and 280 pt a frame, down and back; and
+//!   ↓ to the next row (the key's frame, the frame its 256 KB arrives in while the cursor may
+//!   still move, `held`, and the frame it shows in once the cursor rested, `switch`), then ↑
+//!   back (`back`: a text the panel kept, shown again in the key's frame) and ↓ again (`again`:
+//!   the text just left). Last, a minified file: one 256 KB line, shown to its first 2,000
+//!   characters (`one-line`).
 //!
 //! Headless: no window, no GPU. A frame here is Rune's view, commit, layout, text and paint
 //! (instances built), not encoding, uploading or presenting them; those are what the 120 Hz
 //! budget's remaining headroom is for.
 //!
 //! ```sh
-//! cargo run --release -p dromon-app --example perf [--features perf] -- [--gate scroll,first-rows,stream,refresh] [--samples 5]
+//! cargo run --release -p dromon-app --example perf [--features perf] -- [--gate scroll,first-rows,stream,refresh,preview] [--samples 5]
 //! ```
 //!
 //! With `--features perf` (Rune's `frame-profile`) the scroll frames are also split into Rune's
@@ -29,7 +40,10 @@
 
 use std::time::Instant;
 
-use dromon_app::state::{Action, App, Backend, Command, HostDirectory, Listing, ServiceEvent};
+use dromon_app::state::preview::{Phase, TEXT_LIMIT};
+use dromon_app::state::{
+    Action, App, Backend, Command, HostDirectory, Listing, PreviewBytes, PreviewEvent, PreviewId, ServiceEvent,
+};
 use dromon_core::{ConnStatus, Entry, EntryKind, HostId, HostSpec, RemotePath};
 use rune::{Env, Key, KeyEvent, Mods, Runtime};
 
@@ -449,6 +463,220 @@ fn refresh_gate(m: &mut Metrics) {
     m.events("refresh-100k", &[cost]);
 }
 
+/// The preview gate's folder, in name order: text files of [`TEXT_TOTAL`] bytes, each read for
+/// its first [`TEXT_LIMIT`] (`.json` JSON-like, `.txt` log-like; the last, minified, one line).
+const PREVIEWED: [&str; 9] = [
+    "a-data.json",
+    "b-events.txt",
+    "c-data.json",
+    "d-events.txt",
+    "e-data.json",
+    "f-events.txt",
+    "g-data.json",
+    "h-events.txt",
+    "i-bundle.min.js",
+];
+const TEXT_TOTAL: u64 = 900_000;
+/// The text's rows (`views::preview::LINES`).
+const LINES: &str = "preview-lines";
+
+/// `n` bytes of text in lines of varying length (about 20 to 200 characters): JSON-like
+/// members when `json`, else log lines; different for each `seed`.
+fn text(json: bool, seed: u64, n: usize) -> Vec<u8> {
+    let mut s: u64 = 0x9E37_79B9_7F4A_7C15 ^ seed.wrapping_mul(0xA24B_AED4_963E_E407);
+    let mut next = move || {
+        s ^= s << 13;
+        s ^= s >> 7;
+        s ^= s << 17;
+        s
+    };
+    let words = ["alpha", "build", "cache", "deploy", "event", "fetch", "graph", "index", "queue", "worker"];
+    let mut out = String::with_capacity(n + 256);
+    let mut i = 0u64;
+    while out.len() < n {
+        let r = next();
+        let w = |k: u64| words[((r >> k) % words.len() as u64) as usize];
+        let many: Vec<&str> = (0..(r % 14)).map(|k| w(8 + k * 3)).collect();
+        let line = if json {
+            let indent = 2 * (1 + (r >> 4) % 3) as usize;
+            format!(
+                "{:indent$}\"{}-{i:05}\": {{ \"value\": {}, \"tags\": [\"{}\"] }},",
+                "",
+                w(20),
+                (r >> 24) % 100_000,
+                many.join("\", \""),
+            )
+        } else {
+            let t = i * 7 % 86_400;
+            let level = ["INFO", "INFO", "WARN", "INFO", "ERROR", "DEBUG"][(r % 6) as usize];
+            let at = format!("2026-11-25T{:02}:{:02}:{:02}Z", t / 3600, t / 60 % 60, t % 60);
+            format!("{at} {level:<5} {} {}ms {}", w(20), (r >> 32) % 900, many.join(" "))
+        };
+        out.push_str(&line);
+        out.push('\n');
+        i += 1;
+    }
+    out.truncate(n);
+    out.into_bytes()
+}
+
+/// The read the panel waits for.
+fn waiting(rt: &Runtime<App>) -> PreviewId {
+    match &rt.state.ui.preview.phase {
+        Phase::Loading { id, .. } => *id,
+        other => panic!("the panel waits for no read: {other:?}"),
+    }
+}
+
+/// The read the panel waits for answers with the first 256 KB of `PREVIEWED[row]`, and the
+/// frame after. (A text the cursor moved to waits for it to rest: [`shows`].)
+fn arrive(rt: &mut Runtime<App>, row: usize) -> Cost {
+    let id = waiting(rt);
+    let name = PREVIEWED[row];
+    let mut bytes = text(name.ends_with(".json"), row as u64, TEXT_LIMIT as usize);
+    if name.ends_with(".min.js") {
+        // Minified: all of it on one line.
+        bytes.iter_mut().filter(|b| **b == b'\n').for_each(|b| *b = b' ');
+    }
+    let ev = PreviewEvent::Done { id, host: host(), bytes: PreviewBytes(bytes.into()), total: TEXT_TOTAL };
+    measure(rt, move |rt| apply(rt, ServiceEvent::Preview(ev)))
+}
+
+/// Frames until the panel's text shows (the cursor rested); the frame it shows in.
+fn shows(rt: &mut Runtime<App>) -> Cost {
+    for _ in 0..240 {
+        let cost = measure(rt, |_| {});
+        if rt.find(LINES).is_some() {
+            return cost;
+        }
+    }
+    panic!("the text never showed");
+}
+
+fn key(rt: &mut Runtime<App>, key: Key) {
+    rt.key(KeyEvent { key, mods: Mods::default() });
+}
+
+/// The top of the panel's text (its rows, laid out or not), in the window.
+fn text_top(rt: &Runtime<App>) -> f32 {
+    rt.elements().into_iter().find(|e| e.key.as_deref() == Some(LINES)).map(|e| e.rect[1]).expect("text")
+}
+
+/// `frames` frames wheel-scrolling the panel's text down `dy` points a frame, then back up.
+fn scroll_text(rt: &mut Runtime<App>, dy: f32, frames: usize) -> Vec<Cost> {
+    let (x, y) = rt.find("preview-body").expect("the panel's body");
+    let top = text_top(rt);
+    let mut costs = Vec::with_capacity(2 * frames);
+    for i in 0..2 * frames {
+        let d = if i < frames { -dy } else { dy };
+        costs.push(measure(rt, |rt| rt.wheel(x, y, d)));
+        if i + 1 == frames {
+            assert!(text_top(rt) < top - dy, "the text scrolled");
+        }
+    }
+    settle(rt);
+    costs
+}
+
+/// A new window on the preview gate's folder ([`PREVIEWED`]).
+fn previewing() -> Runtime<App> {
+    let mut rt = runtime();
+    let listed = PREVIEWED.iter().map(|name| Entry {
+        name: (*name).into(),
+        kind: EntryKind::File,
+        size: TEXT_TOTAL,
+        mtime: Some(1_789_990_000),
+        mode: Some(0o100644),
+        owner: None,
+        group: None,
+    });
+    apply(&mut rt, ServiceEvent::Listing { host: host(), path: folder(), entries: listed.collect() });
+    settle(&mut rt);
+    rt
+}
+
+/// Space on `PREVIEWED[row]`: the panel springs in, its read under way, and its spinner turns
+/// until the text comes: half a second of it, not a settle.
+fn open(rt: &mut Runtime<App>, row: usize) {
+    rt.update(move |s, _| drop(s.act(Action::Click { name: PREVIEWED[row].into(), extend: false, toggle: false })));
+    key(rt, Key::Text(" ".into()));
+    for _ in 0..60 {
+        rt.frame(DT);
+    }
+}
+
+/// The text arriving after Space in a window whose panel already showed another text (and
+/// was closed): what a preview costs once the window has drawn the mono face.
+fn warm_arrive() -> Cost {
+    let mut rt = previewing();
+    open(&mut rt, 0);
+    arrive(&mut rt, 0);
+    settle(&mut rt);
+    key(&mut rt, Key::Escape);
+    settle(&mut rt);
+    assert!(matches!(rt.state.ui.preview.phase, Phase::Closed), "Escape closed the panel");
+    // Another file of the same kind (JSON-like), not read before.
+    open(&mut rt, 2);
+    let cost = arrive(&mut rt, 2);
+    assert!(rt.find(LINES).is_some(), "Space's text shows as it comes");
+    cost
+}
+
+fn preview_gate(m: &mut Metrics) {
+    // The window's first preview: its first text in the mono face.
+    let mut rt = previewing();
+    open(&mut rt, 0);
+    let cold = arrive(&mut rt, 0);
+    assert!(rt.find(LINES).is_some(), "Space's text shows as it comes");
+    settle(&mut rt);
+    // Open, nothing changing; then the pointer moving over the text.
+    let idle: Vec<Cost> = (0..120).map(|_| measure(&mut rt, |_| {})).collect();
+    let (x, y) = rt.find("preview-body").expect("the panel's body");
+    let hover: Vec<Cost> = (0..120).map(|i| measure(&mut rt, |rt| rt.pointer_move(x, y + (i % 40) as f32))).collect();
+    settle(&mut rt);
+    // One warm-up pass, then the measured ones.
+    scroll_text(&mut rt, 24.0, 60);
+    let scroll = scroll_text(&mut rt, 24.0, 120);
+    let fling = scroll_text(&mut rt, 280.0, 120);
+    // ↓ to a row not read yet: the key's frame, the frame its text arrives in (held: the cursor
+    // may move on), the frame it shows in once the cursor rested. Then ↑ to the row before (its
+    // text kept by the panel, shown at once) and ↓ again (the text just left).
+    let (mut down, mut held, mut switch) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut back, mut again) = (Vec::new(), Vec::new());
+    let minified = PREVIEWED.len() - 1;
+    for row in 1..minified {
+        down.push(measure(&mut rt, |rt| key(rt, Key::Down)));
+        held.push(arrive(&mut rt, row));
+        assert!(rt.find(LINES).is_none(), "a text the cursor moved to waits for it to rest");
+        switch.push(shows(&mut rt));
+        settle(&mut rt);
+        for (k, into) in [(Key::Up, &mut back), (Key::Down, &mut again)] {
+            into.push(measure(&mut rt, |rt| key(rt, k)));
+            assert!(rt.find(LINES).is_some(), "a kept text shows at once");
+            settle(&mut rt);
+        }
+    }
+    // A minified file: one 256 KB line, shown to its first 2,000 characters.
+    key(&mut rt, Key::Down);
+    rt.frame(DT);
+    arrive(&mut rt, minified);
+    let one_line = shows(&mut rt);
+    settle(&mut rt);
+    let warm = warm_arrive();
+    m.events("preview-arrive-cold", &[cold]);
+    m.events("preview-arrive-warm", &[warm]);
+    m.costs("preview-idle", &idle);
+    m.costs("preview-hover", &hover);
+    m.costs("preview-scroll", &scroll);
+    m.costs("preview-fling", &fling);
+    m.events("preview-down", &down);
+    m.events("preview-held", &held);
+    m.events("preview-switch", &switch);
+    m.events("preview-back", &back);
+    m.events("preview-again", &again);
+    m.events("preview-one-line", &[one_line]);
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let value = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
@@ -466,7 +694,8 @@ fn main() {
                 "first-rows" => first_rows_gate(&mut m),
                 "stream" => stream_gate(&mut m),
                 "refresh" => refresh_gate(&mut m),
-                other => panic!("unknown gate {other:?} (scroll, first-rows, stream, refresh)"),
+                "preview" => preview_gate(&mut m),
+                other => panic!("unknown gate {other:?} (scroll, first-rows, stream, refresh, preview)"),
             }
         }
         runs.push(m);

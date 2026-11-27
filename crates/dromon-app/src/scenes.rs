@@ -17,6 +17,8 @@ use crate::state::{
 };
 use crate::theme::Appearance;
 
+#[path = "scenes_preview.rs"]
+mod preview;
 #[path = "scenes_settings.rs"]
 mod settings;
 #[path = "scenes_update.rs"]
@@ -742,6 +744,10 @@ pub const SCENES: &[Scene] = &[
     ("properties-folder", properties_folder),
     ("properties-file-light", properties_file_light),
     ("properties-folder-light", properties_folder_light),
+    ("preview-image", preview::preview_image),
+    ("preview-text", preview::preview_text),
+    ("preview-unsupported", preview::preview_unsupported),
+    ("preview-text-light", preview::preview_text_light),
     ("listing-compact", settings::listing_compact),
     ("settings", settings::settings),
     ("settings-light", settings::settings_light),

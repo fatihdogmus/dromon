@@ -19,7 +19,7 @@ Status: planning, v1 scope locked · Last updated: 2026-11-25 · License: MIT
 
 ### Non-goals for v1
 - Split or dual panes
-- File previews, Quick Look, editing remote files in place
+- Editing remote files in place (a quick preview exists: Space shows an image, or a text file's start or a log's end, without downloading it)
 - Permission (chmod/chown) editing
 - Dragging files *out* of the app into Finder or Explorer (needs OS file promises, which Rune doesn't support)
 - FTP, WebDAV, S3, cloud storage
@@ -577,7 +577,7 @@ Rules:
 - Release: signing and notarization (macOS), MSI/winget (Windows), Flatpak/AppImage (Linux), auto-update
 - Pinned folders per host
 - Drag-out to Finder/Explorer with file promises (needs Rune support or a platform shim)
-- Quick Look–style previews
+- Quick Look–style previews: done for images, text and logs (Space); PDF, audio and video still to come
 - Windows 10 support
 - Localization
 - Editing a remote file in a local editor with automatic re-upload on save

@@ -16,6 +16,7 @@
 //!   operations (new folder, rename, delete) changed in them, in one overlay that both use.
 //! - `changes.rs`: a server's scripted changes "made elsewhere", applied one step per poll or
 //!   refresh, which the backend answers as the service's polling would (§4.5).
+//! - `preview.rs`: what files hold when previewed (Space): generated from their names and sizes.
 //!
 //! `dromon --fixture <file.json>` runs the app on a fixture: no service thread, no ssh, no ssh
 //! config; the fixture file is the only thing it reads.
@@ -25,6 +26,7 @@ mod changes;
 mod generate;
 mod hostbook;
 mod parse;
+mod preview;
 mod search;
 mod sizes;
 pub mod transfers;

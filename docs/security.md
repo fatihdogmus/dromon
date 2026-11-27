@@ -56,6 +56,10 @@ needed or was never delivered.
 - Error messages name what failed, never message contents (`askpass/protocol.rs`).
 - Only passwords and passphrases may be remembered (`PromptKind::rememberable`); codes and every
   other prompt are asked each time.
+- What a quick preview reads (Space) is treated the same way, since a config file can hold
+  secrets: it stays in memory and never touches disk (no temporary file, no cache on disk), is
+  never logged (`DROMON_TRACE` counts its bytes), shows only sizes in `Debug` (`PreviewBytes`,
+  `state::preview::Text`), and is dropped when the panel closes.
 
 ### Consequences
 

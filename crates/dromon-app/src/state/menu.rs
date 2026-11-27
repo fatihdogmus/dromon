@@ -182,6 +182,11 @@ impl App {
         c.selection.cursor().filter(|name| c.row_names().contains(name)).map(str::to_owned)
     }
 
+    /// The terminal app couldn't be opened: a toast says why.
+    pub(super) fn terminal_failed(&mut self, why: &str) {
+        self.files.toasts.push(format!("Couldn't open a terminal: {why}"));
+    }
+
     /// "Open in Terminal": in the row `row` when it's a folder, else in the folder on screen;
     /// nothing while the host isn't connected.
     pub(super) fn open_terminal(&mut self, row: Option<String>, fx: &mut Vec<Effect>) {
