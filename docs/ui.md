@@ -84,10 +84,10 @@ Picking the right surface for new UI.
 
 | Surface | Behaviour |
 | --- | --- |
-| Sheet | Drops from the toolbar edge over a veil that makes the window inert. One at a time; prompts that arrive meanwhile wait in order. Escape cancels, Return presses the default button (`default_button`). Sign in, host key, yes/no, connection log, delete, Add to SSH config, conflict, edit conflict (`views/editing.rs`: a file being edited changed on the server), quit. |
+| Sheet | Drops from the toolbar edge over a veil that makes the window inert. One at a time; prompts that arrive meanwhile wait in order. Escape cancels, Return presses the default button (`default_button`). Sign in, host key, yes/no, connection log, delete, Add to SSH config, conflict, edit conflict (`views/editing.rs`: a file being edited changed on the server), quit, bug report (below). |
 | Popover | Grows from its trigger on `raised`, modal: Escape or a press outside closes it. Quick connect, transfers (headed by its Editing section while files are being edited in a local editor, `views/editing.rs`). |
 | Palette | ⌘K, 560 pt, a third of the way down; groups Hosts, Go to folder…, Actions. Its phases are `state::palette::Phase`. Actions that can't run now are not listed (never greyed). |
-| Toast | Bottom centre, blocks nothing. ssh's notices first, then the app's (delete progress, "folder was removed"). |
+| Toast | Bottom centre, blocks nothing. ssh's notices first, then the app's (delete progress, "folder was removed"). A failed delete's, a failed save's and a failed update install's toast has **Report**: the bug report sheet with that error in it. |
 | Preview panel | Space on a file row (`views/preview.rs`, `state/preview.rs`): a card over the right 60 % of the list that leaves the rows on its left in reach, so ↑/↓, a click or typing move the cursor and the preview follows. Springs in on `snap`, out on `move`, at once under reduce motion. A dialog, but not a Rune modal (that would make the rows inert): it takes the keyboard on opening and its own `on_key` keeps Tab among its controls; Space or Escape closes it and hands the keyboard back to the rows. While it's open the list's other shortcuts wait (`App::preview_shortcut`). A text shows in the mono face as virtual rows of 16-line blocks (one text for the lines, one for their numbers, hidden from screen readers, inside a region named "Contents of <name>, N lines"), so only the blocks on screen are laid out; lines don't wrap, and the content is as wide as the widest line. A line over 2,000 characters is cut there with " …" (`state::preview::LONG_LINE`), and a note under the header says so beside the one for a text cut to 256 KB. Moving the cursor reads the next file at once, but its text shows only once the cursor has rested 150 ms (`state::preview::REST`, on the poll's clock), so ↓ held lays out none of the texts it passes; Space opening the panel, images and details don't wait. |
 
 - Confirm only what is destructive (delete, Replace, quitting with transfers running); the safe
@@ -95,6 +95,12 @@ Picking the right surface for new UI.
 - What the user types into a prompt lives only in the open sheet's field; it is moved into the
   answer on submit and wiped on cancel ([security.md](security.md#standard-secrets-in-memory)).
 - Modal surfaces trap Tab and hand focus back to their opener when they close.
+- The bug report sheet (`views/report.rs`, `state/report.rs`) opens from the Help menu's "Report
+  a Bug…" (macOS; Rune has no menu bar on Windows and Linux), the palette's "Report a bug…" and
+  an error's Report (the toasts above, the connection-failed screen's `state-report`). It shows
+  the report read-only in the mono face, scrolling and selectable: exactly what Copy report
+  copies and Open GitHub (the default button) fills into the new-issue form. Escape and Cancel
+  close it; it waits behind a prompt sheet, and holds the list's shortcuts as the others do.
 
 ### Agent note
 
@@ -428,7 +434,8 @@ Writing a script that drives the app.
 | Context menus | `ctx-menu` with items `ctx-<id>` (`ctx-open`, `ctx-edit`, `ctx-download`, `ctx-terminal`, `ctx-copy`, `ctx-cut`, `ctx-paste`, `ctx-copy-path`, `ctx-rename`, `ctx-delete`, `ctx-new-folder`, `ctx-refresh`, `ctx-hidden`); a host's menu `ctx-host-connect`, `ctx-host-disconnect`, `ctx-host-add-to-config`, `ctx-host-edit`, `ctx-host-remove`, `ctx-host-save` |
 | Quick connect | `sb-quick-connect`, `welcome-quick-connect`, `quick`, `quick-<field>-input` and `quick-<field>-error` for `host`, `user`, `port`, `alias`, `identity`, `jump`; `quick-more`, `quick-pick-identity`, `quick-save`, `quick-connect`; the Add to SSH config sheet `add-config` (`-block-text`, `-target`, `-backup`, `-confirm`, `-cancel`) |
 | Filter and search | `tb-filter` (closed), `tb-filter-input`, `tb-filter-clear`, the scope switch `tb-scope` with `tb-scope-folder` and `tb-scope-subfolders`; results `search-grid`, `rows/hit-<n>`, `search-status-text`, `search-unreadable`, `search-empty`; a result's menu items `ctx-download`, `ctx-copy-path`, `ctx-properties` |
-| Palette | `tb-palette`, `palette-input`, `palette-group-hosts`, `palette-group-folders`, `palette-group-actions`, rows `pal-host-<id>`, `pal-go`, `pal-folder-<path>`, `pal-<action>`; `palette-empty` |
+| Palette | `tb-palette`, `palette-input`, `palette-group-hosts`, `palette-group-folders`, `palette-group-actions`, rows `pal-host-<id>`, `pal-go`, `pal-folder-<path>`, `pal-<action>` (`pal-report-bug`); `palette-empty` |
+| Bug report | the sheet `report` with `report-explain`, `report-scroll`, `report-text`, `report-note` (the link left events out), `report-copy`, `report-cancel`, `report-open`; Report buttons `toast-op-<id>-report`, `toast-note-<n>-report`, `toast-update-report`, `state-report` |
 | Polling | a refresh's new rows carry `fresh-<n>`; the vanished-folder toast is `toast-note-<n>` (`-text`) |
 | Preview | the panel `preview` (Space: `{"type": "key", "name": " "}`), `preview-title`, `preview-meta`, `preview-download`, `preview-close`; its text `preview-lines` (the region; block `b` is `preview-lines/<b>`, its lines `…/lines`, their numbers `…/n`), the notes `preview-cut` and `preview-long`, `preview-image`, `preview-loading`, `preview-note`, `preview-kind-value` |
 

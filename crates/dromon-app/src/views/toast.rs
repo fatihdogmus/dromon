@@ -1,8 +1,10 @@
 //! The toast stack, bottom centre above the status bar: ssh's notices first, then the app's
 //! toasts (`state::toast`), oldest on top. Each rises 8 pt as it fades in and leaves the same
 //! way (`move`). Running ones show a spinner; failures a warning glyph and a dismiss button (and
-//! a failed save of a file being edited, Retry).
-//! The update toast (`state::update`) comes last, with its buttons under its text.
+//! a failed save of a file being edited, Retry). A failed delete's and a failed save's offer
+//! Report (`toast-…-report`): the bug report sheet with that error in it.
+//! The update toast (`state::update`) comes last, with its buttons under its text (and Report
+//! once installing failed, `toast-update-report`).
 
 use rune::{El, LoopSpec, Transition, Tx, col, el, icon, row, text};
 
@@ -10,6 +12,7 @@ use super::widgets::Keyboard;
 use super::{Paint, run, sheets};
 use crate::icons;
 use crate::state::remote_edit::RemoteEditAction;
+use crate::state::report::{ReportAction, Subject};
 use crate::state::toast::{Toast, Tone};
 use crate::state::update::{Button, UpdateToast};
 use crate::state::{Action, App, FileAction};
@@ -67,6 +70,9 @@ fn update_toast(u: &UpdateToast, p: Paint) -> El {
             .tab_press()
             .child(text(b.label()).font(type_::BODY_STRONG).color(t.text))
     }));
+    // Installing failed: a bug report with that in it.
+    let buttons = buttons
+        .children((u.tone == Tone::Error).then(|| report_button(p, format!("{UPDATE}-report"), Subject::Update)));
     row()
         .key(UPDATE)
         .role(if u.tone == Tone::Error { "alert" } else { "status" })
@@ -126,22 +132,11 @@ pub fn toast(toast: &Toast, p: Paint) -> El {
         );
     // A failed save of a file being edited: upload it again (`state/remote_edit.rs`).
     if let Some(edit) = toast.retry {
-        let retry = Action::RemoteEdit(RemoteEditAction::Retry(edit));
-        e = e.child(
-            row()
-                .key(format!("{key}-retry"))
-                .role("button")
-                .label("Retry")
-                .h(24.0)
-                .px(space::S2)
-                .radius(radius::ROW)
-                .center()
-                .hover(t.hover)
-                .press(t.press)
-                .on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, retry.clone(), tx))
-                .tab_press()
-                .child(text("Retry").font(type_::BODY_STRONG).color(t.text)),
-        );
+        e = e.child(word_button(p, format!("{key}-retry"), "Retry", Action::RemoteEdit(RemoteEditAction::Retry(edit))));
+    }
+    // A failure: a bug report with it in (`state/report.rs`).
+    if let Some(subject) = toast.report() {
+        e = e.child(report_button(p, format!("{key}-report"), subject));
     }
     if toast.dismissible() {
         let id = toast.id;
@@ -160,4 +155,27 @@ pub fn toast(toast: &Toast, p: Paint) -> El {
         );
     }
     e
+}
+
+/// A toast's button of one word: Retry, Report.
+fn word_button(p: Paint, key: String, label: &'static str, action: Action) -> El {
+    let t = p.t;
+    row()
+        .key(key)
+        .role("button")
+        .label(label)
+        .h(24.0)
+        .px(space::S2)
+        .radius(radius::ROW)
+        .center()
+        .hover(t.hover)
+        .press(t.press)
+        .on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, action.clone(), tx))
+        .tab_press()
+        .child(text(label).font(type_::BODY_STRONG).color(t.text))
+}
+
+/// Report: the bug report sheet, with `subject`'s error in it.
+fn report_button(p: Paint, key: String, subject: Subject) -> El {
+    word_button(p, key, "Report", Action::Report(ReportAction::Open(Some(subject))))
 }

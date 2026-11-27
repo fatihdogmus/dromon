@@ -18,7 +18,7 @@ README, "Agent tooling"). `--scene NAME` starts that scene from the fixture's ho
 connect to `prod` and `nas`, so they're meant for the demo; the goldens are the demo's).
 
 `scripts/flows.sh` renders the flows in `tests/flows/` this way, and `scripts/repro.sh` does it
-for a bug report (`.github/ISSUE_TEMPLATE/bug.yml`).
+for a bug report made with the repro form (`.github/ISSUE_TEMPLATE/repro.yml`).
 
 An invalid fixture stops Dromon at once with exit status 2 and a message that names where in the
 file it is wrong, e.g.

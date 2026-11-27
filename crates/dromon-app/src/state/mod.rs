@@ -26,8 +26,10 @@ pub mod prefs;
 pub mod preview;
 pub mod properties;
 pub mod quick;
+pub mod redact;
 pub mod refresh;
 pub mod remote_edit;
+pub mod report;
 pub mod search;
 pub mod selection;
 pub mod service;
@@ -181,6 +183,8 @@ pub struct App {
     pub update: update::Update,
     /// The files being edited in a local editor (`remote_edit.rs`).
     pub edits: remote_edit::Edits,
+    /// "Report a Bug…": the last events and actions, and the sheet (`report.rs`).
+    pub report: report::Report,
 }
 
 /// What the user did, in the app's terms.
@@ -311,6 +315,24 @@ pub enum Action {
     TerminalsFound(Vec<settings::Terminal>),
     /// Edit in a local editor, Stop editing, the edit conflict sheet, Retry (`remote_edit.rs`).
     RemoteEdit(remote_edit::RemoteEditAction),
+    /// "Report a Bug…", an error's Report, and the report sheet's buttons (`report.rs`).
+    Report(report::ReportAction),
+}
+
+impl Action {
+    /// The variant's name and nothing it carries: what a bug report lists of recent actions.
+    pub fn kind(&self) -> &'static str {
+        // One arm per variant, so a new one can't be left out (`{ .. }` matches every shape).
+        macro_rules! names {
+            ($($v:ident)*) => { match self { $(Action::$v { .. } => stringify!($v),)* } };
+        }
+        names!(SelectHost Open OpenSelection GoUp Back Forward GoTo Click Move End SelectAll Type Sort
+            ToggleHidden OpenFilter CloseFilter FilterChanged Search Escape QuickConnect HostBook SubmitPrompt
+            DeclinePrompt DismissSheet OpenLog SignIn Disconnect Verbose Download Upload PickUpload PickUploadFolder
+            Transfer ResolveConflict ToggleApplyAll ToggleTransfers TransfersTab RevealTransfer DropHover QuitAnyway
+            CancelQuit File Palette OpenSettings LeaveSettings SettingsSection Setting Preview NewWindow CloseWindow
+            Update OpenTerminal TerminalFailed TerminalsFound RemoteEdit Report)
+    }
 }
 
 /// What an action asks the view layer to do afterwards.
@@ -382,6 +404,7 @@ impl App {
             poll: refresh::PollUi::default(),
             update: update::Update::default(),
             edits: remote_edit::Edits::default(),
+            report: report::Report::default(),
         }
     }
 
@@ -447,6 +470,8 @@ impl App {
     }
 
     fn apply_one(&mut self, ev: ServiceEvent) {
+        // A bug report lists the last events by their trace lines (`report.rs`).
+        self.report.recent.event(service::trace_line(&ev));
         match ev {
             ServiceEvent::FileOp(ev) => self.ops.event(ev),
             ServiceEvent::FolderSize(ev) => self.size_event(ev),
@@ -571,6 +596,10 @@ impl App {
 
     /// Carries out `action`; returns what the view should do next.
     pub fn act(&mut self, action: Action) -> Vec<Effect> {
+        // A bug report lists the last actions by kind; its own sheet's aren't news.
+        if !matches!(action, Action::Report(_)) {
+            self.report.recent.action(action.kind());
+        }
         let fx = self.act_one(action);
         self.sync();
         fx
@@ -612,18 +641,7 @@ impl App {
                     self.send(Command::AnswerPrompt { id, answer });
                 }
             }
-            Action::DismissSheet => {
-                if std::mem::take(&mut self.ui.confirm_quit) {
-                    return fx;
-                }
-                if self.update.confirming() {
-                    self.update_action(update::UpdateAction::Cancel, &mut fx);
-                    return fx;
-                }
-                if let Some((id, answer)) = self.ui.sheets.cancel() {
-                    self.send(Command::AnswerPrompt { id, answer });
-                }
-            }
+            Action::DismissSheet => self.dismiss_sheet(&mut fx),
             Action::OpenLog => {
                 if let Some(host) = self.active.clone() {
                     self.ui.sheets.open_log(host);
@@ -675,8 +693,28 @@ impl App {
             Action::TerminalFailed(why) => self.terminal_failed(&why),
             Action::TerminalsFound(found) => self.ui.settings_page.terminals = found,
             Action::RemoteEdit(a) => self.remote_edit_action(a, &mut fx),
+            Action::Report(a) => self.report_action(a, &mut fx),
         }
         fx
+    }
+
+    /// Cancel or Escape on the sheet on screen, in the order `views::sheets::layer` stacks them:
+    /// quitting's or updating's question, then a prompt (cancelled) or another sheet of
+    /// [`Sheets`], then the bug report.
+    fn dismiss_sheet(&mut self, fx: &mut Vec<Effect>) {
+        if std::mem::take(&mut self.ui.confirm_quit) {
+            return;
+        }
+        if self.update.confirming() {
+            return self.update_action(update::UpdateAction::Cancel, fx);
+        }
+        if self.ui.sheets.is_open() {
+            if let Some((id, answer)) = self.ui.sheets.cancel() {
+                self.send(Command::AnswerPrompt { id, answer });
+            }
+            return;
+        }
+        self.report_action(report::ReportAction::Cancel, fx);
     }
 
     /// The window's close button (⌘W, Alt+F4) was pressed: whether to close now. Closing the last

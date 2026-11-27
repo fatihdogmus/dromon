@@ -7,7 +7,7 @@
 #   bash scripts/repro.sh path/to/issue.md       # an issue body saved as a file
 #   bash scripts/repro.sh 123 /tmp/out           # out dir (default target/repro/<number or file name>)
 #
-# The issue (see .github/ISSUE_TEMPLATE/bug.yml and docs/examples/issue-repro.md) carries fenced
+# The issue (see .github/ISSUE_TEMPLATE/repro.yml and docs/examples/issue-repro.md) carries fenced
 # blocks whose info string is exactly:
 #   ```json fixture   optional: the fixture (docs/fixtures.md); without it, the built-in demo
 #   ```json script    the Rune script to replay (README "Agent tooling")
@@ -137,7 +137,7 @@ for k in fixture script args; do
   [[ "$(count $k)" -le 1 ]] || refuse 2 "the issue has $(count $k) \`\`\`$( [[ $k == args ]] && echo text || echo json ) $k blocks; give at most one"
 done
 [[ "$(count script)" -eq 1 && -s "$out/script.json" ]] \
-  || refuse 3 "the issue has no \`\`\`json script block (or it's empty), so there is nothing to replay. See .github/ISSUE_TEMPLATE/bug.yml for the format."
+  || refuse 3 "the issue has no \`\`\`json script block (or it's empty), so there is nothing to replay. See .github/ISSUE_TEMPLATE/repro.yml for the format."
 
 fixture="$out/fixture.json"
 fixture_note="fixture.json (from the issue)"

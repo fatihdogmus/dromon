@@ -173,13 +173,11 @@ On Windows and Linux, <kbd>Ctrl</kbd> takes the place of <kbd>⌘</kbd>; Delete 
 
 ## 🐛 Found a bug?
 
-Most bugs can be shown **without your servers**. The [bug report form](https://github.com/fatihdogmus/dromon/issues/new?template=bug.yml) asks for a small *fixture* (fake hosts, folders and sign-in prompts) and a *script* (the clicks and keys), and Dromon replays them headless:
+In Dromon, choose **Help › Report a Bug…** (on Windows and Linux: <kbd>Ctrl+K</kbd> → "Report a bug…"), or **Report** on an error. Dromon shows you the whole report first, then opens a new GitHub issue in your browser with it filled in; you add what happened and what you expected, and can edit anything before you submit. Nothing is sent until you do. No GitHub account? **Copy report** puts the same text on your clipboard.
 
-```sh
-cargo repro 42      # issue #42 → target/repro/42/{summary.md,end.png,strip.png}
-```
+The report says which Dromon you run and how it was installed, your OS, display and accessibility settings, what kind of screen was up, the error you reported from, and the last things you did and Dromon heard, by kind only. The names of your hosts, users, addresses, folders and files are replaced (`host-1`, `<dir>/file-2.txt`), and it never holds passwords or what your files contain.
 
-Maintainers can comment `/repro` on an issue and CI replies with the same output. Writing the fixture with an AI agent works well: point it at [`docs/fixtures.md`](docs/fixtures.md).
+Contributors: the [repro form](https://github.com/fatihdogmus/dromon/issues/new?template=repro.yml) takes a fixture and a script that `cargo repro <issue>` replays headless (see [`docs/fixtures.md`](docs/fixtures.md)).
 
 ## 🛠️ Contributing
 

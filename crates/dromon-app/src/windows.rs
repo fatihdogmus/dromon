@@ -11,8 +11,9 @@
 //! window quits the app, on macOS too. The app menu's "Settings…" (⌘,, macOS) acts in the key
 //! window, as Rune's menu bar holds the key window's items: it shows that window's Settings page
 //! (`state/page.rs`). Its "Check for Updates…" shows that page's General section and checks now.
-//! On Windows and Linux Rune has no app menu, and Ctrl+, reaches `on_key`; Settings' Check now
-//! is the way there.
+//! The Help menu's "Report a Bug…" opens that window's bug report sheet (`state/report.rs`).
+//! On Windows and Linux Rune has no menu bar, and Ctrl+, reaches `on_key`; Settings' Check now
+//! and the palette's "Report a bug…" are the ways there.
 //!
 //! The taskbar, the Dock badge and notifications are hooked up once for the app
 //! ([`Fleet::connect_os`]); every main window's native window joins that link, and only the
@@ -29,6 +30,7 @@ use rune::{
 
 use crate::service::RuneSink;
 use crate::state::frames::{self, Area, CASCADE, Frame};
+use crate::state::report::ReportAction;
 use crate::state::update::UpdateAction;
 use crate::state::{Action, App, News, Peers, SettingsSection, WindowId};
 use crate::theme::Appearance;
@@ -202,6 +204,7 @@ fn main_window(fleet: &Fleet, id: WindowId, app: RuneApp<App>) -> RuneApp<App> {
         .menu_item(menu_item("Close Window", "close-window", "mod+w", |s, tx| views::run(s, Action::CloseWindow, tx)))
         .menu_item(settings_item())
         .menu_item(updates_item())
+        .menu_item(report_item())
 }
 
 fn menu_item(title: &str, id: &str, chord: &str, action: fn(&mut App, &mut Tx)) -> MenuItem<App> {
@@ -235,6 +238,16 @@ fn check_for_updates(s: &mut App, tx: &mut Tx) {
     views::run(s, Action::OpenSettings, tx);
     views::run(s, Action::SettingsSection(SettingsSection::General), tx);
     views::run(s, Action::Update(UpdateAction::CheckNow), tx);
+}
+
+/// The Help menu's "Report a Bug…": the bug report sheet in the window it acts in
+/// (`state/report.rs`).
+fn report_item() -> MenuItem<App> {
+    MenuItem::new("Report a Bug…", report_bug).id("report-bug").menu("Help")
+}
+
+fn report_bug(s: &mut App, tx: &mut Tx) {
+    views::run(s, Action::Report(ReportAction::Open(None)), tx);
 }
 
 /// The fleet as a window state's peers, and its backend waking the windows (a fixture's); the
