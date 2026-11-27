@@ -474,11 +474,20 @@ impl Fixture {
     /// CLI: on Windows, the CLI talking to WSL's Docker over TCP ran commands but returned none
     /// of their output. Native: `sudo -n <command>` in `/`.
     ///
-    /// Blocking; callable from async tests too (it runs on a thread of its own).
+    /// Blocking; callable from async tests too. On a multi-thread runtime it blocks in place
+    /// (`tokio::task::block_in_place`): the worker hands its other tasks to another thread, so
+    /// they keep running. A worker that just blocked would stall them, the other matrix
+    /// servers' SFTP sessions included, until their replies timed out as a lost connection.
     pub fn exec(&self, command: &[&str]) -> Result<String, String> {
-        match &self.server {
+        let run = || match &self.server {
             Server::Docker(c) => c.exec(command),
             Server::Native(sshd) => sshd.exec(command),
+        };
+        match tokio::runtime::Handle::try_current() {
+            Ok(rt) if rt.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+                tokio::task::block_in_place(run)
+            }
+            _ => run(),
         }
     }
 

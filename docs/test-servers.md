@@ -135,7 +135,11 @@ Knowing what happens when a test asks for the default server.
 
 Base images come through `mirror.gcr.io`, not Docker Hub directly, which rate-limits CI.
 `Fixture::exec` runs a command in the container (the Docker API, not the `docker` CLI);
-`kill_sessions` ends a user's sessions.
+`kill_sessions` ends a user's sessions. `exec` blocks; from an async test on a multi-thread
+runtime it blocks in place (`tokio::task::block_in_place`), so the runtime's other tasks keep
+running. Any other blocking call in such a test does the same: a worker that just blocks stalls
+the tasks queued on it, other checks' SFTP sessions included, whose replies then exceed their
+10 s timeout and fail as `ConnectionLost`.
 
 ### Agent note
 
