@@ -466,10 +466,17 @@ impl App {
             .filter_map(|n| c.find(n))
             .map(|e| RemoteItem { path: c.cwd.join(&e.name), kind: e.kind, size: e.size })
             .collect();
+        let host = c.host.clone();
+        self.download_items(host, items);
+    }
+
+    /// Downloads `items` of `host` (rows of the folder on screen, or search results) as
+    /// [`App::download`] does.
+    pub(super) fn download_items(&mut self, host: HostId, items: Vec<RemoteItem>) {
         if items.is_empty() {
             return;
         }
-        let req = JobRequest::Download { host: c.host.clone(), items, into: self.download_folder() };
+        let req = JobRequest::Download { host, items, into: self.download_folder() };
         self.send(Command::Transfer(TransferCommand::Start(req)));
         if !self.transfers.open {
             self.transfers.flourish.start();

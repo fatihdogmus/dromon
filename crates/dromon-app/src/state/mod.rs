@@ -26,6 +26,7 @@ pub mod prefs;
 pub mod properties;
 pub mod quick;
 pub mod refresh;
+pub mod search;
 pub mod selection;
 pub mod service;
 pub mod settings;
@@ -54,12 +55,13 @@ pub use ops::{OpView, Ops};
 pub use page::{Page, SettingsSection};
 pub use palette::PaletteAction;
 pub use prefs::{NoStore, Saved, Store};
+pub use search::{Scope, SearchAction};
 pub use selection::{Selection, TypeSelect};
 #[cfg(test)]
 pub use service::Recorder;
 pub use service::{
-    Backend, Command, FileOp, FileOpKind, HostBookCommand, HostBookEvent, OpId, ServiceEvent, Silent, SizeId,
-    SizeTotal, TransferCommand, WindowId,
+    Backend, Command, FileOp, FileOpKind, Found, HostBookCommand, HostBookEvent, OpId, SearchId, ServiceEvent, Silent,
+    SizeId, SizeTotal, TransferCommand, WindowId,
 };
 pub use settings::{Density, Settings, SettingsChange, SettingsView};
 pub use sheets::{Sheet, Sheets};
@@ -79,8 +81,11 @@ pub struct UiState {
     /// the view ORs them with what the OS asks for (`views::access`).
     pub access: Access,
     pub sidebar_width: f32,
-    /// The ⌘F field's text model; its query is mirrored into the active `ConnView::filter`.
+    /// The ⌘F field's text model; its query is mirrored into the active `ConnView::filter`, or
+    /// searched for below the folder in the Subfolders scope (`search.rs`).
     pub filter_edit: TextEdit,
+    /// Search in subfolders: the field's scope, and the search and its results (`search.rs`).
+    pub search: search::Search,
     pub type_select: TypeSelect,
     /// A row to bring to the middle of the list once it mounts (a scene's scroll position).
     pub center_on_mount: Option<String>,
@@ -108,6 +113,7 @@ impl Default for UiState {
             access: Access::default(),
             sidebar_width: size::SIDEBAR,
             filter_edit: TextEdit::new(""),
+            search: search::Search::default(),
             type_select: TypeSelect::default(),
             center_on_mount: None,
             sheets: Sheets::default(),
@@ -200,6 +206,8 @@ pub enum Action {
     CloseFilter,
     /// The filter field's text changed to this.
     FilterChanged(String),
+    /// Search in subfolders: the filter field's scope and typing, ⌘⇧F (`search.rs`).
+    Search(SearchAction),
     Escape,
     /// Open the quick-connect popover (the sidebar's +, the welcome button, ⌘⇧K).
     QuickConnect,
@@ -407,6 +415,7 @@ impl App {
             }
             ServiceEvent::Opened { host, start } => self.opened(host, start),
             ServiceEvent::Listing { host, path, entries } | ServiceEvent::Refreshed { host, path, entries } => {
+                let query = self.folder_query();
                 if let Some(c) = self.conns.get_mut(&host) {
                     if path == c.cwd {
                         c.fallback = None;
@@ -414,7 +423,7 @@ impl App {
                     let seq = c.fresh.seq;
                     c.set_listing(&path, entries);
                     if c.filter.is_on() && self.active.as_ref() == Some(&host) {
-                        c.set_filter(Filter::On(self.ui.filter_edit.text.clone()));
+                        c.set_filter(Filter::On(query));
                     }
                     if c.fresh.seq != seq {
                         self.refreshed();
@@ -423,6 +432,7 @@ impl App {
                 self.vanish_landed(&host, &path);
             }
             ServiceEvent::ListingPage { host, path, entries, first, done } => {
+                let query = self.folder_query();
                 if let Some(c) = self.conns.get_mut(&host) {
                     if path == c.cwd {
                         c.fallback = None;
@@ -432,7 +442,7 @@ impl App {
                         && c.filter.is_on()
                         && self.active.as_ref() == Some(&host)
                     {
-                        c.set_filter(Filter::On(self.ui.filter_edit.text.clone()));
+                        c.set_filter(Filter::On(query));
                     }
                     if c.fresh.seq != seq {
                         self.refreshed();
@@ -489,6 +499,9 @@ impl App {
             ev @ (ServiceEvent::FolderSizeProgress { .. }
             | ServiceEvent::FolderSizeDone { .. }
             | ServiceEvent::FolderSizeFailed { .. }) => self.size_event(ev),
+            ev @ (ServiceEvent::SearchFound { .. }
+            | ServiceEvent::SearchDone { .. }
+            | ServiceEvent::SearchFailed { .. }) => self.search_event(ev),
         }
     }
 
@@ -519,6 +532,8 @@ impl App {
 
     fn act_one(&mut self, action: Action) -> Vec<Effect> {
         let mut fx = Vec::new();
+        // While a search's results are on screen, the list's actions are theirs (`search.rs`).
+        let Some(action) = self.results_action(action, &mut fx) else { return fx };
         match action {
             Action::SelectHost(host) => self.select_host(host),
             Action::Open(_)
@@ -538,6 +553,7 @@ impl App {
             | Action::CloseFilter
             | Action::FilterChanged(_)
             | Action::Escape => self.browse_action(action, &mut fx),
+            Action::Search(a) => self.search_action(a, &mut fx),
             Action::QuickConnect => self.open_quick(),
             Action::HostBook(a) => self.host_action(a, &mut fx),
             Action::SubmitPrompt => {
@@ -669,6 +685,7 @@ impl App {
             Shortcut::SelectAll => Action::SelectAll,
             Shortcut::ToggleHidden => Action::ToggleHidden,
             Shortcut::Filter => Action::OpenFilter,
+            Shortcut::Search => Action::Search(SearchAction::Open),
             Shortcut::Escape => Action::Escape,
             Shortcut::Move { delta, extend } => Action::Move { delta, extend },
             Shortcut::Page { down, extend } => {
@@ -677,7 +694,7 @@ impl App {
             Shortcut::End { last, extend } => Action::End { last, extend },
             Shortcut::Type(text) => Action::Type { text, now },
             // Shift+F10 and the Menu key: the cursor row's menu, else the empty list's.
-            Shortcut::ContextMenu => return self.context_menu_key(),
+            Shortcut::ContextMenu => return self.hit_menu_key().unwrap_or_else(|| self.context_menu_key()),
             // A focused text field keeps its keys (§7): these are the list's.
             Shortcut::File(_) | Shortcut::GoToPath | Shortcut::Host(_) | Shortcut::ShowTransfers
                 if self.text_focused() =>

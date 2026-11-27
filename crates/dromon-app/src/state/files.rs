@@ -415,9 +415,11 @@ impl App {
 
     /// After every action and event: moves the field along with its operation, closes a field
     /// or drag whose folder (or row) went away, asks the list to scroll to a row that just
-    /// appeared, and cancels a folder size walk whose Properties sheet closed.
+    /// appeared, cancels a folder size walk whose Properties sheet closed, and ends a search
+    /// whose folder isn't on screen any more (`search.rs`).
     pub(super) fn sync_files(&mut self) {
         self.sync_properties();
+        self.sync_search();
         let on_screen = |s: &App, host: &HostId, folder: &RemotePath| {
             s.active.as_ref() == Some(host) && s.conn().is_some_and(|c| c.interactive() && c.cwd == *folder)
         };
