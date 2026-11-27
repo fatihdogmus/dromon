@@ -10,6 +10,7 @@ use super::history::NavHistory;
 use super::log::LogBuffer;
 use super::refresh::{self, Fresh};
 use super::selection::Selection;
+use super::service::Live;
 
 /// The listing of the current folder.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -156,6 +157,8 @@ pub struct ConnView {
     pub vanished: Option<RemotePath>,
     /// The session's home folder (where it started), once it opened: `~` in a typed path.
     pub home: Option<RemotePath>,
+    /// Whether a folder of the host updates live, as the service last said.
+    pub live: Live,
 }
 
 impl ConnView {
@@ -181,7 +184,13 @@ impl ConnView {
             fresh: Fresh::default(),
             vanished: None,
             home: None,
+            live: Live::Off,
         }
+    }
+
+    /// Whether the folder on screen updates live (the status bar's mark).
+    pub fn is_live(&self) -> bool {
+        self.status == ConnStatus::Ready && matches!(&self.live, Live::On(path) if *path == self.cwd)
     }
 
     pub fn entries(&self) -> &[Entry] {
@@ -510,6 +519,19 @@ mod tests {
     fn listings_sort_folders_first() {
         let c = ready("/w");
         assert_eq!(c.row_names(), ["current", "src", ".env", "a.txt", "b.txt"]);
+    }
+
+    #[test]
+    fn only_the_folder_watched_live_shows_live_and_only_while_connected() {
+        let mut c = ready("/w");
+        assert!(!c.is_live());
+        c.live = Live::On(RemotePath::new("/w"));
+        assert!(c.is_live());
+        c.status = ConnStatus::Reconnecting { attempt: 1 };
+        assert!(!c.is_live());
+        c.status = ConnStatus::Ready;
+        c.live = Live::On(RemotePath::new("/elsewhere"));
+        assert!(!c.is_live(), "another window's folder on this host");
     }
 
     #[test]

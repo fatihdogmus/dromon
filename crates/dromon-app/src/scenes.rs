@@ -12,7 +12,7 @@ use rune::TextEdit;
 use crate::fixture;
 use crate::state::log::LogBuffer;
 use crate::state::{
-    Action, App, DropTarget, Effect, FileAction, HostAction, MenuKind, PaletteAction, RowTarget, SearchAction,
+    Action, App, DropTarget, Effect, FileAction, HostAction, Live, MenuKind, PaletteAction, RowTarget, SearchAction,
     ServiceEvent, Silent, Tab,
 };
 use crate::theme::Appearance;
@@ -54,6 +54,13 @@ pub fn listing(s: &mut App) {
     act(s, Action::SelectHost(HostId("nas".into())));
     act(s, Action::SelectHost(prod()));
     act(s, Action::Click { name: "index.html".into(), extend: false, toggle: false });
+}
+
+/// The listing watched live: "Live" before the connection in the status bar.
+pub fn live(s: &mut App) {
+    listing(s);
+    let live = Live::On(RemotePath::new("/var/www/site"));
+    s.apply(ServiceEvent::Live { host: prod(), live });
 }
 
 pub fn listing_sorted_size(s: &mut App) {
@@ -679,6 +686,7 @@ pub const SCENES: &[Scene] = &[
     ("welcome", welcome),
     ("connecting", connecting),
     ("listing", listing),
+    ("live", live),
     ("listing-sorted-size", listing_sorted_size),
     ("big-folder", big_folder),
     ("empty-folder", empty_folder),

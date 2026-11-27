@@ -61,8 +61,8 @@ pub use selection::{Selection, TypeSelect};
 #[cfg(test)]
 pub use service::Recorder;
 pub use service::{
-    Backend, Command, FileOp, FileOpKind, Found, HostBookCommand, HostBookEvent, OpId, SearchId, ServiceEvent, Silent,
-    SizeId, SizeTotal, TransferCommand, WindowId,
+    Backend, Command, FileOp, FileOpKind, Found, HostBookCommand, HostBookEvent, Live, LiveUnavailable, OpId, SearchId,
+    ServiceEvent, Silent, SizeId, SizeTotal, TransferCommand, WindowId,
 };
 pub use settings::{Density, Settings, SettingsChange, SettingsView};
 pub use sheets::{Sheet, Sheets};
@@ -514,6 +514,9 @@ impl App {
             | ServiceEvent::SearchDone { .. }
             | ServiceEvent::SearchFailed { .. }) => self.search_event(ev),
             ServiceEvent::Update(ev) => self.update_event(ev),
+            ServiceEvent::Live { host, live } => {
+                self.conns.entry(host).and_modify(|c| c.live = live);
+            }
         }
     }
 

@@ -9,7 +9,8 @@
 //! - General: the Terminal "Open in Terminal" uses, one choice per line: System default and the
 //!   terminal apps found on this machine (looked for when the section shows). Check for updates
 //!   automatically, a switch; Check now, with what the last check found and, for a newer
-//!   version, Update (or Copy command) and Release notes.
+//!   version, Update (or Copy command) and Release notes. Live updates when the server supports
+//!   them, a switch.
 //!
 //! The list is a tablist: one Tab stop, ↑ ↓ move between the sections and the section follows,
 //! Tab goes on to the controls, the section's tabpanel. Every control's change goes to the
@@ -230,6 +231,9 @@ fn general(s: &App, v: &SettingsView, terminals: &[Terminal], p: Paint) -> El {
     let t = p.t;
     let terminal_sub = format!("Where Open in Terminal ({}) opens ssh", super::widgets::chord(TERMINAL_CHORD));
     let terminal = terminal_list(p, terminals, v.settings.terminal);
+    let live_label = "Live updates when the server supports them";
+    let live = switch(p, "live-toggle", live_label, v.settings.live_updates, SettingsChange::LiveUpdates);
+    let live_sub = sub(p, "On Linux servers with inotifywait, changes show at once");
     let u = &s.update;
     let auto = switch(
         p,
@@ -261,6 +265,7 @@ fn general(s: &App, v: &SettingsView, terminals: &[Terminal], p: Paint) -> El {
                 auto,
             ),
             setting(p, "Updates", Some(status), buttons),
+            setting(p, live_label, Some(live_sub), live),
         ],
     )
 }

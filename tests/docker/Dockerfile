@@ -1,6 +1,8 @@
 # OpenSSH sshd fixture for Dromon's integration tests: Debian trixie's PAM-enabled OpenSSH.
 # Built and started by `crates/dromon-testkit` (testcontainers); see docs/test-servers.md.
 # sftp-server here advertises posix-rename@openssh.com, limits@openssh.com and copy-data.
+# inotify-tools gives live updates their inotifywait (the bullseye and alpine images lack it, so
+# the matrix sees the fallback to polling).
 #
 # Users (see sshd_config and pam-sshd for how each one logs in):
 #   key    public key (id_ed25519), no password; owns the seed data
@@ -21,7 +23,7 @@ FROM mirror.gcr.io/library/debian:trixie-slim
 # disables passwords.
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        openssh-server openssh-sftp-server libpam-google-authenticator socat \
+        openssh-server openssh-sftp-server libpam-google-authenticator socat inotify-tools \
     && rm -rf /var/lib/apt/lists/* /etc/ssh/ssh_host_* /etc/ssh/sshd_config.d \
     && for u in key pw kbd keypw enc; do useradd -m -s /bin/sh "$u"; done \
     && usermod -p '*' key && usermod -p '*' enc \

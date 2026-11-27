@@ -365,6 +365,12 @@ fn a_real_shell_reads_quoted_paths_back() {
     for path in awkward {
         assert_eq!(sh_words(&quote(path)), [path], "{path:?}");
     }
+    // Nothing inside a quoted path runs.
+    let dir = tempfile::tempdir().unwrap();
+    let canary = dir.path().join("ran");
+    let inject = format!("/x`touch {0}`$(touch {0})';touch {0};'", canary.display());
+    assert_eq!(sh_words(&quote(&inject)), [inject.as_str()]);
+    assert!(!canary.exists(), "nothing in a path runs");
     // The remote command, run by a shell: it lands in the folder (made here for the test).
     let dir = tempfile::tempdir().unwrap();
     let folder = dir.path().join("it's a $dir `x`\nline");
@@ -427,6 +433,128 @@ fn debug_never_prints_the_token() {
 #[test]
 fn ssh_program_is_plain_ssh() {
     assert_eq!(ssh_program(), PathBuf::from("ssh"));
+}
+
+fn build_watch(host: &HostSpec, folder: &str) -> Result<SshCommand, CommandError> {
+    SshCommand::watch_with(PathBuf::from("ssh"), host, askpass().vars_with_display(None), folder)
+}
+
+#[test]
+fn a_watch_runs_a_remote_command_with_the_host_options_and_askpass_of_the_session() {
+    let cmd = build_watch(&saved("box"), "/srv/www").unwrap();
+    let sftp = build(&saved("box"), false).unwrap();
+    let a = args(&cmd);
+    // The session's options (base, `-T`, `ControlMaster=no`, the host's -o), then the alias.
+    assert_eq!(a[..a.len() - 3], args(&sftp)[..sftp.args.len() - 3]);
+    assert!(a.contains(&"-T") && a.contains(&"ControlMaster=no"));
+    assert_eq!(a[a.len() - 3..a.len() - 1], ["box", "--"]);
+    assert!(!a.contains(&"-s") && !a.contains(&"sftp"), "{a:?}");
+    assert_eq!(
+        a[a.len() - 1],
+        "command -v inotifywait >/dev/null 2>&1 || { echo dromon-watch-missing; exit 0; }; echo dromon-watch-ready; \
+         inotifywait -m -q -e create,delete,move,modify,attrib,close_write --format %e -- '/srv/www' & w=$!; \
+         exec 3<&0; { read _ <&3; kill $w; } >/dev/null 2>&1 & r=$!; wait $w; kill $r 2>/dev/null"
+    );
+    assert_eq!(cmd.env, sftp.env, "the same askpass");
+    // A config host passes only its alias, as for the session; -F goes after the base options.
+    let cmd = build_watch(&HostSpec::from_config_alias("prod"), "/").unwrap();
+    let cmd = cmd.with_config_file(Path::new("/tmp/ssh_config")).unwrap();
+    let a = args(&cmd);
+    assert_eq!(a[..BASE.len()], BASE);
+    assert_eq!(a[BASE.len()..a.len() - 1], ["-F", "/tmp/ssh_config", "prod", "--"]);
+}
+
+#[test]
+fn a_watch_refuses_what_the_session_refuses_and_a_folder_it_cant_pass() {
+    assert!(build_watch(&HostSpec::from_config_alias("-oProxyCommand=sh"), "/a").is_err());
+    let mut host = saved("box");
+    host.user = Some("-x".into());
+    assert!(build_watch(&host, "/a").is_err());
+    assert_eq!(build_watch(&saved("box"), "").unwrap_err(), CommandError::Empty("The folder"));
+    assert_eq!(build_watch(&saved("box"), "/a\0b").unwrap_err(), CommandError::Unquotable("The folder"));
+}
+
+#[test]
+fn a_watch_quotes_its_folder_whatever_it_holds() {
+    for folder in ["/srv/my site", "/it's", "/''", "/\"q\"", "/$HOME/${x}", "/`rm -rf ~`", "/$(id)", "/a\nb", "-rf"] {
+        let quoted = quote(folder);
+        assert!(watch_script(folder).unwrap().contains(&format!(" -- {quoted} & w=$!;")), "{folder:?}");
+    }
+}
+
+/// The watch's command in a real shell, with a fake `inotifywait` (`body`) on its `PATH`, its
+/// input and output one socket, as sshd may give a session; its input kept open. Returns its
+/// output lines up to the end of its output (`None`: the output didn't end within 2 s), and
+/// whether the command ended within 5 s once its input closed then.
+#[cfg(unix)]
+fn run_watch(dir: &Path, body: &str) -> (Option<Vec<String>>, bool) {
+    use std::io::{BufRead, BufReader};
+    use std::os::fd::OwnedFd;
+    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::net::UnixStream;
+    use std::time::{Duration, Instant};
+    let fake = dir.join("inotifywait");
+    std::fs::write(&fake, format!("#!/bin/sh\n{body}\n")).unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (ours, theirs) = UnixStream::pair().unwrap();
+    let theirs_out = theirs.try_clone().unwrap();
+    let mut child = std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg(watch_script("/srv/my site").unwrap())
+        .env("PATH", format!("{}:/usr/bin:/bin", dir.display()))
+        .stdin(OwnedFd::from(theirs))
+        .stdout(OwnedFd::from(theirs_out))
+        .spawn()
+        .unwrap();
+    let reader = ours.try_clone().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(BufReader::new(reader).lines().map_while(Result::ok).collect::<Vec<_>>());
+    });
+    let out = rx.recv_timeout(Duration::from_secs(2)).ok();
+    // macOS refuses to shut down a socket whose other end is closed already (the command ended):
+    // its input is closed either way.
+    match ours.shutdown(std::net::Shutdown::Write) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotConnected => {}
+        r => r.unwrap(),
+    }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while child.try_wait().unwrap().is_none() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let ended = child.try_wait().unwrap().is_some();
+    let _ = child.kill();
+    (out, ended)
+}
+
+/// When ssh goes (the command's input ends), the server's `inotifywait` goes too; when
+/// `inotifywait` ends, the output does, so the app hears the watch is over.
+#[cfg(unix)]
+#[test]
+fn a_watch_ends_with_its_input_and_its_output_with_inotifywait() {
+    let dir = tempfile::tempdir().unwrap();
+    let pid = dir.path().join("pid");
+    // An inotifywait that runs until stopped: the output stays open while the input does.
+    let (out, ended) = run_watch(dir.path(), &format!("echo $$ > '{}'; exec sleep 600", pid.display()));
+    assert_eq!(out, None, "watching: the output stays open");
+    assert!(ended, "the input closed: the command ended");
+    let pid = std::fs::read_to_string(&pid).unwrap();
+    let alive = std::process::Command::new("kill").args(["-0", pid.trim()]).status().unwrap().success();
+    assert!(!alive, "and inotifywait with it");
+
+    let (out, ended) = run_watch(dir.path(), "echo \"args: $*\"; echo CREATE");
+    let args = "args: -m -q -e create,delete,move,modify,attrib,close_write --format %e -- /srv/my site";
+    assert_eq!(out.as_deref(), Some(&[WATCH_READY, args, "CREATE"].map(String::from)[..]), "its input still open");
+    assert!(ended);
+    std::fs::remove_file(dir.path().join("inotifywait")).unwrap();
+    let mut child = std::process::Command::new("/bin/sh")
+        .arg("-c")
+        .arg(watch_script("/x").unwrap())
+        .env("PATH", dir.path())
+        .output()
+        .unwrap();
+    child.stdout.retain(|b| *b != b'\n');
+    assert_eq!(String::from_utf8(child.stdout).unwrap(), WATCH_MISSING, "no inotifywait on the server");
 }
 
 /// Feeds our options to the real `ssh -G` (no network, empty config) and checks it reads back

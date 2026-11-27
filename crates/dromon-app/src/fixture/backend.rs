@@ -761,6 +761,8 @@ impl Core {
             Command::Poll { host } => self.poll(&host, &mut out),
             Command::FolderSize { id, host, path } => self.folder_size(id, host, path, &mut out),
             Command::CancelFolderSize { .. } | Command::CancelSearch { .. } => {}
+            // Fixture servers have no live updates: their hosts stay polled (`Live::Off`).
+            Command::LiveUpdates { .. } => {}
             Command::Search { id, host, root, query, show_hidden } => {
                 let up = self.up(&host);
                 out.extend(search::run(&self.transfers.tree, up, id, &host, &root, &query, show_hidden));

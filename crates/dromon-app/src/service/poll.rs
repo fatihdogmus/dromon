@@ -11,6 +11,8 @@
 //!   while polls take more than a quarter of it. Folders over 20,000 entries are never polled
 //!   (⌘R only), nor folders whose listing failed (until they're listed again).
 //! - A poll that finds what the UI already has sends nothing ([`Outcome::Quiet`]).
+//! - While the folder is watched live (`live.rs`) the interval is [`LIVE_STRETCH`] times longer:
+//!   the watch's changes start polls of their own, and these only back it up.
 
 use dromon_core::{Entry, Error, RemotePath};
 use dromon_sftp::{PollSchedule, Visibility, base_interval, diff};
@@ -97,6 +99,10 @@ pub enum Outcome {
     Quiet,
 }
 
+/// How much longer the interval is while the folder is watched live (`live.rs`): polls are only
+/// the safety net then, for what inotify misses (NFS, a full event queue, the watch dying).
+pub const LIVE_STRETCH: u32 = 4;
+
 /// One host's polling.
 #[derive(Debug)]
 pub struct Poller {
@@ -107,11 +113,20 @@ pub struct Poller {
     /// What the UI has of it; `None` while its listing is still coming.
     seen: Option<Seen>,
     due: Option<Instant>,
+    /// The folder is watched live: intervals are [`LIVE_STRETCH`] times longer.
+    live: bool,
 }
 
 impl Default for Poller {
     fn default() -> Self {
-        Poller { vis: Visibility::Hidden, schedule: PollSchedule::new(), path: None, seen: None, due: None }
+        Poller {
+            vis: Visibility::Hidden,
+            schedule: PollSchedule::new(),
+            path: None,
+            seen: None,
+            due: None,
+            live: false,
+        }
     }
 }
 
@@ -139,11 +154,36 @@ impl Poller {
         self.vis != Visibility::Hidden && self.polled_size().is_some()
     }
 
+    /// Whether the folder may be watched live: not one that's never polled (too big, or its
+    /// listing failed). One still listing may.
+    pub fn watchable(&self) -> bool {
+        !matches!(self.seen, Some(Seen::TooBig | Seen::Failed(_)))
+    }
+
+    /// `d`, stretched while the folder is watched live.
+    fn interval(&self, d: Duration) -> Duration {
+        if self.live { d * LIVE_STRETCH } else { d }
+    }
+
     /// The window shows as `vis` now: the next poll moves to the new interval from `now`
     /// (none while hidden). The backoff stays.
     pub fn window(&mut self, vis: Visibility, now: Instant) {
         self.vis = vis;
-        self.due = self.polled_size().and_then(|n| self.schedule.current(n, vis)).map(|d| now + d);
+        self.reschedule(now);
+    }
+
+    /// The folder is watched live (`on`) or not any more: the next poll moves to the stretched
+    /// or the normal interval, from `now`.
+    pub fn live(&mut self, on: bool, now: Instant) {
+        if self.live != on {
+            self.live = on;
+            self.reschedule(now);
+        }
+    }
+
+    fn reschedule(&mut self, now: Instant) {
+        let next = self.polled_size().and_then(|n| self.schedule.current(n, self.vis));
+        self.due = next.map(|d| now + self.interval(d));
     }
 
     /// The session opened afresh: no folder on screen yet.
@@ -185,7 +225,7 @@ impl Poller {
         let n = got.count;
         let seen = if pollable(n) && got.entries.len() == n { Seen::Entries(got.entries) } else { Seen::TooBig };
         self.seen = Some(seen);
-        self.due = self.schedule.next_delay(n, self.vis, took).map(|d| now + d);
+        self.due = self.schedule.next_delay(n, self.vis, took).map(|d| now + self.interval(d));
     }
 
     /// A poll of `path` ended with `result` after `took`: what to tell the UI. A connection

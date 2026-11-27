@@ -28,7 +28,7 @@ pub enum SettingsSection {
     Transfers,
     /// Hidden files by default.
     Browsing,
-    /// The terminal app; updates: checking by itself, and Check now.
+    /// The terminal app; updates: checking by itself, and Check now; live updates.
     General,
 }
 
