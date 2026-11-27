@@ -214,6 +214,8 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
         .on_button(mouse_button)
         .child(sidebar::view(s, p))
         .child(main)
+        // Over the main column, under the popovers, the palette, sheets and menus.
+        .children(transfers::started(s, p, transfers::flight(s, cx)))
         .children(transfers::popover(s, p))
         .children(quick::popover(s, p))
         .children(palette::layer(s, p, palette::top(s, cx)))

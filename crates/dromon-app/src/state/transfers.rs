@@ -5,7 +5,7 @@
 //! Each snapshot also drives what shows outside the popover: the taskbar, the Dock badge and
 //! notifications (`notify.rs`, [`Watch`]), and the done flourish of a job that just finished
 //! with the toolbar ring's pulse ([`Flourishes`], stepped on the window's clock by the app's
-//! poll, `views::transfers::poll`).
+//! poll, `views::transfers::poll`). A download this window starts plays [`Started`] there too.
 
 use std::path::PathBuf;
 
@@ -56,7 +56,7 @@ pub struct Transfers {
     pub drop: Option<DropHover>,
     /// The jobs as the OS shows them: taskbar, Dock badge, notifications.
     pub watch: Watch,
-    /// Done flourishes playing, and the toolbar ring's pulse.
+    /// Done flourishes playing, the toolbar ring's pulse and the download-started animation.
     pub flourish: Flourishes,
 }
 
@@ -65,6 +65,8 @@ pub struct Transfers {
 pub const FILL: f64 = 0.30;
 /// How long the toolbar ring's pulse lasts (the `settle` spring's duration), in seconds.
 pub const PULSE: f64 = 0.45;
+/// How long the download-started animation lasts (Chrome's), in seconds.
+pub const STARTED: f64 = 0.5;
 
 /// The done flourish of a job that finished while the app watched it (§6.6): its bar fills,
 /// then collapses into a mint check and the toolbar ring pulses once. A job without one (it
@@ -89,6 +91,28 @@ impl Flourish {
     }
 }
 
+/// The download-started animation (Chrome's): a download the user started in this window
+/// flies from the middle of the content area into the toolbar's transfers button, so they see
+/// where it went. One per action, however many files it takes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Started {
+    /// The user just started a download; it plays from the next frame (actions have no clock).
+    Asked,
+    /// It plays until `until` (seconds on the window's clock).
+    Playing { until: f64 },
+}
+
+impl Started {
+    /// The phase after this one at `clock`; `None` once it has played.
+    pub fn step(self, clock: f64) -> Option<Started> {
+        match self {
+            Started::Asked => Some(Started::Playing { until: clock + STARTED }),
+            Started::Playing { until } if clock >= until => None,
+            s => Some(s),
+        }
+    }
+}
+
 /// What a step of the flourishes did: whether anything on screen changes (the view runs again,
 /// animated), and when the next step is due.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -97,7 +121,7 @@ pub struct Stepped {
     pub wake: Option<f64>,
 }
 
-/// The flourishes playing and the ring's pulse.
+/// The flourishes playing, the ring's pulse and the download-started animation.
 #[derive(Clone, Debug, Default)]
 pub struct Flourishes {
     jobs: Vec<(JobId, Flourish)>,
@@ -105,6 +129,10 @@ pub struct Flourishes {
     pulse: Option<f64>,
     /// Pulses so far: each one draws a new element, so each plays.
     pulses: u32,
+    /// The download-started animation playing, if any.
+    started: Option<Started>,
+    /// Download-started animations so far: each one draws a new element, so each plays.
+    starts: u32,
 }
 
 impl Flourishes {
@@ -123,8 +151,20 @@ impl Flourishes {
         self.pulse.map(|_| self.pulses)
     }
 
-    /// Steps every flourish and the pulse at `clock`: a filled bar collapses and starts the
-    /// ring's pulse; a pulse that has run ends.
+    /// The download-started animation playing, numbered.
+    pub fn started(&self) -> Option<u32> {
+        self.started.map(|_| self.starts)
+    }
+
+    /// The user started a download in this window: a new download-started animation, in place
+    /// of one still playing.
+    fn start(&mut self) {
+        self.started = Some(Started::Asked);
+        self.starts += 1;
+    }
+
+    /// Steps every flourish, the pulse and the download-started animation at `clock`: a filled
+    /// bar collapses and starts the ring's pulse; a pulse or an animation that has run ends.
     pub fn step(&mut self, clock: f64) -> Stepped {
         let mut out = Stepped::default();
         let mut collapsed = false;
@@ -147,11 +187,20 @@ impl Flourishes {
             self.pulse = None;
             out.changed = true;
         }
+        if let Some(s) = self.started {
+            self.started = s.step(clock);
+            // Asked becomes Playing, which shows the same; only the end changes what shows.
+            out.changed |= self.started.is_none();
+        }
         let dues = self.jobs.iter().map(|(_, f)| match f {
             Flourish::Filling { until } => *until,
             Flourish::Finished { .. } => clock,
         });
-        out.wake = dues.chain(self.pulse).reduce(f64::min);
+        let started = self.started.map(|s| match s {
+            Started::Playing { until } => until,
+            Started::Asked => clock,
+        });
+        out.wake = dues.chain(self.pulse).chain(started).reduce(f64::min);
         out
     }
 
@@ -351,7 +400,10 @@ impl App {
         if selected.is_empty() { c.selection.cursor().map(str::to_owned).into_iter().collect() } else { selected }
     }
 
-    /// Downloads these rows of the folder on screen into [`App::downloads`].
+    /// Downloads these rows of the folder on screen into [`App::downloads`]: every download the
+    /// user starts (⌘D, the menus' and the palette's Download, opening a file) comes here. It
+    /// plays the download-started animation, unless the popover is open (the new row shows
+    /// there).
     pub(super) fn download(&mut self, names: &[String]) {
         let Some(c) = self.conn().filter(|c| c.interactive()) else { return };
         let items: Vec<RemoteItem> = names
@@ -364,6 +416,9 @@ impl App {
         }
         let req = JobRequest::Download { host: c.host.clone(), items, into: self.download_folder() };
         self.send(Command::Transfer(TransferCommand::Start(req)));
+        if !self.transfers.open {
+            self.transfers.flourish.start();
+        }
     }
 
     /// Uploads local files into the folder on screen, or into its subfolder `folder`.

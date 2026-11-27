@@ -413,6 +413,78 @@ fn a_flourish_fills_then_collapses_and_the_ring_pulses_once() {
 }
 
 #[test]
+fn each_download_the_user_starts_plays_the_started_animation_once() {
+    let (mut s, rec) = connected();
+    assert_eq!(s.transfers.flourish.started(), None);
+    // Two rows, one action: one animation.
+    s.act(Action::Click { name: "robots.txt".into(), extend: false, toggle: false });
+    s.act(Action::Click { name: "index.html".into(), extend: false, toggle: true });
+    s.act(Action::Download);
+    assert_eq!(s.transfers.flourish.started(), Some(1));
+    // ⌘D and opening a file start one each, in place of the one playing.
+    s.shortcut(crate::state::Shortcut::Download, 0.0);
+    assert_eq!(s.transfers.flourish.started(), Some(2));
+    s.act(Action::Open("README.md".into()));
+    assert_eq!(s.transfers.flourish.started(), Some(3));
+    assert_eq!(started(&rec).len(), 3);
+    // Nothing to download: nothing plays.
+    s.act(Action::Escape);
+    s.act(Action::Download);
+    assert_eq!((started(&rec).len(), s.transfers.flourish.started()), (3, Some(3)));
+}
+
+#[test]
+fn the_started_animation_plays_half_a_second_from_the_next_frame() {
+    use super::STARTED;
+    assert_eq!(Started::Asked.step(2.0), Some(Started::Playing { until: 2.0 + STARTED }));
+    let playing = Started::Playing { until: 2.5 };
+    assert_eq!(playing.step(2.4), Some(playing));
+    assert_eq!(playing.step(2.5), None);
+
+    let (mut s, _rec) = connected();
+    s.act(Action::Open("robots.txt".into()));
+    let fl = &mut s.transfers.flourish;
+    // The first frame times it (it shows already) and asks to be woken when it's over.
+    assert_eq!(fl.step(10.0), Stepped { changed: false, wake: Some(10.0 + STARTED) });
+    assert_eq!(fl.step(10.2), Stepped { changed: false, wake: Some(10.0 + STARTED) });
+    assert_eq!(fl.started(), Some(1));
+    assert_eq!(fl.step(10.0 + STARTED), Stepped { changed: true, wake: None });
+    assert_eq!(fl.started(), None);
+    assert_eq!(fl.step(11.0), Stepped::default());
+}
+
+#[test]
+fn uploads_copies_moves_and_an_open_popover_play_no_started_animation() {
+    let (mut s, rec) = connected();
+    s.act(Action::Upload { paths: vec![PathBuf::from("/Users/me/a.txt")], folder: None });
+    s.act(Action::Click { name: "index.html".into(), extend: false, toggle: false });
+    s.act(Action::File(crate::state::FileAction::Copy));
+    s.act(Action::File(crate::state::FileAction::Paste { text: format!("{SITE}/index.html"), as_move: false }));
+    s.act(Action::File(crate::state::FileAction::Paste { text: format!("{SITE}/index.html"), as_move: true }));
+    let kinds: Vec<&str> = started(&rec)
+        .iter()
+        .map(|r| match r {
+            JobRequest::Upload { .. } => "upload",
+            JobRequest::RemoteCopy { .. } => "copy",
+            JobRequest::Move { .. } => "move",
+            _ => "other",
+        })
+        .collect();
+    assert_eq!(kinds, ["upload", "copy", "move"]);
+    assert_eq!(s.transfers.flourish.started(), None);
+
+    // With the popover open, the new row shows there instead.
+    s.act(Action::ToggleTransfers);
+    s.act(Action::Download);
+    assert_eq!(started(&rec).len(), 4);
+    assert_eq!(s.transfers.flourish.started(), None);
+    // Closed again, a download plays the first one.
+    s.act(Action::ToggleTransfers);
+    s.act(Action::Download);
+    assert_eq!(s.transfers.flourish.started(), Some(1));
+}
+
+#[test]
 fn only_jobs_seen_running_get_a_flourish_and_clearing_ends_it() {
     let mut tr = Transfers::default();
     // Arrived finished, failed or cancelled: no flourish.
