@@ -1,8 +1,8 @@
 //! Context menus (`state::menu`): native on macOS and Windows through Rune's `Tx::popup_menu`,
 //! drawn here elsewhere (Linux, and every headless run, so goldens and tests see the same menu
-//! on every platform). The drawn menu opens at the pointer on the `raised` surface (10 pt
-//! radius, popover elevation), flips to stay in the window, and closes on a pick, a press
-//! outside or Escape.
+//! on every platform). The drawn menu opens at the pointer (a menu button's under the button)
+//! on the `raised` surface (10 pt radius, popover elevation), flips to stay in the window, and
+//! closes on a pick, a press outside or Escape.
 
 use rune::{Align, El, PointerPress, PopupItem, PopupMenu, Side, Transition, Tx, col, el, icon, row, text};
 
@@ -73,6 +73,16 @@ pub fn open_at_row(kind: MenuKind, tx: &mut Tx) {
     tx.read_layout(format!("{}/{name}", super::ROWS), move |s: &mut App, rect, tx: &mut Tx| match rect {
         Some([x, y, _, h]) => open(s, kind, PointerPress { x, y: y + h }, tx),
         None => at_list(kind, tx),
+    });
+}
+
+/// A menu button (the toolbar's add button, `key`) asked for `kind`'s menu, by a click, Space or
+/// Return: it opens under the button's bottom-left corner, as a menu button's does.
+pub fn open_under(kind: MenuKind, key: &'static str, tx: &mut Tx) {
+    tx.read_layout(key, move |s: &mut App, rect, tx: &mut Tx| {
+        if let Some([x, y, _, h]) = rect {
+            open(s, kind, PointerPress { x, y: y + h }, tx);
+        }
     });
 }
 
