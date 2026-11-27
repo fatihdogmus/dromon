@@ -17,6 +17,7 @@ mod preview;
 mod properties;
 mod quick;
 mod quit;
+mod report;
 mod search;
 mod settings;
 mod sheets;
@@ -54,10 +55,14 @@ use crate::theme::{self, Access, Tokens};
 static WINDOWS: std::sync::OnceLock<RuneSink> = std::sync::OnceLock::new();
 
 /// Hooks the app up to the OS once per run, before its first window opens: notifications and
-/// the taskbar (`transfers::connect_os`), and the way back to a window for what the terminal
-/// launcher hears from the OS on its thread. `None` in a headless run.
+/// the taskbar (`transfers::connect_os`), the way back to a window for what the terminal
+/// launcher hears from the OS on its thread, and the OS version bug reports name (read on a
+/// thread of its own, not in headless runs). `None` in a headless run.
 pub fn connect_os(windows: RuneSink) -> Option<OsLink> {
     let _ = WINDOWS.set(windows.clone());
+    if launches() {
+        report::detect();
+    }
     transfers::connect_os(windows)
 }
 
@@ -226,11 +231,12 @@ pub fn effect(fx: Effect, tx: &mut Tx) {
                 }
             });
         }
-        // Links the app builds itself (a release's GitHub page), never refused; tests and
-        // headless runs open nothing (Rune records them).
+        // Links the app builds itself (a release's GitHub page, the bug report's new issue),
+        // never refused; tests and headless runs open nothing (Rune records them). The error
+        // never quotes the link: a report's carries its text.
         Effect::OpenUrl(url) => {
             if let Err(e) = tx.open_url(&url) {
-                eprintln!("dromon: couldn't open the release page: {e}");
+                eprintln!("dromon: couldn't open the browser: {e}");
             }
         }
         // A copy the service just downloaded, in its private folder; tests and headless runs
@@ -290,6 +296,8 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     cx.focus_ring(2.0, 1.0, t.focus);
     let scale = cx.env().scale;
     let p = Paint { t, hair: 1.0 / scale, scale, insets: cx.chrome_insets(), reduced: access.reduce_motion, access };
+    // What a bug report says of the display: only the view hears it from Rune.
+    s.report.saw(crate::state::report::Seen { scale, dark, access });
     // Under the Settings page the folder view stays mounted as it was (its scroll position and
     // fields kept for when the page goes), drawn over, out of reach and out of readers' tree.
     let section = s.ui.page.settings();

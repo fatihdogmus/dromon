@@ -249,6 +249,9 @@ pub enum UpdateEvent {
     /// The new version is in place (macOS) or its installer runs (Windows): quit, starting the
     /// app again when `relaunch`.
     Installed { relaunch: bool },
+    /// How this copy was installed, once the updater has found out (at its start, or its first
+    /// check): what a bug report says (`state/report.rs`).
+    Install(Install),
 }
 
 impl UpdateEvent {
@@ -262,6 +265,7 @@ impl UpdateEvent {
             UpdateEvent::Installing => "Installing",
             UpdateEvent::InstallFailed(_) => "InstallFailed",
             UpdateEvent::Installed { .. } => "Installed",
+            UpdateEvent::Install(_) => "Install",
         }
     }
 }
@@ -312,6 +316,8 @@ pub struct Update {
     hidden: bool,
     /// What the service's news asked of the view (quitting); [`App::take_update_effects`].
     pending: Vec<Effect>,
+    /// How this copy was installed, once the service has said ([`UpdateEvent::Install`]).
+    pub install: Option<Install>,
 }
 
 /// What moves a window's [`Update`]: the service's news, or the user.
@@ -393,6 +399,7 @@ fn installable(phase: &Phase) -> Option<Offer> {
 
 fn event(u: &mut Update, ev: UpdateEvent) -> Vec<Out> {
     match ev {
+        UpdateEvent::Install(install) => u.install = Some(install),
         UpdateEvent::Installed { relaunch } => {
             u.phase = Phase::Quitting;
             return vec![Out::Quit { relaunch }];

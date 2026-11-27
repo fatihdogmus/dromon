@@ -1,6 +1,6 @@
 //! The window's shortcut dispatch: which surface a [`Shortcut`] (`keys.rs` maps the key) goes
 //! to, and the [`Action`] it becomes there. Window shortcuts (⌘, ⌘N ⌘W) work under anything;
-//! a sheet that asks (a conflict, quitting, updating) holds the rest; the quick-connect popover,
+//! a sheet that asks (a conflict, quitting, updating) or the bug report holds the rest; the quick-connect popover,
 //! the palette, the Settings page and the preview panel take their own first; what's left is the
 //! list's, except where a focused text field keeps the key (§7).
 
@@ -21,7 +21,7 @@ impl App {
             _ => {}
         }
         let conflict = self.conflict_on_screen().is_some() || self.edit_conflict_on_screen().is_some();
-        if conflict || self.ui.confirm_quit || self.update.confirming() {
+        if conflict || self.ui.confirm_quit || self.update.confirming() || self.report.is_open() {
             return Vec::new();
         }
         // The quick-connect popover is modal too: Escape closes it, nothing reaches the list.

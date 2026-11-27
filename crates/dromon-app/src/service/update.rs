@@ -12,6 +12,8 @@
 //!   File names and URLs are built from the version, never taken from GitHub's answer.
 //! - **HTTPS only**: the agent refuses plain `http` (and redirects to it). Tests give it a local
 //!   endpoint ([`Endpoint`]) and allow `http` there; nothing in tests reaches GitHub.
+//! - **How it was installed**: found out once as it starts, unless its [`Setup`] says, and told
+//!   to every window ([`UpdateEvent::Install`]) for their bug reports.
 //!
 //! The service starts the updater on the first update command (`service/mod.rs`); only the app
 //! sends one (its restored settings, Settings, the app menu), never a headless run.
@@ -113,6 +115,8 @@ pub fn start<S: Sink>(sink: S, setup: Setup) -> Updater {
 
 /// A blocking job's end.
 enum Done {
+    /// How this copy was installed (`update_platform::detect`, at the updater's start).
+    Detected(Install),
     Checked(Install, Result<Option<Offer>, String>),
     Installed(WindowId, Result<bool, String>),
 }
@@ -147,6 +151,13 @@ async fn run<S: Sink>(mut commands: mpsc::UnboundedReceiver<(WindowId, UpdateCom
         busy: false,
         queued: None,
     };
+    // How this copy was installed, for the windows' bug reports, without waiting for a check.
+    if w.install.is_none() {
+        let done = w.done.clone();
+        tokio::task::spawn_blocking(move || {
+            let _ = done.send(Done::Detected(update_platform::detect()));
+        });
+    }
     let mut tick = tokio::time::interval(TICK);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
@@ -216,11 +227,23 @@ impl<S: Sink> Worker<S> {
         });
     }
 
+    /// How this copy was installed: the windows hear it the first time it's found out.
+    fn learned(&mut self, install: Install) {
+        if self.install.is_none() {
+            self.emit(UpdateEvent::Install(install.clone()));
+        }
+        self.install = Some(install);
+    }
+
     fn finished(&mut self, done: Done) {
-        self.busy = false;
+        // Finding out how it was installed runs beside checks and installs.
+        if !matches!(done, Done::Detected(_)) {
+            self.busy = false;
+        }
         match done {
+            Done::Detected(install) => self.learned(install),
             Done::Checked(install, found) => {
-                self.install = Some(install);
+                self.learned(install);
                 match found {
                     Ok(offer) => {
                         self.last = Some(Instant::now());

@@ -348,3 +348,23 @@ fn automatic_checks_wait_for_the_setting() {
     assert!(events.recv_timeout(Duration::from_millis(300)).is_err());
     assert_eq!(server.paths().len(), 1);
 }
+
+#[test]
+fn the_updater_tells_the_windows_how_this_copy_was_installed_as_it_starts() {
+    let server = serve(|_, _| None);
+    let dir = tempfile::tempdir().unwrap();
+    let rt = runtime();
+    let _in = rt.enter();
+    let (tx, events) = std_mpsc::channel();
+    let unknown = Setup { install: None, ..setup(server.endpoint(), test_key(), dir.path()) };
+    let _updater = start(Events(Arc::new(Mutex::new(tx))), unknown);
+    // A test binary in the build folder is no package Dromon knows.
+    assert_eq!(events.recv_timeout(WAIT).unwrap(), ServiceEvent::Update(UpdateEvent::Install(Install::Other)));
+    assert!(events.recv_timeout(Duration::from_millis(300)).is_err(), "once, and no check by itself");
+    assert!(server.paths().is_empty());
+
+    let mut s = fixture::app(fixture::demo());
+    s.apply(ServiceEvent::Update(UpdateEvent::Install(Install::Deb)));
+    assert_eq!(s.update.install, Some(Install::Deb), "the window keeps it for its bug reports");
+    assert_eq!(s.update.phase, Phase::Idle, "and nothing else changes");
+}

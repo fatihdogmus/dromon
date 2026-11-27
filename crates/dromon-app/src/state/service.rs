@@ -553,6 +553,7 @@ mod tests {
             UpdateEvent::Installing,
             UpdateEvent::InstallFailed("secret".into()),
             UpdateEvent::Installed { relaunch: true },
+            UpdateEvent::Install(crate::state::update::Install::MacApp { team: Some("secret".into()) }),
         ];
         let lines: Vec<String> = events.into_iter().map(|e| trace_line(&ServiceEvent::Update(e))).collect();
         assert_eq!(
@@ -565,6 +566,7 @@ mod tests {
                 "Update Installing",
                 "Update InstallFailed",
                 "Update Installed",
+                "Update Install",
             ]
         );
         assert!(lines.iter().all(|l| !l.contains("secret") && !l.contains("7.7.7")));

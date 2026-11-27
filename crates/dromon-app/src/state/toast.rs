@@ -4,11 +4,14 @@
 //! button, when it failed. [`Toasts`] also holds plain notes for whatever else needs one (M4's
 //! "/var/www/old was removed"), and each file being edited in a local editor has at most one of
 //! its own ("Saved notes.txt to prod", or a failed save that offers Retry; `remote_edit.rs`).
+//! A failed delete's and a failed save's toast also offer Report ([`Toast::report`]): a bug
+//! report with that error in it (`report.rs`).
 
 use dromon_core::Error;
 
 use super::ops::OpView;
 use super::remote_edit::EditId;
+use super::report::Subject;
 use super::service::{FileOpKind, OpId};
 
 #[cfg(test)]
@@ -57,6 +60,15 @@ pub struct Toast {
 impl Toast {
     pub fn dismissible(&self) -> bool {
         self.tone != Tone::Busy
+    }
+
+    /// The error its Report button puts in a bug report: a failed delete's, a failed save's.
+    pub fn report(&self) -> Option<Subject> {
+        match (self.id, self.tone, self.retry) {
+            (_, _, Some(edit)) => Some(Subject::Edit(edit)),
+            (ToastId::Op(op), Tone::Error, None) => Some(Subject::Op(op)),
+            _ => None,
+        }
     }
 }
 

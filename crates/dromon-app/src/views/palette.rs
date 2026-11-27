@@ -212,6 +212,7 @@ fn glyph(item: &Item) -> &'static IconPair {
             "pal-log" => &icons::LOG,
             "pal-clear-finished" => &icons::CHECK,
             "pal-settings" => &icons::GEAR,
+            "pal-report-bug" => &icons::WARNING,
             _ => &icons::FILE,
         },
     }

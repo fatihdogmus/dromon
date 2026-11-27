@@ -256,6 +256,7 @@ fn popovers_menus_and_sheets_keep_tab_inside() {
         ("menu-empty", scenes::menu_empty, "ctx-menu"),
         ("host-menu", scenes::host_menu, "ctx-menu"),
         ("add-menu", scenes::add_menu, "ctx-menu"),
+        ("report", scene("report"), "report"),
     ];
     for (name, start, modal) in modals {
         let order = walk(name, *start, Some(modal));

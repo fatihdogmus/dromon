@@ -21,6 +21,8 @@ use crate::theme::Appearance;
 mod preview;
 #[path = "scenes_remote_edit.rs"]
 mod remote_edit;
+#[path = "scenes_report.rs"]
+mod report;
 #[path = "scenes_settings.rs"]
 mod settings;
 #[path = "scenes_update.rs"]
@@ -768,4 +770,6 @@ pub const SCENES: &[Scene] = &[
     ("settings-general", update::settings_general),
     ("update-toast", update::update_toast),
     ("update-confirm", update::update_confirm),
+    ("report", report::report),
+    ("report-light", report::report_light),
 ];

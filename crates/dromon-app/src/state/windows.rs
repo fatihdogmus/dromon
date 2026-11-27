@@ -139,6 +139,8 @@ impl App {
         app.wall_ms = self.wall_ms;
         app.downloads = self.downloads.clone();
         app.transfers.jobs = self.transfers.jobs.clone();
+        // The service said how this copy was installed once, before the window was there.
+        app.update.install = self.update.install.clone();
         app.edits = self.edits.for_window();
         // It times the jobs from when this window saw them start, and speaks once it leads.
         app.transfers.watch = self.transfers.watch.follower();

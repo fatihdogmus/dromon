@@ -27,6 +27,7 @@ This guide uses typed sections with real fields, not title-only labels.
 - [Standard: Tracing and Logs](#standard-tracing-and-logs)
 - [Reference: The Release Signing Boundary](#reference-the-release-signing-boundary)
 - [Decision: Updates Install Only What the Release Key Signed](#decision-updates-install-only-what-the-release-key-signed)
+- [Decision: Bug Reports Are Built Locally, Without Names](#decision-bug-reports-are-built-locally-without-names)
 
 ---
 
@@ -376,3 +377,45 @@ installed by hand ([releasing.md](releasing.md#2b-updates-the-minisign-key)).
 - Does a new download or URL go through the same agent, HTTPS only, built from the version?
 - Is anything installed before both checks pass, or does a failure leave something changed?
 - Does a change to the signing step still verify against the committed public key?
+
+## Decision: Bug Reports Are Built Locally, Without Names
+
+**Status:** Accepted
+**Scope:** `dromon-app/src/state/report.rs`, `state/redact.rs`, `views/report.rs`, `.github/ISSUE_TEMPLATE/bug.yml`
+
+### Context
+
+"Report a Bug…" gathers diagnostics for people who can't write a repro. Users browse servers
+whose names, users and paths can be private, and Dromon has no server of its own to send
+anything to.
+
+### Decision
+
+The report is built on the machine, from what the window already knows, and shown whole
+before anything happens. Open GitHub only opens the browser at the repository's new-issue form
+with the report in its query; the user edits and submits it there, or uses Copy report and
+sends it however they like. Nothing is sent by Dromon.
+
+### Rules and examples
+
+- Names are replaced, always (`state/redact.rs`): hosts become `host-1`, `host-2` … (a quick
+  connect's `user@address:port` id goes whole), a folder's path `<path>`, a file's
+  `<dir>/file-3.txt` with only a short plain extension kept; numbering is stable within one
+  report.
+- Errors are rendered from their variant with the stand-in in the path's place, never by
+  searching their text. Free-form messages (ssh's reasons, I/O errors, an update's failure)
+  are left out with a sentence saying why.
+- Events go in as their trace lines (already kinds, ids and counts, [Tracing and
+  Logs](#standard-tracing-and-logs)) with the hosts replaced; actions by kind only. Never a
+  secret, a prompt's text, a log line or file contents.
+- A test fills a window with distinctive names and checks none reaches the report or the link.
+
+### Consequences
+
+Reports say less than a log would; a maintainer who needs more asks for the repro form or the
+connection log, which the user reads before sharing.
+
+### Agent checklist
+
+- Does new report content come from kinds and counts, through the redactor?
+- Does the no-names test still seed every new kind of name the report could carry?

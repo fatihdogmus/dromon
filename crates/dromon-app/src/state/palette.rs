@@ -22,6 +22,7 @@ use super::fuzzy;
 use super::keys::{Shortcut, host_chord};
 use super::menu::{TERMINAL_CHORD, delete_chord};
 use super::remote_edit::{EDIT_CHORD, RemoteEditAction};
+use super::report::ReportAction;
 use super::{Action, App, Effect, FileAction, Listing, SearchAction, TransferCommand, hosts};
 
 #[cfg(test)]
@@ -365,6 +366,7 @@ impl App {
         let row = self.cursor_row().filter(|name| self.editable(name));
         let edit = Action::RemoteEdit(RemoteEditAction::Edit(row.clone()));
         add(row.is_some(), "edit", "Edit in local editor", Some(EDIT_CHORD), edit);
+        add(true, "report-bug", "Report a bug…", None, Action::Report(ReportAction::Open(None)));
         for cmd in &mut out {
             if matches!(cmd.id, "log" | "disconnect") {
                 cmd.detail = host.clone();
@@ -440,14 +442,14 @@ impl App {
     }
 
     /// Runs a row: the palette closes (the keyboard goes back to the list) and the action runs.
-    /// "Go to folder…" turns the palette to its path instead. Every row but "Settings…" is about
-    /// the folder view, so it leaves the Settings page first (`page.rs`).
+    /// "Go to folder…" turns the palette to its path instead. Every row but "Settings…" and
+    /// "Report a bug…" is about the folder view, so it leaves the Settings page first (`page.rs`).
     fn run_item(&mut self, action: Action, fx: &mut Vec<Effect>) {
         if let Action::Palette(a) = action {
             return self.palette_action(a, fx);
         }
         self.close_palette(fx);
-        if action != Action::OpenSettings {
+        if !matches!(action, Action::OpenSettings | Action::Report(_)) {
             self.leave_settings();
         }
         fx.extend(self.act(action));

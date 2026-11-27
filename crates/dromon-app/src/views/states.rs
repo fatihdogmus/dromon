@@ -1,5 +1,5 @@
 //! The list area's other states (§6.8): welcome, connecting skeleton, empty folder, permission
-//! denied, no filter matches, and the reconnecting banner.
+//! denied, no filter matches, a failed connection, and the reconnecting banner.
 
 use dromon_core::ConnStatus;
 use rune::{El, LoopSpec, Transition, Tx, col, el, icon, row, text};
@@ -8,6 +8,7 @@ use super::brand::{self, Mark};
 use super::widgets::{Keyboard, chord, dot};
 use super::{Paint, run};
 use crate::icons::{self, IconPair};
+use crate::state::report::{ReportAction, Subject};
 use crate::state::{Action, App, ConnView};
 use crate::theme::{motion, radius, size, space, type_};
 
@@ -114,13 +115,16 @@ pub fn denied(p: Paint, c: &ConnView) -> El {
         .child(sub)
 }
 
-/// The connection failed (§3.4): why, in ssh's words or ours, with Try again and Show log.
+/// The connection failed (§3.4): why, in ssh's words or ours, with Try again, Show log and
+/// Report (the bug report sheet, saying the connection failed).
 pub fn failed(s: &App, c: &ConnView, msg: &str, p: Paint) -> El {
     let host = s.hosts.get(&c.host).map_or(c.host.as_str(), |h| h.display_name()).to_owned();
+    let report = Action::Report(ReportAction::Open(Some(Subject::Connection(c.host.clone()))));
     let actions = row()
         .gap(space::S2)
         .child(button(p, "state-retry", &icons::SERVER, "Try again", Action::SelectHost(c.host.clone())))
-        .child(button(p, "state-show-log", &icons::LOG, "Show log", Action::OpenLog));
+        .child(button(p, "state-show-log", &icons::LOG, "Show log", Action::OpenLog))
+        .child(button(p, "state-report", &icons::WARNING, "Report", report));
     let sub = col()
         .center()
         .gap(space::S2)
