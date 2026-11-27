@@ -247,9 +247,12 @@ pub enum Action {
         paths: Vec<PathBuf>,
         folder: Option<String>,
     },
-    /// The toolbar's Upload button, ⌘U, the palette: ask for the native file picker
+    /// The toolbar's add menu, ⌘U, the palette: ask for the native file picker
     /// ([`Effect::PickUpload`]); what it picks goes to [`Action::Upload`].
     PickUpload,
+    /// The toolbar's add menu, the palette: ask for the native folder picker
+    /// ([`Effect::PickUploadFolder`]); the folder picked goes to [`Action::Upload`].
+    PickUploadFolder,
     /// A transfer row's buttons: pause, resume, cancel, retry, clear finished.
     Transfer(TransferCommand),
     /// The conflict sheet's buttons, for the clash on screen.
@@ -326,6 +329,9 @@ pub enum Effect {
     /// Open the native multi-file picker, titled for `folder` (the folder on screen); the files
     /// picked upload into it (`Action::Upload` with no folder).
     PickUpload { folder: String },
+    /// Open the native folder picker, titled for `folder` (the folder on screen); the folder
+    /// picked uploads into it, with all it holds (`Action::Upload` with no folder).
+    PickUploadFolder { folder: String },
     /// The preview panel opened: the keyboard goes into it.
     FocusPreview,
     /// The preview panel closed: the keyboard, if it was in it, goes back to the list.
@@ -634,6 +640,7 @@ impl App {
             Action::Download
             | Action::Upload { .. }
             | Action::PickUpload
+            | Action::PickUploadFolder
             | Action::Transfer(_)
             | Action::ResolveConflict(_)
             | Action::ToggleApplyAll

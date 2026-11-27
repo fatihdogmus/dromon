@@ -435,6 +435,13 @@ pub fn menu_empty(s: &mut App) {
     file(s, FileAction::OpenMenu { kind: MenuKind::Empty, at: Some((640.0, 560.0)) });
 }
 
+/// The toolbar's add button pressed: its drawn menu under it (Upload files…, Upload folder…,
+/// New folder), at the button's bottom-left corner as the view opens it.
+pub fn add_menu(s: &mut App) {
+    listing(s);
+    file(s, FileAction::OpenMenu { kind: MenuKind::Add, at: Some((316.0, 36.0)) });
+}
+
 /// The light theme: a cut row (dimmed) with its drawn menu open.
 pub fn file_ops_light(s: &mut App) {
     menu_row(s);
@@ -720,6 +727,7 @@ pub const SCENES: &[Scene] = &[
     ("drag-folder", drag_folder),
     ("menu-row", menu_row),
     ("menu-empty", menu_empty),
+    ("add-menu", add_menu),
     ("file-ops-light", file_ops_light),
     ("icons", icons),
     ("poll-added", poll_added),

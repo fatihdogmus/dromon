@@ -73,6 +73,7 @@ A sheet shows the host, the key type and the SHA256 fingerprint in mono, with **
   - Over empty space or file rows: the whole list area gets a mint outline and a floating pill: "Upload 3 items to /var/www".
   - Over a folder row: that folder highlights and the pill names it.
 - Or copy files in Finder or Explorer and press ⌘V in the app.
+- Or the toolbar's add button (§6.8): **Upload files…** (⌘U) or **Upload folder…** opens the system's file or folder picker, titled "Upload to site"; what's picked uploads to the open folder.
 - A name clash opens a sheet: **Replace / Keep both / Skip**, with an "Apply to all" checkbox. Keep both gives `name (1).ext`.
 
 ### 3.7 Copy, cut, paste and drag to move
@@ -347,7 +348,7 @@ Each proof of concept is a small throwaway binary that settles a risk before UI 
 ## 6. Design spec
 
 ### 6.1 Principles
-1. **Bold and quiet.** Dark-first neutral surfaces. One vivid mint/teal accent, used only for selection, focus, progress, the connected dot and drop targets. Rarity gives the accent its force.
+1. **Bold and quiet.** Dark-first neutral surfaces. One vivid mint/teal accent, used only for selection, focus, progress, the connected dot, drop targets and primary actions (a sheet's default button, the toolbar's add button). Rarity gives the accent its force.
 2. **Native behaviour, our own look.** Window controls, context menus, scrolling momentum, text input, shortcuts and accessibility behave natively. Surfaces, type, motion and icons are ours and identical on every platform.
 3. **Respond on press.** Every control gives feedback on pointer-down in the same frame. Nothing waits for release to show it noticed.
 4. **Everything interruptible.** All motion is springs that retarget from their current value. Nothing locks input while animating.
@@ -358,7 +359,7 @@ Each proof of concept is a small throwaway binary that settles a risk before UI 
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────┐
-│ ● ● ●   │  ‹  ›   prod  ›  var  ›  www  ›  site            ⌕ Filter   ⤓◔  ⌘K     │  toolbar 44px
+│ ● ● ●   │  ‹  ›  [+]  prod  ›  var  ›  www  ›  site        ⌕ Filter   ⇅◔  ⌘K     │  toolbar 44px
 │─────────┼──────────────────────────────────────────────────────────────────────│
 │ CONNECTED│  Name ▲                                  Size        Modified        │  header 28px
 │ ● prod   │ ──────────────────────────────────────────────────────────────────── │
@@ -454,7 +455,7 @@ Rules:
 
 ### 6.7 Icons
 - Our own set, drawn on a 16px grid, each icon in two bodies (`IconPair`, picked by device scale). 1× bodies: 1 pt strokes on half-pixels; 2× bodies: 1.5 pt strokes on quarter-pixels; straight edges pixel-exact at both scales, verified by a pixel test.
-- Set: folder, folder-open, file, code, text, image, archive, audio, video, PDF, binary/executable, symlink badge, lock badge (no permission), server, connected dot, download, upload, pause, resume, cancel, retry, check, chevrons, search, plus, more, gear, log.
+- Set: folder, folder-open, file, code, text, image, archive, audio, video, PDF, binary/executable, symlink badge, lock badge (no permission), server, connected dot, download, upload, transfers (⇅), pause, resume, cancel, retry, check, chevrons, search, plus, bold plus, more, gear, log.
 - **Tint**: icons use `text-2`. Folders use the accent at 70%. File categories get a very desaturated hue (about 35% chroma) to add texture without noise. Selected rows lift icons to `text`.
 - App icon (later): a stylised dromon bow or oar bank inside a rounded square, in mint on near-black.
 
@@ -473,7 +474,8 @@ Rules:
 | **Folder vanished** | Navigate to the nearest existing parent and show a toast: "/var/www/old was removed". |
 | **Reconnecting** | Slim banner under the toolbar ("Reconnecting to prod…", amber dot), listing dimmed to 60% and read-only. **Sign in** appears when input is needed. |
 | **Transfers popover** | 380 × up to 480px, anchored to the toolbar button. Segmented Downloads / Uploads tabs with counts; rows show icon, name, a 3px progress bar, then "12.4 / 80 MB · 8.1 MB/s · about 9 s" in tabular `text-2`, plus pause/cancel/retry on hover. Footer "Clear finished". Empty tab: "No downloads yet". |
-| **Toolbar transfers button** | Arrow glyph inside a 2px progress ring (aggregate bytes across all jobs); a count badge while anything runs. Idle = plain glyph. |
+| **Toolbar add button** | Right after Back / Forward, before the breadcrumbs, so it stays put while the filter opens and closes: a 28px accent-filled square (6px radius) with a bold plus in `on-accent`, the toolbar's one filled control; the `hover` and `press` washes go over the accent. Named and titled "Add to site" (the folder on screen, or the host at its root). Opens a menu under it: **Upload files…** ⌘U, **Upload folder…**, **New folder** ⌘⇧N. While the host isn't connected the accent fades to 60% and it takes nothing. |
+| **Toolbar transfers button** | Transfers glyph (⇅, up and down arrows) inside a 2px progress ring (aggregate bytes across all jobs); a count badge while anything runs. Idle = plain glyph. Downloads the user starts fly into it as an accent circle with the download glyph. |
 | **Conflict sheet** | "'index.html' already exists in /var/www", sizes and dates of both side by side, **Replace** (danger style) / **Keep both** / **Skip**, "Apply to all 4 conflicts". |
 | **Delete confirm** | "Delete 3 items permanently?", list of the first 5 names, "This can't be undone on the server.", **Delete** (danger) / Cancel. |
 | **⌘K palette** | 560px wide, top third of the window. Fuzzy search; groups: Hosts, Go to folder…, Actions. Each row shows its shortcut. `move` scale from centre. |
@@ -509,6 +511,7 @@ Rules:
 | Refresh | ⌘R (also F5 on Windows and Linux) |
 | Toggle hidden files | ⌘⇧. (Ctrl+H on Linux) |
 | Download selection | ⌘D |
+| Upload files | ⌘U |
 | Show transfers | ⌘⇧J |
 | New folder | ⌘⇧N |
 | Rename | F2 |
@@ -599,7 +602,7 @@ Rules:
 | Reconnect | Silent with backoff; transfers pause and resume |
 | Panes | Single pane, list view only |
 | Download | Double-click → Downloads; Chrome-style renaming |
-| Upload | Drop or paste from the OS file manager; Replace / Keep both / Skip |
+| Upload | Drop or paste from the OS file manager, or pick files or a folder from the add button; Replace / Keep both / Skip |
 | Folders | Recursive both ways |
 | Operations | New folder, rename, delete (confirm), copy path, copy/cut/paste incl. cross-host, drag to move |
 | Freshness | Adaptive polling of the visible folder; animated diffs; live updates (`inotifywait` over a second ssh session) where the server has it, polls stretched behind them |

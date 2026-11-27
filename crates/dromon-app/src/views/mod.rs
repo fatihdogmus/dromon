@@ -209,6 +209,16 @@ pub fn effect(fx: Effect, tx: &mut Tx) {
                 }
             });
         }
+        Effect::PickUploadFolder { folder } => {
+            let options =
+                rune::FileDialogOptions { title: format!("Upload to {folder}"), ..rune::FileDialogOptions::default() };
+            // As the file picker: a cancelled dialog or an error from it does nothing.
+            tx.open_folder(options, |s: &mut App, picked, tx| {
+                if let Ok(Some(dir)) = picked {
+                    run(s, Action::Upload { paths: vec![dir], folder: None }, tx);
+                }
+            });
+        }
         // Links the app builds itself (a release's GitHub page), never refused; tests and
         // headless runs open nothing (Rune records them).
         Effect::OpenUrl(url) => {

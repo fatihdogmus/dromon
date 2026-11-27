@@ -345,6 +345,17 @@ impl Transfers {
 }
 
 impl App {
+    /// What the pickers and the toolbar's add button call the folder on screen, which uploads
+    /// land in: its name, or the host's at the root (as the breadcrumbs name it). `None` with no
+    /// host on screen.
+    pub fn upload_folder(&self) -> Option<String> {
+        let c = self.conn()?;
+        Some(match c.cwd.file_name() {
+            Some(name) => name.to_owned(),
+            None => self.hosts.get(&c.host).map_or(c.host.as_str(), |h| h.display_name()).to_owned(),
+        })
+    }
+
     /// The transfer actions of [`App::act`].
     pub(super) fn transfer_action(&mut self, action: Action, fx: &mut Vec<Effect>) {
         match action {
@@ -357,12 +368,13 @@ impl App {
                 self.upload(paths, folder);
             }
             Action::PickUpload => {
-                if let Some(c) = self.conn().filter(|c| c.interactive()) {
-                    let folder = match c.cwd.file_name() {
-                        Some(name) => name.to_owned(),
-                        None => self.hosts.get(&c.host).map_or(c.host.as_str(), |h| h.display_name()).to_owned(),
-                    };
+                if let Some(folder) = self.upload_folder().filter(|_| self.conn().is_some_and(|c| c.interactive())) {
                     fx.push(Effect::PickUpload { folder });
+                }
+            }
+            Action::PickUploadFolder => {
+                if let Some(folder) = self.upload_folder().filter(|_| self.conn().is_some_and(|c| c.interactive())) {
+                    fx.push(Effect::PickUploadFolder { folder });
                 }
             }
             Action::DropHover { target, over, count } => self.drop_hover(target, over, count),
