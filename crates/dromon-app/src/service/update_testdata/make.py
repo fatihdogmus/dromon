@@ -2,7 +2,7 @@
 """Writes the update tests' fixtures (service/update_verify_tests.rs, update_tests.rs).
 
 TEST ONLY. The keys here sign nothing but these fixtures; the release key is
-packaging/update/release-key.pub, whose secret half lives only in the `release` environment.
+crates/dromon-app/assets/release-key.pub, whose secret half lives only in the `release` environment.
 
   test-only-key.seed / test-only-other-key.seed   Ed25519 seeds (hex) of the two test keys
   test-only-key.pub                               key A's minisign public key

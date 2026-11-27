@@ -44,7 +44,7 @@ fn base64(text: &str) -> Vec<u8> {
 
 #[test]
 fn the_shipped_release_key_is_minisign_key_489cb3c37a12ec48() {
-    release_key().expect("packaging/update/release-key.pub is a minisign public key");
+    release_key().expect("crates/dromon-app/assets/release-key.pub is a minisign public key");
     let line = RELEASE_KEY.lines().nth(1).expect("the key's line");
     let bin = base64(line);
     assert_eq!((bin.len(), &bin[..2]), (42, &b"Ed"[..]), "an Ed25519 minisign key");

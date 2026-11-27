@@ -1,8 +1,9 @@
 //! The brand kit in the app (`assets/brand/`, rebuilt by `cargo brand`): the app icon the
 //! window and taskbar show on Windows and Linux, and the marks the views draw: the simple mark
-//! beside the app's name in the sidebar band, the full mark on the Welcome screen. Each comes
-//! from the kit's own file, never a copy or a redrawing, in its colour for the theme (BRAND.md:
-//! mint on dark, deep mint on light).
+//! beside the app's name in the sidebar band, the full mark on the Welcome screen. Each is the
+//! kit's own file, never a redrawing, in its colour for the theme (BRAND.md: mint on dark, deep
+//! mint on light). `cargo brand` copies them into this crate's `assets/brand/`, since `cargo dev`
+//! builds a copy of the crates alone, and a test checks they still match the kit.
 //!
 //! A mark rasterizes from its SVG on Rune's decoder workers, once per theme and device scale,
 //! and stays for the run (a few small images). Its pixels wake the windows that show them once
@@ -23,7 +24,7 @@ mod tests;
 /// The app's icon while it runs on Windows and Linux (`rune::set_app_icon_choice`): the kit's
 /// 256 px app icon. macOS keeps the bundle's `Dromon.icns`.
 #[cfg(any(not(target_os = "macos"), test))]
-pub const APP_ICON: &[u8] = include_bytes!("../../../../assets/brand/png/app-icon/dromon-256.png");
+pub const APP_ICON: &[u8] = include_bytes!("../../assets/brand/dromon-256.png");
 
 /// A mark of the brand kit, drawn at a fixed size in points: the kit's 3:2 drawing on whole
 /// points.
@@ -47,10 +48,10 @@ impl Mark {
     /// The kit's SVG of it for a dark or a light theme.
     fn svg(self, dark: bool) -> &'static [u8] {
         match (self, dark) {
-            (Mark::Simple, true) => include_bytes!("../../../../assets/brand/svg/dromon-mark-simple.svg"),
-            (Mark::Simple, false) => include_bytes!("../../../../assets/brand/svg/dromon-mark-simple-on-light.svg"),
-            (Mark::Full, true) => include_bytes!("../../../../assets/brand/svg/dromon-mark.svg"),
-            (Mark::Full, false) => include_bytes!("../../../../assets/brand/svg/dromon-mark-on-light.svg"),
+            (Mark::Simple, true) => include_bytes!("../../assets/brand/dromon-mark-simple.svg"),
+            (Mark::Simple, false) => include_bytes!("../../assets/brand/dromon-mark-simple-on-light.svg"),
+            (Mark::Full, true) => include_bytes!("../../assets/brand/dromon-mark.svg"),
+            (Mark::Full, false) => include_bytes!("../../assets/brand/dromon-mark-on-light.svg"),
         }
     }
 }

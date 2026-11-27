@@ -106,7 +106,7 @@ as carefully as code that holds the keys (a CODEOWNERS rule for both is worth ad
 - **`credentials`, `sign-*` and `publish`** run in the `release` environment, which holds every
   signing secret and variable and admits only `main`, and only after `approve`, the one job you
   approve (environment `release-approval`). They check out only `/.github/release/` (sign-macos also reads
-  `packaging/macos/Info.plist`, and sign-linux `packaging/update/release-key.pub`, as data), run
+  `packaging/macos/Info.plist`, and sign-linux `crates/dromon-app/assets/release-key.pub`, as data), run
   only those scripts and SHA-pinned actions, and never build, install project dependencies, or
   run anything from the artifacts. The one install is sign-linux's `minisign`, Ubuntu's package
   through `.github/actions/apt-install` (also checked out): apt checks every file against
@@ -118,7 +118,7 @@ as carefully as code that holds the keys (a CODEOWNERS rule for both is worth ad
 - **Signing jobs only add signatures.** `sign-linux` writes detached signatures beside files it
   never changes; the Windows and macOS jobs sign in place and verify again.
 - **The update signature must be one the app accepts.** `sign-minisign.sh` verifies
-  `SHA256SUMS.minisig` against the committed `packaging/update/release-key.pub` (the key the app
+  `SHA256SUMS.minisig` against the committed `crates/dromon-app/assets/release-key.pub` (the key the app
   builds in), requires a pre-hashed signature and the trusted comment `dromon <version>`, and
   fails the run otherwise: a release the updater would refuse never ships.
 - **Secrets stay out of logs**: the scripts run with `set +x`; GitHub masks secret values; the
@@ -279,7 +279,7 @@ block in `KEYS`, and update `validpgpkeys`.
 
 Dromon's updater (`crates/dromon-app/src/service/update*.rs`) installs a release only when its
 `SHA256SUMS` carries a valid minisign signature by the key built into the app,
-`packaging/update/release-key.pub` (key ID `489CB3C37A12EC48`), with the trusted comment
+`crates/dromon-app/assets/release-key.pub` (key ID `489CB3C37A12EC48`), with the trusted comment
 `dromon <version>`, and the downloaded file's SHA-256 is the one listed there. minisign
 (Ed25519) rather than GPG because the app verifies it with a small dependency-free crate
 (`minisign-verify`); GPG keeps signing the packages and `SHA256SUMS.asc` for people.
@@ -294,7 +294,7 @@ Creating it (on a trusted machine, once):
 ```sh
 minisign -G -W -p dromon-release.pub -s dromon-release.key
 gh secret set MINISIGN_SECRET_KEY --env release --repo fatihdogmus/dromon < dromon-release.key
-cp dromon-release.pub packaging/update/release-key.pub   # commit it: the app builds it in
+cp dromon-release.pub crates/dromon-app/assets/release-key.pub   # commit it: the app builds it in
 ```
 
 Keep `dromon-release.key` offline (the maintainer's password manager, beside the GPG key's
@@ -528,7 +528,7 @@ The release notes carry these steps for each file. In short:
 |---|---|
 | Any file | `gh attestation verify <file> --repo fatihdogmus/dromon` |
 | Any file (GPG) | `gpg --import dromon-release-key.asc` (check its fingerprint against the README), then `gpg --verify SHA256SUMS.asc SHA256SUMS` and `sha256sum --check --ignore-missing SHA256SUMS` |
-| Any file (minisign, as the updater does) | `minisign -V -p packaging/update/release-key.pub -m SHA256SUMS -x SHA256SUMS.minisig` (trusted comment `dromon <v>`), then `sha256sum --check --ignore-missing SHA256SUMS` |
+| Any file (minisign, as the updater does) | `minisign -V -p crates/dromon-app/assets/release-key.pub -m SHA256SUMS -x SHA256SUMS.minisig` (trusted comment `dromon <v>`), then `sha256sum --check --ignore-missing SHA256SUMS` |
 | `.deb` | `gpg --verify Dromon-<v>-linux-x64.deb.asc Dromon-<v>-linux-x64.deb` |
 | `.pkg.tar.zst` | `pacman -U` checks the `.sig` beside the package against pacman's keyring; trust the key there once: `sudo pacman-key --add dromon-release-key.asc && sudo pacman-key --lsign-key 61AA20030B8170BE3527E4BA1E548E51E3AD8C38` |
 | `.msi` | `Get-AuthenticodeSignature .\Dromon-<v>-windows-x64.msi` → `Valid`. Unsigned: SmartScreen *More info → Run anyway* |

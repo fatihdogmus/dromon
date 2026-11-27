@@ -330,7 +330,7 @@ Ubuntu's signed archive through `.github/actions/apt-install` and saves no cache
 ## Decision: Updates Install Only What the Release Key Signed
 
 **Status:** Accepted
-**Scope:** `dromon-app/src/service/update*.rs`, `state/update.rs`, `packaging/update/release-key.pub`, `.github/release/sign-minisign.sh`
+**Scope:** `dromon-app/src/service/update*.rs`, `state/update.rs`, `crates/dromon-app/assets/release-key.pub`, `.github/release/sign-minisign.sh`
 
 ### Context
 
@@ -341,8 +341,8 @@ boundary.
 ### Decision
 
 An update installs only when `SHA256SUMS.minisig` is a pre-hashed minisign signature of the
-release's `SHA256SUMS` by the key built into the app (`packaging/update/release-key.pub`, through
-`include_str!`), with the trusted comment `dromon <version>`, and the downloaded file's SHA-256 is
+release's `SHA256SUMS` by the key built into the app (`crates/dromon-app/assets/release-key.pub`,
+through `include_str!`), with the trusted comment `dromon <version>`, and the downloaded file's SHA-256 is
 the one `SHA256SUMS` lists for its name, exactly once. Anything else refuses it with a sentence
 the user reads, and changes nothing.
 

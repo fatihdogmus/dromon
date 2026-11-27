@@ -99,7 +99,7 @@ fi
 # ---- Updates (minisign) --------------------------------------------------------------------
 if [ "${HAS_MINISIGN_SECRET_KEY:-}" = true ]; then
   minisign=true
-  summary "- Updates: SHA256SUMS minisign-signed with the key the app trusts (packaging/update/release-key.pub)."
+  summary "- Updates: SHA256SUMS minisign-signed with the key the app trusts (crates/dromon-app/assets/release-key.pub)."
 else
   minisign=false
   required "Updates: no MINISIGN_SECRET_KEY; SHA256SUMS gets no minisign signature, so the app installs no update from this release."

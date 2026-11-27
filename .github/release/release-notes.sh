@@ -91,10 +91,10 @@ fi
 if [ "$minisign" = true ]; then
   cat <<EOF
 
-Any file, with [minisign](https://jedisct1.github.io/minisign/) and the key Dromon's updater trusts (\`packaging/update/release-key.pub\` in the repository):
+Any file, with [minisign](https://jedisct1.github.io/minisign/) and the key Dromon's updater trusts (\`crates/dromon-app/assets/release-key.pub\` in the repository):
 
 \`\`\`sh
-curl -L -o dromon-update-key.pub $server/$repo/raw/$v/packaging/update/release-key.pub
+curl -L -o dromon-update-key.pub $server/$repo/raw/$v/crates/dromon-app/assets/release-key.pub
 minisign -V -p dromon-update-key.pub -m SHA256SUMS -x SHA256SUMS.minisig   # "Trusted comment: dromon $v"
 sha256sum --check --ignore-missing SHA256SUMS
 \`\`\`

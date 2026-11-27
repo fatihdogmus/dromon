@@ -79,7 +79,7 @@ gpg --verify SHA256SUMS.asc SHA256SUMS
 sha256sum --check --ignore-missing SHA256SUMS
 ```
 
-`SHA256SUMS.minisig` is the checksums' [minisign](https://jedisct1.github.io/minisign/) signature by the key Dromon's updater trusts, [`packaging/update/release-key.pub`](packaging/update/release-key.pub) (key ID `489CB3C37A12EC48`): `minisign -V -p packaging/update/release-key.pub -m SHA256SUMS -x SHA256SUMS.minisig`.
+`SHA256SUMS.minisig` is the checksums' [minisign](https://jedisct1.github.io/minisign/) signature by the key Dromon's updater trusts, [`crates/dromon-app/assets/release-key.pub`](crates/dromon-app/assets/release-key.pub) (key ID `489CB3C37A12EC48`): `minisign -V -p crates/dromon-app/assets/release-key.pub -m SHA256SUMS -x SHA256SUMS.minisig`.
 
 </details>
 

@@ -3,7 +3,7 @@
 # lockups, the social card) from its generator, assets/brand/tools/build_logo.py, with the
 # repository's own Inter:
 #
-#   bash scripts/brand.sh                                       # rewrites assets/brand/
+#   bash scripts/brand.sh                                       # rewrites assets/brand/ and the app's copies
 #   bash scripts/brand.sh --out DIR                             # writes DIR instead (to compare)
 #   bash scripts/brand.sh --accent '#2DD4BF' --deep '#0F8F85'   # anything else goes to build_logo.py
 #
@@ -11,6 +11,10 @@
 # carries Inter only as a variable font (crates/dromon-app/assets/fonts/InterVariable.ttf), so
 # this first cuts static instances of it, at wght 600 and 400 in the text optical size (opsz 14),
 # with fontTools' instancer into target/brand/.
+#
+# The kit's files the app draws (the app icon and the marks, views/brand.rs) are then copied into
+# crates/dromon-app/assets/brand/: `cargo dev` builds a copy of the crates alone, so the app can't
+# build in a file from assets/brand/. A test fails when the copies differ from the kit's.
 #
 # Needs python3 with Pillow and fontTools (pip install pillow fonttools), and rsvg-convert
 # (librsvg: apt install librsvg2-bin, brew install librsvg). Never edit the outputs by hand:
@@ -58,3 +62,10 @@ python3 -m fontTools.varLib.instancer --quiet "$variable" opsz=14 wght=400 -o "$
 python3 "$root/assets/brand/tools/build_logo.py" \
   --font "$fonts/Inter-SemiBold.ttf" --font-regular "$fonts/Inter-Regular.ttf" --out "$out" ${args[@]+"${args[@]}"}
 echo "brand: wrote $out"
+
+if [[ $out == "$root/assets/brand" ]]; then
+  app="$root/crates/dromon-app/assets/brand"
+  mkdir -p "$app"
+  cp "$out/png/app-icon/dromon-256.png" "$out"/svg/dromon-mark{,-on-light,-simple,-simple-on-light}.svg "$app/"
+  echo "brand: copied the app's files to $app"
+fi

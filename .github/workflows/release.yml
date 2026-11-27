@@ -674,7 +674,7 @@ jobs:
           sparse-checkout: |
             /.github/release/
             /.github/actions/apt-install/
-            /packaging/update/release-key.pub
+            /crates/dromon-app/assets/release-key.pub
           sparse-checkout-cone-mode: false
           persist-credentials: false
       - uses: ./.github/release/download
@@ -698,7 +698,7 @@ jobs:
           save: "false"
       - name: Minisign-sign SHA256SUMS (the app's update check)
         if: needs.credentials.outputs.minisign == 'true'
-        run: bash .github/release/sign-minisign.sh "$RUNNER_TEMP/in/release-files" "$RUNNER_TEMP/signatures" "$VERSION" packaging/update/release-key.pub
+        run: bash .github/release/sign-minisign.sh "$RUNNER_TEMP/in/release-files" "$RUNNER_TEMP/signatures" "$VERSION" crates/dromon-app/assets/release-key.pub
         env:
           MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
           VERSION: ${{ needs.plan.outputs.version }}

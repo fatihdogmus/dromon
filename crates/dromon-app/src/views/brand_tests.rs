@@ -7,6 +7,32 @@ fn the_app_icon_is_a_256_px_png() {
     assert_eq!(icon.wait().map_err(|e| e.0.clone()), Ok([256, 256]));
 }
 
+#[test]
+fn the_app_builds_in_the_brand_kits_own_files() {
+    let files: [(&str, &[u8], &[u8]); 5] = [
+        ("dromon-256.png", APP_ICON, include_bytes!("../../../../assets/brand/png/app-icon/dromon-256.png")),
+        ("dromon-mark.svg", Mark::Full.svg(true), include_bytes!("../../../../assets/brand/svg/dromon-mark.svg")),
+        (
+            "dromon-mark-on-light.svg",
+            Mark::Full.svg(false),
+            include_bytes!("../../../../assets/brand/svg/dromon-mark-on-light.svg"),
+        ),
+        (
+            "dromon-mark-simple.svg",
+            Mark::Simple.svg(true),
+            include_bytes!("../../../../assets/brand/svg/dromon-mark-simple.svg"),
+        ),
+        (
+            "dromon-mark-simple-on-light.svg",
+            Mark::Simple.svg(false),
+            include_bytes!("../../../../assets/brand/svg/dromon-mark-simple-on-light.svg"),
+        ),
+    ];
+    for (name, app, kit) in files {
+        assert!(app == kit, "crates/dromon-app/assets/brand/{name} isn't the kit's: run `cargo brand`");
+    }
+}
+
 #[cfg(not(target_os = "macos"))]
 #[test]
 fn rune_takes_the_app_icon() {

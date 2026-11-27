@@ -2,7 +2,7 @@
 //! boundary, docs/security.md):
 //!
 //! 1. `SHA256SUMS.minisig` is a minisign signature of the release's `SHA256SUMS` by the release
-//!    key built into the app ([`release_key`], `packaging/update/release-key.pub`), with the
+//!    key built into the app ([`release_key`], `crates/dromon-app/assets/release-key.pub`), with the
 //!    trusted comment `dromon <version>` the release pipeline signs it with
 //!    (`.github/release/sign-minisign.sh`), so another release's signed sums don't pass for
 //!    this one's.
@@ -22,8 +22,9 @@ use crate::state::update::Version;
 #[path = "update_verify_tests.rs"]
 pub(super) mod tests;
 
-/// The release key's public half, as `minisign -G` wrote it.
-const RELEASE_KEY: &str = include_str!("../../../../packaging/update/release-key.pub");
+/// The release key's public half, as `minisign -G` wrote it. It lives in this crate because
+/// `cargo dev` builds a copy of the crates alone.
+const RELEASE_KEY: &str = include_str!("../../assets/release-key.pub");
 
 /// The release key the app trusts, or why this build has none it can use (the file is missing
 /// its key or isn't a minisign public key): then updates are found but never installed.

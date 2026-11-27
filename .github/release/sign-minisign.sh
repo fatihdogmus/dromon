@@ -7,7 +7,7 @@
 #
 # The secret key goes to a 0600 file in a 0700 folder under the job's temp folder, deleted on
 # exit; it never reaches argv or the log. The new signature must verify against <public key>
-# (packaging/update/release-key.pub, read as data: the key the app builds in), so a release the
+# (crates/dromon-app/assets/release-key.pub, read as data: the key the app builds in), so a release the
 # app would refuse never ships, and must be the pre-hashed kind (the app refuses the legacy one).
 #
 # Environment: MINISIGN_SECRET_KEY (an unencrypted minisign secret key, `minisign -G -W`).

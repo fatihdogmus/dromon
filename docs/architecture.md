@@ -333,7 +333,10 @@ Knowing where a new module is declared and why there are two binaries.
 
 Declare new modules in `app_root.rs`, never in `lib.rs` or `hot.rs`, or `dromon-hot` and the
 library drift apart. `cargo dev` patches function-body edits in the view and theme code into the
-running app (`scripts/dev.sh` lists the paths); any other edit rebuilds and restarts it.
+running app (`scripts/dev.sh` lists the paths); any other edit rebuilds and restarts it. It builds
+a copy of the crates alone (Rune's `rune-dev` stages only the packages and the workspace
+manifests), so a file the app builds in (`include_bytes!`, `include_str!` outside tests) lives
+inside its crate, never elsewhere in the repository.
 
 ## Standard: The Rune Pin
 

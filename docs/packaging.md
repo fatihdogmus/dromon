@@ -53,8 +53,7 @@ packaging/
 │               window), verify-dmg.sh
 ├─ windows/     build-exe.ps1 (dromon.exe, version resource and icon stamped), dromon.wxs
 │               (WiX v5 source), build-msi.ps1, verify-msi.ps1
-├─ signpath/    dromon-msi.xml (SignPath artifact configuration: exe-in-MSI, then the MSI)
-└─ update/      release-key.pub (the minisign key the app's updater trusts, built in)
+└─ signpath/    dromon-msi.xml (SignPath artifact configuration: exe-in-MSI, then the MSI)
 ```
 
 - The icons come from the brand kit, `assets/brand/` (its `BRAND.md` says which file is for
@@ -63,6 +62,12 @@ packaging/
   gives it to the MSI, and `stage.sh` installs `linux/hicolor/` as it is. The app sets
   `png/app-icon/dromon-256.png` as its window and taskbar icon on Windows and Linux at run time
   (`rune::set_app_icon_choice`); macOS keeps the bundle's.
+- Every file the app builds in lives inside `crates/dromon-app/` (`assets/`), never elsewhere in
+  the repository: `cargo dev` builds a copy of the crates alone, so an `include_bytes!` that
+  reaches outside a crate fails there (tests may, since `cargo dev` doesn't build them). `cargo brand` copies the kit's files the app draws (the
+  app icon and the marks) into `crates/dromon-app/assets/brand/`, and a test fails when they
+  differ from the kit's. The minisign key the updater trusts is
+  `crates/dromon-app/assets/release-key.pub`.
 - `scripts/package-linux.sh` (`cargo package-linux`) builds the Linux binary, in an
   `ubuntu:22.04` container by default so it needs only glibc 2.35, and runs `build-deb.sh` and
   `build-arch.sh`; `--verify` installs the results in clean containers.
@@ -155,11 +160,13 @@ Changing the app icon, the marks or the lockup: shapes, colours or sizes.
    Welcome screen, so re-render the goldens) and the README's lockup. Another Pillow or
    librsvg version re-encodes PNGs, `.ico` and `.icns` whose pixels didn't change, so compare
    pixels, not bytes.
-4. Commit `build_logo.py` and every changed file under `assets/brand/` together.
+4. Commit `build_logo.py`, every changed file under `assets/brand/` and the app's copies in
+   `crates/dromon-app/assets/brand/` together.
 
 ### Done when
 
-`cargo brand` leaves no change under `assets/brand/` beyond the ones you meant, and the goldens
+`cargo brand` leaves no change under `assets/brand/` or `crates/dromon-app/assets/brand/` beyond
+the ones you meant, and the goldens
 that show a mark are re-rendered and looked at.
 
 ## Recipe: Check a Package by Hand
