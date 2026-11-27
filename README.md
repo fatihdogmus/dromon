@@ -1,6 +1,11 @@
 <div align="center">
 
-# ⛵ Dromon
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/svg/dromon-lockup-on-dark.svg">
+    <img alt="Dromon" src="assets/brand/svg/dromon-lockup-on-light.svg" width="360">
+  </picture>
+</p>
 
 **Browse a remote machine over SSH the way you browse a local folder.**
 
@@ -9,7 +14,7 @@ Native-feeling, GPU-rendered, and built around the SSH you already use.
 
 [![CI](https://github.com/fatihdogmus/dromon/actions/workflows/ci.yml/badge.svg)](https://github.com/fatihdogmus/dromon/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-3DDC97.svg)](LICENSE)
-![Platforms](https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-1A1E1E.svg)
+![Platforms](https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-0D211C.svg)
 
 <picture>
   <source media="(prefers-color-scheme: light)" srcset="tests/goldens/light-light@2x.png">

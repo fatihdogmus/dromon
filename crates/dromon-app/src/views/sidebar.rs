@@ -5,6 +5,7 @@
 use dromon_core::{ConnStatus, HostSpec};
 use rune::{Color, Cursor, Drag, El, Phase, ScrollSpec, Tx, col, el, icon, row, text};
 
+use super::brand::{self, Mark};
 use super::widgets::{Keyboard, dot, icon_button};
 use super::{Paint, menu};
 use crate::icons;
@@ -48,13 +49,16 @@ pub fn view(s: &App, p: Paint) -> El {
 }
 
 /// The top band, one piece with the toolbar: it drags the window and, on macOS, holds the
-/// traffic lights. Elsewhere it carries the app's name.
+/// traffic lights. Elsewhere it carries the brand's simple mark and the app's name.
 fn band(p: Paint) -> El {
     let b = row().key("sb-band").w_full().h(size::TOOLBAR).center_y().window_drag();
     if p.insets.leading > 0.0 {
         return b;
     }
-    b.px(space::S4).child(text("Dromon").font(type_::BODY_STRONG).color(p.t.text_2))
+    b.px(space::S4)
+        .gap(space::S2)
+        .child(brand::mark("sb-mark", Mark::Simple, p))
+        .child(text("Dromon").font(type_::BODY_STRONG).color(p.t.text_2))
 }
 
 fn section_view(s: &App, p: Paint, section: Section, hosts: &[&HostSpec]) -> El {

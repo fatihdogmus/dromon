@@ -52,7 +52,7 @@ try {
         -d "Version=$MsiVersion" `
         -d "DisplayVersion=$Version" `
         -d "Exe=$ExePath" `
-        -d "Icon=$(Join-Path $Root 'packaging\icon\dromon.ico')" `
+        -d "Icon=$(Join-Path $Root 'assets\brand\windows\dromon.ico')" `
         -d "License=$(Join-Path $Root 'LICENSE')" `
         -d "InterLicense=$(Join-Path $Root 'crates\dromon-app\assets\fonts\Inter-LICENSE.txt')" `
         -d "GeistMonoLicense=$(Join-Path $Root 'crates\dromon-app\assets\fonts\GeistMono-OFL.txt')" `

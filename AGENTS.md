@@ -32,7 +32,7 @@ A small, fast SFTP file browser for macOS, Windows and Linux, in Rust on
 | **Fixtures** | [docs/fixtures.md](docs/fixtures.md) | Writing a fixture for a test, flow or bug repro, or changing the fixture parser. | The JSON format: hosts, servers, sign-in steps, folder trees, generators, changes, transfers, windows, the demo. |
 | **Releasing** | [docs/releasing.md](docs/releasing.md) | Touching `release.yml`, `.github/release/`, packaging or signing. | The release run, the security boundary, credentials, signing setup, Homebrew. |
 | **Test servers** | [docs/test-servers.md](docs/test-servers.md) | Changing `tests/docker/`, `dromon-testkit`, the native backend, the WSL2 setup or the server variants, or debugging a fixture test. | One server per test binary, users and roles, the Docker, WSL2 and native backends, TOTP, the matrix variants, Windows' own sshd, environment variables, debugging. |
-| **Packaging** | [docs/packaging.md](docs/packaging.md) | Changing installers, the icon, package metadata or version handling. | The `packaging/` tree, fixed identifiers, version numbers, changing the icon, checking a package by hand. |
+| **Packaging** | [docs/packaging.md](docs/packaging.md) | Changing installers, the icon or the brand kit (`assets/brand/`), package metadata or version handling. | The `packaging/` tree, where the icons come from, fixed identifiers, version numbers, changing the icon (`cargo brand`), checking a package by hand. |
 
 ## Project Structure
 
@@ -54,9 +54,10 @@ dromon/
 │  │  └─ tests/             end-to-end tests against a real sshd (e2e.rs, *_e2e.rs)
 │  └─ dromon-testkit/       the sshd fixture for tests (Docker or native)
 ├─ xtask/                   developer-command runner
-├─ scripts/                 goldens, flows, smoke, repro, perf, dev, accents, package-linux
+├─ scripts/                 goldens, flows, smoke, repro, perf, dev, accents, brand, package-linux
 ├─ tests/                   docker/ (sshd images), goldens/ (PNG per scene), flows/
-├─ packaging/               installers and the icon
+├─ assets/brand/            brand kit: icons, marks, lockup (BRAND.md); rebuilt by `cargo brand`
+├─ packaging/               installers
 ├─ docs/                    the guides in the table above
 └─ .github/                 workflows, apt-install action, release scripts, PR template
 ```
@@ -79,6 +80,7 @@ cargo smoke [--window] [--connect]         # smoke-test the dromon binary
 cargo repro <issue|issue.md>               # replay a bug report headless into target/repro
 cargo perf [--gate …|all]                  # performance gates as one table
 cargo accents                              # accent candidates side by side
+cargo brand [--out DIR]                    # rebuild the brand kit in assets/brand/
 cargo package-linux [--arch …] [--verify]  # release binary and Linux packages
 ```
 

@@ -573,7 +573,8 @@ packaging/macos/build-app.sh /tmp/out          # macOS: Dromon.app, its zip, the
 packaging/windows/build-exe.ps1 -Arch x64 -Out out                       # Windows: dromon.exe
 packaging/windows/build-msi.ps1 -Exe out\dromon.exe -Arch x64 -Out out   # needs WiX v5
 packaging/windows/verify-msi.ps1 -Msi out\Dromon-<v>-windows-x64.msi -Version <v>   # elevated shell
-python3 packaging/icon/generate.py             # icon PNGs, .ico and .icns from the shapes in it
+cargo brand                                    # the brand kit in assets/brand/: icons, .ico, .icns
+                                               # (docs/packaging.md, "Change the Icon")
 ```
 
 `package-linux.sh` builds in an `ubuntu:22.04` container by default, so the binary needs only
