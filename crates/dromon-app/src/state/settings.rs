@@ -1,5 +1,6 @@
 //! Settings (§6.8, §8): theme, list density, the download folder, transfers at once per host,
-//! whether hidden files show by default, and whether Dromon checks for updates by itself.
+//! whether hidden files show by default, the terminal app "Open in Terminal" uses, and whether
+//! Dromon checks for updates by itself.
 //!
 //! The values live in each main window's state ([`App::settings`]), the same in all of them.
 //! Each main window shows them on its Settings page (`page.rs`, `views/settings.rs`), which
@@ -48,6 +49,76 @@ impl Density {
     }
 }
 
+/// The terminal app "Open in Terminal" opens ssh in: the platform's own choice, or one of those
+/// found on this machine (`crate::terminal` finds and starts them).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Terminal {
+    /// macOS's Terminal.app.
+    #[serde(rename = "terminal")]
+    TerminalApp,
+    #[serde(rename = "iterm2")]
+    Iterm2,
+    Ghostty,
+    #[serde(rename = "wezterm")]
+    WezTerm,
+    Kitty,
+    Alacritty,
+    WindowsTerminal,
+    /// Windows: ssh in a console window of its own.
+    Console,
+    GnomeTerminal,
+    Konsole,
+    Foot,
+    Xterm,
+    /// macOS: Terminal; Windows: Windows Terminal, else a console window; Linux: `$TERMINAL`,
+    /// then `x-terminal-emulator`, then the first known one installed. A name the file has that
+    /// this version doesn't know reads as this too (serde's `other` is the last variant's).
+    #[default]
+    #[serde(other)]
+    System,
+}
+
+impl Terminal {
+    /// Its name on the Settings page.
+    pub fn label(self) -> &'static str {
+        match self {
+            Terminal::System => "System default",
+            Terminal::TerminalApp => "Terminal",
+            Terminal::Iterm2 => "iTerm2",
+            Terminal::Ghostty => "Ghostty",
+            Terminal::WezTerm => "WezTerm",
+            Terminal::Kitty => "kitty",
+            Terminal::Alacritty => "Alacritty",
+            Terminal::WindowsTerminal => "Windows Terminal",
+            Terminal::Console => "Console window",
+            Terminal::GnomeTerminal => "GNOME Terminal",
+            Terminal::Konsole => "Konsole",
+            Terminal::Foot => "foot",
+            Terminal::Xterm => "XTerm",
+        }
+    }
+
+    /// The key of its choice on the Settings page.
+    pub fn key(self) -> &'static str {
+        match self {
+            Terminal::System => "terminal-system",
+            Terminal::TerminalApp => "terminal-terminal",
+            Terminal::Iterm2 => "terminal-iterm2",
+            Terminal::Ghostty => "terminal-ghostty",
+            Terminal::WezTerm => "terminal-wezterm",
+            Terminal::Kitty => "terminal-kitty",
+            Terminal::Alacritty => "terminal-alacritty",
+            Terminal::WindowsTerminal => "terminal-windows-terminal",
+            Terminal::Console => "terminal-console",
+            Terminal::GnomeTerminal => "terminal-gnome-terminal",
+            Terminal::Konsole => "terminal-konsole",
+            Terminal::Foot => "terminal-foot",
+            Terminal::Xterm => "terminal-xterm",
+        }
+    }
+}
+
 /// Every setting, as remembered. A field missing from the file takes its default (§8).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -60,6 +131,8 @@ pub struct Settings {
     pub transfers_at_once: usize,
     /// Show dotfiles in hosts opened from now on (⌘⇧. still switches them for the session).
     pub show_hidden: bool,
+    /// Where "Open in Terminal" opens ssh.
+    pub terminal: Terminal,
     /// Check GitHub for a newer Dromon at launch and once a day (`update.rs`).
     pub check_updates: bool,
 }
@@ -72,6 +145,7 @@ impl Default for Settings {
             download_folder: None,
             transfers_at_once: AT_ONCE_DEFAULT,
             show_hidden: true,
+            terminal: Terminal::System,
             check_updates: true,
         }
     }
@@ -96,6 +170,7 @@ impl Settings {
             SettingsChange::DownloadFolder(folder) => s.download_folder = folder,
             SettingsChange::TransfersAtOnce(n) => s.transfers_at_once = n,
             SettingsChange::ShowHidden(show) => s.show_hidden = show,
+            SettingsChange::Terminal(terminal) => s.terminal = terminal,
             SettingsChange::CheckUpdates(on) => s.check_updates = on,
         }
         s.clamped()
@@ -111,6 +186,7 @@ pub enum SettingsChange {
     DownloadFolder(Option<PathBuf>),
     TransfersAtOnce(usize),
     ShowHidden(bool),
+    Terminal(Terminal),
     CheckUpdates(bool),
 }
 

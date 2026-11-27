@@ -139,8 +139,8 @@ line break or an unquotable character could become an ssh option or a second con
 ### Decision
 
 ssh is spawned directly (`tokio::process::Command` with an argument vector), never through a
-shell. Every user-supplied value reaches ssh only through `SshCommand::sftp` and the checks
-behind it.
+shell. Every user-supplied value reaches ssh only through `SshCommand::sftp` (or, for "Open in
+Terminal", `SshCommand::terminal`) and the checks behind it.
 
 ### Rules and examples
 
@@ -153,6 +153,19 @@ behind it.
   `ControlMaster=no`). Change them only with the plan's §4.3 and a test.
 - Nothing from an issue body or a fixture is ever run as shell (`scripts/repro.sh` passes blocks
   as files and refuses arguments outside its list).
+- "Open in Terminal" starts a second ssh, the user's terminal app's own, built by
+  `SshCommand::terminal`: the same host options and checks, `-t`, and no askpass environment,
+  so that ssh asks for passwords, passphrases and codes in the terminal. Dromon never hands it
+  a secret it remembers. The folder reaches the server's shell in a remote command
+  (`cd -- '<folder>' && exec "$SHELL" -l || exec "$SHELL" -l`), single-quoted by
+  `command.rs`'s `quote`.
+- Terminal apps start from an argument vector (`dromon-app/src/terminal.rs`), never through a
+  local shell. The one exception is macOS's Terminal and iTerm2, which only open files: there
+  the launcher writes a `.command` script (mode 0700, a fresh name in the app's cache folder)
+  whose only command is the ssh line from `SshCommand::shell_line`, every word quoted by the
+  same tested `quote`, and which deletes itself as it starts; `open -a Terminal <script>` runs
+  it. No Apple Events are sent, so the hardened app needs no automation entitlement. On
+  Windows the console fallback is `conhost.exe` with ssh's argument vector, not `cmd /c`.
 
 ### Consequences
 
@@ -163,7 +176,8 @@ intended trade.
 
 - Does the new value reach ssh only through `SshCommand` and its checks?
 - Is there a test in `command_tests.rs` or `quick_tests.rs` for the new value's edge cases?
-- Is any new process spawned without a shell?
+- Is any new process spawned without a shell, and does anything a shell parses go through
+  `quote`?
 
 ## Decision: Host Keys Are ssh's Call
 

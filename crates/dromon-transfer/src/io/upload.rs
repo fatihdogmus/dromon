@@ -15,7 +15,7 @@ use dromon_sftp::{RemoteFile, Sftp, WriteAck, WriteMode};
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
-use super::{CopyOptions, changed_locally, free_remote_name, local_err, secs_of};
+use super::{CopyOptions, changed_locally, free_remote_name, local_err, secs_of, write_denied};
 use crate::{FilePlan, upload_part_name};
 
 /// The part file next to `dst`: `.<name>.dromon-part`. `None` for the root.
@@ -56,7 +56,7 @@ pub async fn upload(
     };
 
     let mode = if offset > 0 { WriteMode::Resume } else { WriteMode::Truncate };
-    let remote = sftp.open_write(&part, mode).await?;
+    let remote = sftp.open_write(&part, mode).await.map_err(write_denied(dst))?;
     if offset > 0 {
         file.seek(SeekFrom::Start(offset)).await.map_err(|e| local_err("read", src, &e))?;
         progress(offset);
@@ -69,7 +69,7 @@ pub async fn upload(
     }
     remote.close().await?;
     if let Some(t) = now_mtime {
-        sftp.set_mtime(&part, t).await?;
+        sftp.set_mtime(&part, t).await.map_err(write_denied(dst))?;
     }
     finish(sftp, &part, dst, *overwrite).await
 }
@@ -129,20 +129,23 @@ async fn read_full(file: &mut File, buf: &mut [u8]) -> std::io::Result<usize> {
 /// - `overwrite`: `posix-rename` replaces `dst` atomically; without it, `dst` is removed first.
 /// - otherwise: a free name when `dst` is taken now; if something appears at `dst` between that
 ///   check and the rename, a free name is picked once more.
+///
+/// A refused rename or removal says the folder can't be written ([`write_denied`]).
 pub(super) async fn finish(sftp: &Sftp, part: &RemotePath, dst: &RemotePath, overwrite: bool) -> Result<RemotePath> {
     let (Some(folder), Some(name)) = (dst.parent(), dst.file_name()) else {
         return Err(Error::Other(format!("Can't upload to {dst}")));
     };
+    let denied = write_denied(dst);
     if overwrite {
         match sftp.posix_rename(part, dst).await {
             Err(Error::Unsupported(_)) => {
                 match sftp.remove_file(dst).await {
                     Ok(()) | Err(Error::NotFound(_)) => {}
-                    Err(e) => return Err(e),
+                    Err(e) => return Err(denied(e)),
                 }
-                sftp.rename(part, dst).await?;
+                sftp.rename(part, dst).await.map_err(&denied)?;
             }
-            res => res?,
+            res => res.map_err(&denied)?,
         }
         return Ok(dst.clone());
     }
@@ -152,9 +155,9 @@ pub(super) async fn finish(sftp: &Sftp, part: &RemotePath, dst: &RemotePath, ove
         Ok(()) => Ok(target),
         Err(Error::AlreadyExists(_)) => {
             let again = folder.join(&free_remote_name(sftp, &folder, name).await?);
-            sftp.rename(part, &again).await?;
+            sftp.rename(part, &again).await.map_err(&denied)?;
             Ok(again)
         }
-        Err(e) => Err(e),
+        Err(e) => Err(denied(e)),
     }
 }

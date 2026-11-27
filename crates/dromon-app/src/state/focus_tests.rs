@@ -67,6 +67,22 @@ fn a_job_is_said_once_when_it_ends() {
 }
 
 #[test]
+fn a_failed_job_is_said_with_its_reason_as_its_row_says_it() {
+    let mut s = listing();
+    let mut a = Announcer::default();
+    a.news(&s);
+    let why = "You don't have permission to write in /home/u/.gradle";
+    let mut j = job(1, JobKind::Upload, "key.pem", TaskState::Failed { error: "1 file failed".into() });
+    j.errors = vec![format!("key.pem: {why}")];
+    s.apply(ServiceEvent::Transfers(vec![j]));
+    assert_eq!(a.news(&s), Some(format!("Upload of key.pem failed: {why}")));
+    let mut j = job(2, JobKind::Download, "photos", TaskState::Failed { error: "2 files failed".into() });
+    j.errors = vec!["a.jpg: denied".into(), "b.jpg: gone".into()];
+    s.apply(ServiceEvent::Transfers(vec![j]));
+    assert_eq!(a.news(&s).as_deref(), Some("Download of photos failed: 2 files failed: a.jpg: denied"));
+}
+
+#[test]
 fn a_connection_lost_and_back_is_said() {
     let mut s = listing();
     let mut a = Announcer::default();

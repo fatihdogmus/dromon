@@ -12,6 +12,7 @@ mod reveal;
 mod scenes;
 pub mod service;
 pub mod state;
+mod terminal;
 #[expect(dead_code, reason = "the whole token catalogue (§6.3–6.7); not every token is drawn yet")]
 mod theme;
 mod views;

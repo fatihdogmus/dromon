@@ -135,6 +135,36 @@ fn a_host_in_the_sidebar_leaves_the_page_and_goes_there() {
     assert!(rt.find("toolbar").is_some());
 }
 
+/// General's Terminal: System default until the look comes back, then the ones found; a click
+/// picks one.
+#[test]
+fn general_picks_the_terminal_from_those_found() {
+    use crate::state::settings::Terminal;
+    let mut rt = page(SettingsSection::General);
+    assert!(rt.find("section-general").is_some());
+    // `(name, checked)` of each choice, as screen readers hear them.
+    let radios = |rt: &Runtime<App>| {
+        tree(rt)
+            .into_iter()
+            .filter(|n| n.key.starts_with("terminal-"))
+            .map(|n| {
+                assert_eq!(n.role, "radio-button", "{n:?}");
+                (n.name.clone(), n.has_state("checked"))
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(radios(&rt), [("System default".to_owned(), true)], "nothing looked up in tests");
+    // What the detecting thread answers.
+    rt.update(|s, tx| crate::views::run(s, Action::TerminalsFound(vec![Terminal::Kitty, Terminal::Xterm]), tx));
+    settle(&mut rt);
+    assert_eq!(radios(&rt), [("System default".to_owned(), true), ("kitty".into(), false), ("XTerm".into(), false)]);
+    click(&mut rt, "terminal-xterm");
+    assert_eq!(rt.state.settings.terminal, Terminal::Xterm);
+    assert_eq!(radios(&rt)[2], ("XTerm".to_owned(), true));
+    click(&mut rt, "terminal-system");
+    assert_eq!(rt.state.settings.terminal, Terminal::System);
+}
+
 #[test]
 fn the_sections_list_picks_what_the_panel_shows() {
     let mut rt = page(SettingsSection::Appearance);
