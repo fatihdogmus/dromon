@@ -17,10 +17,11 @@
 //! The manager ([`run`]) routes commands and askpass requests to one task per host
 //! (`conn.rs`), whose lifecycle is the pure machine in `lifecycle.rs` and whose prompts go
 //! through `auth.rs`; its file operations (new folder, rename, delete) run in `fileops.rs`
-//! on its SFTP session, the Properties sheet's folder size walks in `sizes.rs` and quick preview
-//! reads in `preview.rs`. The password store lives here only: cleared per host on Disconnect, and
-//! all of it when the UI goes away. `hostfiles.rs` owns the files: discovery and its watcher,
-//! the saved hosts' `hosts.conf`, and "Add to SSH config".
+//! on its SFTP session, its folder walks (the Properties sheet's sizes, search in subfolders)
+//! in `sizes.rs` and `search.rs`, and quick preview reads in `preview.rs`. The password store
+//! lives here only: cleared per host on Disconnect, and all of it when the UI goes away.
+//! `hostfiles.rs` owns the files: discovery and its watcher, the saved hosts' `hosts.conf`, and
+//! "Add to SSH config".
 //!
 //! The manager also watches the clocks for a sleep (`wake.rs`; Rune reports no wake or network
 //! change): after one, and when a window gains focus, every live connection checks its session
@@ -37,7 +38,9 @@ pub(crate) mod lifecycle;
 pub(crate) mod poll;
 /// Quick preview reads: one range of one file.
 mod preview;
-/// Folder size walks for the Properties sheet; the fixture backend counts with it too.
+/// Search in subfolders, on the same walk; the fixture backend matches with it too.
+pub(crate) mod search;
+/// Folder walks, and the Properties sheet's sizes; the fixture backend counts with it too.
 pub(crate) mod sizes;
 mod transfers;
 /// Sleep detection and connection checks (spike S6).
@@ -68,6 +71,7 @@ use tokio::sync::mpsc;
 use self::auth::PromptIds;
 use self::conn::{ConnCmd, ConnHandle, Shared};
 use self::preview::PreviewCmd;
+use self::search::SearchCmd;
 use self::sizes::SizeCmd;
 use crate::state::{App, Backend, Command, ServiceEvent, WindowId};
 
@@ -375,26 +379,40 @@ fn dispatch<S: Sink>(
                 let _ = c.cmds.send(ConnCmd::Closed(from));
             }
         }
-        Command::FolderSize { id, host, path } => {
-            // The host's task walks it; a host without one isn't connected.
-            let unsent =
-                conns.get(&host).is_none_or(|c| c.cmds.send(ConnCmd::Size(from, SizeCmd::Start { id, path })).is_err());
-            if unsent {
-                let total = crate::state::SizeTotal::default();
-                sink.emit_to(
-                    from,
-                    ServiceEvent::FolderSizeFailed { id, host, total, error: dromon_core::Error::ConnectionLost },
-                );
-            }
-        }
-        Command::CancelFolderSize { id, host } => {
-            if let Some(c) = conns.get(&host) {
-                let _ = c.cmds.send(ConnCmd::Size(from, SizeCmd::Cancel(id)));
-            }
-        }
+        cmd @ (Command::FolderSize { .. }
+        | Command::CancelFolderSize { .. }
+        | Command::Search { .. }
+        | Command::CancelSearch { .. }) => walk(from, cmd, conns, sink),
         cmd @ (Command::Preview { .. } | Command::CancelPreview { .. }) => preview(from, cmd, conns, sink),
         // The manager's loop takes these first.
         Command::HostBook(_) => {}
+    }
+}
+
+/// A folder walk from window `from`, or stopping one: the host's task walks it; a host without
+/// one isn't connected, and the walk fails at once.
+fn walk<S: Sink>(from: WindowId, cmd: Command, conns: &HashMap<HostId, ConnHandle>, sink: &S) {
+    let lost = dromon_core::Error::ConnectionLost;
+    let send = |host: &HostId, cmd: ConnCmd| conns.get(host).is_some_and(|c| c.cmds.send(cmd).is_ok());
+    match cmd {
+        Command::FolderSize { id, host, path } => {
+            if !send(&host, ConnCmd::Size(from, SizeCmd::Start { id, path })) {
+                let total = crate::state::SizeTotal::default();
+                sink.emit_to(from, ServiceEvent::FolderSizeFailed { id, host, total, error: lost });
+            }
+        }
+        Command::CancelFolderSize { id, host } => {
+            send(&host, ConnCmd::Size(from, SizeCmd::Cancel(id)));
+        }
+        Command::Search { id, host, root, query, show_hidden } => {
+            if !send(&host, ConnCmd::Search(from, SearchCmd::Start { id, root, query, show_hidden })) {
+                sink.emit_to(from, ServiceEvent::SearchFailed { id, host, error: lost });
+            }
+        }
+        Command::CancelSearch { id, host } => {
+            send(&host, ConnCmd::Search(from, SearchCmd::Cancel(id)));
+        }
+        _ => {}
     }
 }
 

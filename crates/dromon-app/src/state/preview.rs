@@ -646,9 +646,13 @@ impl Preview {
 
 impl App {
     /// The row the panel follows: the cursor's, in the folder on screen while the list shows.
+    /// None while search results take the list's place: the folder's cursor is hidden under them.
     fn preview_row(&self) -> Option<Target> {
         let c = self.conn()?;
-        if self.on_settings() || matches!(c.status, ConnStatus::Failed(_) | ConnStatus::Disconnected) {
+        if self.on_settings()
+            || self.results().is_some()
+            || matches!(c.status, ConnStatus::Failed(_) | ConnStatus::Disconnected)
+        {
             return None;
         }
         let entry = c.find(c.selection.cursor()?)?.clone();

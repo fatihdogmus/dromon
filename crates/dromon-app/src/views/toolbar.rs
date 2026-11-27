@@ -1,6 +1,7 @@
 //! The toolbar (§6.2), one piece with the title bar: back/forward, the path as breadcrumbs,
-//! the ⌘F filter, the transfers button and the ⌘K hint. It drags the window wherever nothing
-//! takes the press, and leaves room for Windows' caption buttons (`ChromeInsets::trailing`).
+//! the ⌘F filter with its scope (this folder, or a search in subfolders), the transfers button
+//! and the ⌘K hint. It drags the window wherever nothing takes the press, and leaves room for
+//! Windows' caption buttons (`ChromeInsets::trailing`).
 
 use dromon_core::{ConnStatus, RemotePath};
 use rune::{El, HasPopup, Key, KeyEvent, KeyPlatform, LoopSpec, Tx, el, icon, row, text, text_input};
@@ -9,8 +10,10 @@ use super::widgets::{Keyboard, chord, icon_button, kbd};
 use super::{Paint, run, transfers};
 use crate::icons;
 use crate::state::keys::{self, FileKey};
-use crate::state::{Action, App, ConnView, FileAction, Filter, PaletteAction, RowTarget, Shortcut};
-use crate::theme::{radius, size, space, type_};
+use crate::state::{
+    Action, App, ConnView, FileAction, Filter, PaletteAction, RowTarget, Scope, SearchAction, Shortcut,
+};
+use crate::theme::{motion, radius, size, space, type_};
 
 pub fn view(s: &App, p: Paint) -> El {
     let t = p.t;
@@ -48,7 +51,7 @@ pub fn view(s: &App, p: Paint) -> El {
         .child(forward)
         .child(path_bar(s, p).ml(space::S2));
     if let Some(c) = c {
-        bar = bar.child(filter(s, c, p));
+        bar = bar.children(c.filter.is_on().then(|| scope_switch(s, p))).child(filter(s, c, p));
     }
     bar.child(upload).child(transfers::button(s, p)).child(palette_button(p))
 }
@@ -185,18 +188,30 @@ fn filter(s: &App, c: &ConnView, p: Paint) -> El {
     }
     // The field's box rings while the keyboard has the field (a caret alone is easy to miss).
     let field = field.focus_visible_within_ring(2.0, 1.0, t.focus);
+    let what = match s.ui.search.scope {
+        Scope::Folder => "Filter",
+        Scope::Subfolders => "Search subfolders",
+    };
     let input = text_input(&s.ui.filter_edit, type_::BODY)
         .key("tb-filter-input")
-        .label("Filter")
+        .label(what)
         .single_line()
         .grow(1.0)
         .min_w(0.0)
         .color(t.text)
-        .placeholder("Filter", t.text_3)
+        .placeholder(what, t.text_3)
         .on_edit(|s: &mut App| &mut s.ui.filter_edit)
         .on_input_change(|s: &mut App, tx: &mut Tx| {
             let text = s.ui.filter_edit.text.clone();
-            run(s, Action::FilterChanged(text), tx);
+            // In Subfolders the search starts once typing pauses (the poll fires it when due).
+            let action = match s.ui.search.scope {
+                Scope::Folder => Action::FilterChanged(text),
+                Scope::Subfolders => Action::Search(SearchAction::Typed { text, now: tx.clock() }),
+            };
+            run(s, action, tx);
+            if let Some(due) = s.ui.search.due() {
+                tx.wake_at(due);
+            }
         })
         .on_input_key(filter_key);
     let clear = el()
@@ -212,6 +227,50 @@ fn filter(s: &App, c: &ConnView, p: Paint) -> El {
         .tab_press()
         .child(icon(icons::CLOSE.at(p.scale), size::ICON).color(t.text_3));
     field.child(input).child(clear)
+}
+
+/// The open filter's scope, "This folder | Subfolders": a segmented control beside the field
+/// (⌘F opens it in This folder, ⌘⇧F in Subfolders). Arrow keys move between the two.
+fn scope_switch(s: &App, p: Paint) -> El {
+    let t = p.t;
+    let options = [
+        (Scope::Folder, "This folder", "tb-scope-folder", None),
+        (Scope::Subfolders, "Subfolders", "tb-scope-subfolders", Some(chord("mod+shift+f"))),
+    ];
+    let segments = options.into_iter().map(|(scope, name, key, hint)| {
+        let on = s.ui.search.scope == scope;
+        let mut e = row()
+            .key(key)
+            .role("radio")
+            .label(name)
+            .checked(on)
+            .focusable(true)
+            .keyboard_focus_only()
+            .focus_selected(on)
+            .h(22.0)
+            .px(space::S2)
+            .radius(radius::ROW - 1.0)
+            .center()
+            .motion(motion::SNAP)
+            .on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, Action::Search(SearchAction::Scope(scope)), tx))
+            .child(text(name).font(type_::META_STRONG).color(if on { t.text } else { t.text_2 }));
+        if let Some(hint) = hint {
+            e = e.shortcut_hint(hint);
+        }
+        if on { e.fill(t.press).border(p.hair, t.border_subtle) } else { e.hover(t.hover).press(t.press) }
+    });
+    row()
+        .key("tb-scope")
+        .role("radiogroup")
+        .label("Filter in")
+        .focus_group()
+        .h(26.0)
+        .padding(2.0)
+        .gap(2.0)
+        .mr(space::S1)
+        .radius(radius::ROW)
+        .fill(t.field)
+        .children(segments)
 }
 
 /// Keys the filter field hands to the list before its editor sees them; Properties (⌘I,

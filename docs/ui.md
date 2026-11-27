@@ -24,6 +24,7 @@ How a view gets its state and runs actions is [architecture.md](architecture.md#
 
 - [Standard: Views and Theme Tokens](#standard-views-and-theme-tokens)
 - [Reference: Sheets, Popovers, the Palette and Toasts](#reference-sheets-popovers-the-palette-and-toasts)
+- [Reference: The Filter and Search in Subfolders](#reference-the-filter-and-search-in-subfolders)
 - [Decision: One Model for Native and Drawn Menus](#decision-one-model-for-native-and-drawn-menus)
 - [Standard: Keyboard Shortcuts](#standard-keyboard-shortcuts)
 - [Decision: Accessibility Is Tested](#decision-accessibility-is-tested)
@@ -99,6 +100,36 @@ Picking the right surface for new UI.
 
 Shortcuts of the list don't reach behind a sheet or the palette (`on_key` in `app_root.rs`
 returns early); keep it that way for new modal surfaces.
+
+## Reference: The Filter and Search in Subfolders
+
+**Scope:** `views/toolbar.rs`, `views/list.rs`, `views/search.rs`, `state/search.rs`
+
+### Use for
+
+Knowing what the list area shows while the filter field is open, and which state owns it.
+
+### Reference
+
+| Scope | Opened by | The list area shows |
+| --- | --- | --- |
+| This folder | ⌘F, the Filter button, the switch | The folder's rows whose names contain the text (`conn.rs`'s `Filter`). |
+| Subfolders | ⌘⇧F, the palette's "Search in subfolders…", the switch | Results mode: a status line ("Searching… N folders", then "N results in M folders" and "K folders couldn't be read"), then a grid of Name, Folder (relative to the folder searched, `.` for itself), Size, Modified, in the order found. |
+
+- The scope switch (`tb-scope`, a radiogroup) sits beside the open field. Typing in Subfolders
+  starts a search once typing pauses (`search::DEBOUNCE`, on the window's clock: the view's poll
+  fires it); a substring of the name, or a glob of the whole name when the text has `*` or `?`.
+- Results mode is the list's: the same `list` viewport and `rows` row group (one Tab stop, the
+  cursor's row the active descendant), rows keyed `hit-<n>` in the order found, the folder a
+  grid cell and in each row's description. The header row is for the eye (results aren't
+  sorted), so readers don't meet column headers that do nothing. The status bar counts results.
+- While results are on screen the list's actions are theirs (`App::results_action`): the
+  selection, Enter and double-click (a folder opens; a file opens its folder, selected), and the
+  row menu's Download, Copy path and Properties. What would change the folder view out of sight
+  (rename, delete, the clip, new folder) does nothing.
+- Escape, clearing the field, switching to This folder, navigating, another host or a
+  disconnect end the search; the folder view is back as it was. The count is announced
+  politely when a search ends.
 
 ## Decision: One Model for Native and Drawn Menus
 
@@ -391,6 +422,7 @@ Writing a script that drives the app.
 | File operations | `new-folder`, `edit-input`, `edit-error-text`, `delete-confirm`, `delete-cancel`, toasts `toast-op-<id>` (`-text`, `-dismiss`), the drop and drag pill `drop-pill` (`-text`) |
 | Context menus | `ctx-menu` with items `ctx-<id>` (`ctx-open`, `ctx-download`, `ctx-terminal`, `ctx-copy`, `ctx-cut`, `ctx-paste`, `ctx-copy-path`, `ctx-rename`, `ctx-delete`, `ctx-new-folder`, `ctx-refresh`, `ctx-hidden`); a host's menu `ctx-host-connect`, `ctx-host-disconnect`, `ctx-host-add-to-config`, `ctx-host-edit`, `ctx-host-remove`, `ctx-host-save` |
 | Quick connect | `sb-quick-connect`, `welcome-quick-connect`, `quick`, `quick-<field>-input` and `quick-<field>-error` for `host`, `user`, `port`, `alias`, `identity`, `jump`; `quick-more`, `quick-pick-identity`, `quick-save`, `quick-connect`; the Add to SSH config sheet `add-config` (`-block-text`, `-target`, `-backup`, `-confirm`, `-cancel`) |
+| Filter and search | `tb-filter` (closed), `tb-filter-input`, `tb-filter-clear`, the scope switch `tb-scope` with `tb-scope-folder` and `tb-scope-subfolders`; results `search-grid`, `rows/hit-<n>`, `search-status-text`, `search-unreadable`, `search-empty`; a result's menu items `ctx-download`, `ctx-copy-path`, `ctx-properties` |
 | Palette | `tb-palette`, `palette-input`, `palette-group-hosts`, `palette-group-folders`, `palette-group-actions`, rows `pal-host-<id>`, `pal-go`, `pal-folder-<path>`, `pal-<action>`; `palette-empty` |
 | Polling | a refresh's new rows carry `fresh-<n>`; the vanished-folder toast is `toast-note-<n>` (`-text`) |
 | Preview | the panel `preview` (Space: `{"type": "key", "name": " "}`), `preview-title`, `preview-meta`, `preview-download`, `preview-close`; its text `preview-lines` (the region; block `b` is `preview-lines/<b>`, its lines `…/lines`, their numbers `…/n`), the notes `preview-cut` and `preview-long`, `preview-image`, `preview-loading`, `preview-note`, `preview-kind-value` |

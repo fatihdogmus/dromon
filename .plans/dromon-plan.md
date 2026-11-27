@@ -505,6 +505,7 @@ Rules:
 | Back / Forward | ⌘[ / ⌘] (Alt+← / Alt+→ on Windows and Linux) |
 | Go to path | ⌘L |
 | Filter current folder | ⌘F |
+| Search in subfolders | ⌘⇧F |
 | Refresh | ⌘R (also F5 on Windows and Linux) |
 | Toggle hidden files | ⌘⇧. (Ctrl+H on Linux) |
 | Download selection | ⌘D |

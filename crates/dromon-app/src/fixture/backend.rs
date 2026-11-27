@@ -19,6 +19,8 @@
 //! the fixture's folders with what transfers and file operations changed) is the one this
 //! backend lists and runs file operations on.
 //!
+//! Folder sizes and searches in subfolders walk the trees at once (`fixture/search.rs`).
+//!
 //! Polling (§4.5) has no clock either: `Command::Poll` (the window gaining focus) polls at once
 //! through the service's own `Poller`, after the server's next changes made elsewhere
 //! (`changes.rs`); a refresh of the folder on screen (⌘R) takes the next changes too.
@@ -38,12 +40,13 @@ use zeroize::Zeroize;
 use dromon_sftp::Visibility;
 use tokio::time::{Duration, Instant};
 
-use super::changes;
 use super::hostbook::Book;
 use super::transfers::Engine;
 use super::{Fixture, Step};
+use super::{changes, search};
 use crate::service::lifecycle::{self, Event, Lifecycle, Phase};
 use crate::service::poll::{Collector, Outcome};
+use crate::service::sizes::Sizes;
 use crate::service::windows::Watch;
 use crate::state::{Command, FileOp, OpId, PreviewBytes, ServiceEvent, SizeId, SizeTotal, TransferCommand, WindowId};
 
@@ -201,12 +204,15 @@ impl Core {
             });
             return;
         }
-        match self.transfers.tree.folder_size(&host, &path) {
-            Ok(total) => {
+        let mut sizes = Sizes::new(|_| {});
+        let walked = self.transfers.tree.walk(&host, &path, &mut sizes);
+        let total = sizes.total;
+        match walked {
+            Ok(()) => {
                 out.push(ServiceEvent::FolderSizeProgress { id, host: host.clone(), total });
                 out.push(ServiceEvent::FolderSizeDone { id, host, total });
             }
-            Err((total, error)) => {
+            Err(error) => {
                 let lost = error == Error::ConnectionLost;
                 out.push(ServiceEvent::FolderSizeFailed { id, host: host.clone(), total, error });
                 if lost {
@@ -752,7 +758,15 @@ impl Core {
             }
             Command::Poll { host } => self.poll(&host, &mut out),
             Command::FolderSize { id, host, path } => self.folder_size(id, host, path, &mut out),
-            Command::CancelFolderSize { .. } => {}
+            Command::CancelFolderSize { .. } | Command::CancelSearch { .. } => {}
+            Command::Search { id, host, root, query, show_hidden } => {
+                let up = self.up(&host);
+                out.extend(search::run(&self.transfers.tree, up, id, &host, &root, &query, show_hidden));
+                // A folder whose listing loses the connection drops it, as a folder size's does.
+                if up && matches!(out.last(), Some(ServiceEvent::SearchFailed { error: Error::ConnectionLost, .. })) {
+                    self.drive(&host, Work::Life(Event::Lost), &mut out);
+                }
+            }
             // Read at once from what `preview.rs` makes up, so there's never one to cancel.
             Command::Preview { id, host, path, range } => {
                 let read = if self.up(&host) {

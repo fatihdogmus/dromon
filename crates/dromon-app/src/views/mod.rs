@@ -15,6 +15,7 @@ mod preview;
 mod properties;
 mod quick;
 mod quit;
+mod search;
 mod settings;
 mod sheets;
 mod sidebar;
@@ -104,16 +105,16 @@ pub fn access(s: &App, cx: &Cx<App>) -> Access {
 pub const LIST: &str = "list";
 pub const ROWS: &str = "rows";
 
-/// The app's poll, at the start of every frame: the done flourish's phases (`transfers.rs`),
-/// and the preview's: a text that waited for the cursor to rest, an image that finished
-/// decoding (the view runs again to show it, or say its size).
+/// The app's poll (`AppSpec::poll`, at the start of every frame): the transfers' and a waiting
+/// search's (`search.rs`), then the preview's: a text that waited for the cursor to rest, an
+/// image that finished decoding (the view runs again to show it, or say its size).
 pub fn poll(s: &mut App, clock: f64, tx: &mut Tx) -> bool {
-    let flourish = transfers::poll(s, clock, tx);
+    let changed = search::poll(s, clock, tx);
     let preview = s.preview_tick(clock);
     if let Some(due) = preview.wake {
         tx.wake_at(due);
     }
-    preview.changed | flourish
+    preview.changed | changed
 }
 
 /// `AppSpec::setup`: Rune's waker, so a preview's image that finished decoding on Rune's

@@ -131,11 +131,15 @@ impl Shared {
                     to(self, at, ev);
                 }
                 ServiceEvent::Opened { .. } if joins => to(self, from, ev),
-                // A folder size is the asking window's sheet's alone, and a preview its panel's,
+                // A folder size is the asking window's sheet's alone, a search its list's and a
+                // preview its panel's,
                 // as the service sends them.
                 ServiceEvent::FolderSizeProgress { .. }
                 | ServiceEvent::FolderSizeDone { .. }
                 | ServiceEvent::FolderSizeFailed { .. }
+                | ServiceEvent::SearchFound { .. }
+                | ServiceEvent::SearchDone { .. }
+                | ServiceEvent::SearchFailed { .. }
                 | ServiceEvent::Preview { .. }
                 | ServiceEvent::PreviewFailed { .. } => to(self, from, ev),
                 _ => {

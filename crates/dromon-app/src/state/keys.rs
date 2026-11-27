@@ -13,6 +13,8 @@ pub enum Shortcut {
     SelectAll,
     ToggleHidden,
     Filter,
+    /// ⌘⇧F (Ctrl+Shift+F elsewhere): the filter, searching subfolders.
+    Search,
     /// ⌘D (Ctrl+D elsewhere): download the selection.
     Download,
     /// ⌘U (Ctrl+U elsewhere): pick files to upload into the folder on screen.
@@ -170,6 +172,8 @@ pub fn shortcut(ev: &KeyEvent, platform: KeyPlatform) -> Option<Shortcut> {
         Key::Command('[') => Shortcut::Back,
         Key::Command(']') => Shortcut::Forward,
         Key::Command('a') => Shortcut::SelectAll,
+        // Shift may arrive applied (`F`) or not.
+        Key::Command('f' | 'F') if m.shift && !m.alt => Shortcut::Search,
         Key::Command('f') => Shortcut::Filter,
         Key::Command('d') if !m.shift && !m.alt => Shortcut::Download,
         Key::Command('u') if !m.shift && !m.alt => Shortcut::Upload,
@@ -245,6 +249,19 @@ mod tests {
         let ctrl = Mods { ctrl: true, logo: false, ..CMD };
         assert_eq!(on(Key::Command('h'), ctrl, KeyPlatform::Linux), Some(Shortcut::ToggleHidden));
         assert_eq!(k(Key::Command('f'), CMD), Some(Shortcut::Filter));
+    }
+
+    #[test]
+    fn cmd_shift_f_searches_subfolders_and_cmd_f_filters_on_each_platform() {
+        let ctrl = Mods { ctrl: true, logo: false, ..CMD };
+        let shift = |m: Mods| Mods { shift: true, ..m };
+        for p in [KeyPlatform::Mac, KeyPlatform::Windows, KeyPlatform::Linux] {
+            let primary = if p == KeyPlatform::Mac { CMD } else { ctrl };
+            assert_eq!(on(Key::Command('f'), shift(primary), p), Some(Shortcut::Search), "{p:?}");
+            assert_eq!(on(Key::Command('F'), shift(primary), p), Some(Shortcut::Search), "{p:?}: Shift applied");
+            assert_eq!(on(Key::Command('f'), primary, p), Some(Shortcut::Filter), "{p:?}");
+            assert_eq!(on(Key::Text("F".into()), SHIFT, p), Some(Shortcut::Type("F".into())), "a plain F still types");
+        }
     }
 
     #[test]

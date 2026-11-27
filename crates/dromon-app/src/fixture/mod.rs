@@ -27,6 +27,7 @@ mod generate;
 mod hostbook;
 mod parse;
 mod preview;
+mod search;
 pub mod transfers;
 mod tree;
 mod windows;
@@ -37,6 +38,8 @@ mod backend_tests;
 mod changes_tests;
 #[cfg(test)]
 mod fileops_tests;
+#[cfg(test)]
+mod search_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

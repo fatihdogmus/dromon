@@ -7,7 +7,8 @@ use dromon_core::{Entry, EntryKind, Error, HostId, LinkTarget, RemotePath};
 
 use super::*;
 use crate::fixture;
-use crate::state::{Recorder, ServiceEvent};
+use crate::state::search::DEBOUNCE;
+use crate::state::{Recorder, SearchAction, ServiceEvent};
 
 fn prod() -> HostId {
     HostId("prod".into())
@@ -232,6 +233,29 @@ fn space_opens_the_cursor_files_preview_and_space_or_escape_closes_it() {
     assert_eq!(s.shortcut(Shortcut::Escape, 13.0), [Effect::FocusList]);
     assert!(!s.ui.preview.is_open());
     assert!(s.conn().unwrap().selection.contains("index.html"), "Escape closed the panel, the selection stays");
+}
+
+/// `text` searched for in subfolders (⌘⇧F, typed, the pause after it).
+fn searched(s: &mut App, text: &str) {
+    s.act(Action::Search(SearchAction::Open));
+    s.ui.filter_edit = rune::TextEdit::new(text);
+    s.act(Action::Search(SearchAction::Typed { text: text.into(), now: 10.0 }));
+    s.act(Action::Search(SearchAction::Tick(10.0 + DEBOUNCE)));
+}
+
+#[test]
+fn search_results_have_no_preview_and_a_search_closes_an_open_one() {
+    let mut s = demo();
+    click(&mut s, "index.html");
+    space(&mut s, 1.0);
+    assert_eq!(on_panel(&s), Some("index.html"));
+    // The palette's "Search in subfolders…" while the panel is open: the results take the list.
+    searched(&mut s, "*.json");
+    assert!(s.results().is_some_and(|r| !r.found.is_empty()), "the search found something");
+    assert!(!s.ui.preview.is_open(), "the folder's row isn't on screen any more");
+    // Space among the results previews nothing: the folder's own cursor is hidden under them.
+    assert!(space(&mut s, 20.0).is_empty());
+    assert!(!s.ui.preview.is_open());
 }
 
 #[test]
