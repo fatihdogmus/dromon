@@ -20,7 +20,8 @@
 //! the fixture's folders with what transfers and file operations changed) is the one this
 //! backend lists and runs file operations on.
 //!
-//! Folder sizes and searches in subfolders walk the trees at once (`fixture/search.rs`).
+//! Folder sizes and searches in subfolders walk the trees at once (`fixture/sizes.rs`,
+//! `fixture/search.rs`).
 //!
 //! Polling (§4.5) has no clock either: `Command::Poll` (the window gaining focus) polls at once
 //! through the service's own `Poller`, after the server's next changes made elsewhere
@@ -41,16 +42,15 @@ use zeroize::Zeroize;
 use dromon_sftp::Visibility;
 use tokio::time::{Duration, Instant};
 
+use super::changes;
 use super::hostbook::Book;
 use super::transfers::Engine;
 use super::{Fixture, Step};
-use super::{changes, search};
 use crate::service::lifecycle::{self, Event, Lifecycle, Phase};
 use crate::service::poll::{Collector, Outcome};
-use crate::service::sizes::Sizes;
 use crate::service::windows::Watch;
 use crate::state::service::{UpdateCommand, UpdateEvent};
-use crate::state::{Command, FileOp, OpId, ServiceEvent, SizeId, SizeTotal, TransferCommand, WindowId};
+use crate::state::{Command, FileOp, FileOpEvent, OpId, ServiceEvent, TransferCommand, WindowId};
 
 /// Entries per listing page, as the service pages them (§4.4).
 pub const PAGE: usize = 512;
@@ -67,7 +67,7 @@ pub struct Core {
     last_prompt: u64,
     /// Transfers (`fixture::transfers`); it also owns the folder trees as they are now, which
     /// listings and file operations use.
-    transfers: Engine,
+    pub(super) transfers: Engine,
     /// How each window shows (`Command::Window`): a folder is polled only while a window
     /// showing it is on screen.
     pub(super) windows: BTreeMap<WindowId, Visibility>,
@@ -166,7 +166,7 @@ impl Core {
     /// listing loses the connection fails it with `ConnectionLost` and drops the connection.
     fn file_op(&mut self, id: OpId, host: HostId, op: FileOp, out: &mut Vec<ServiceEvent>) {
         if !self.up(&host) {
-            out.push(ServiceEvent::FileOpFailed { id, host, error: Error::ConnectionLost });
+            out.push(ServiceEvent::FileOp(FileOpEvent::Failed { id, host, error: Error::ConnectionLost }));
             return;
         }
         let tree = &mut self.transfers.tree;
@@ -174,17 +174,22 @@ impl Core {
             FileOp::Mkdir { path } => tree.mkdir(&host, path, self.fixture.now),
             FileOp::Rename { from, to } => tree.rename(&host, from, to),
             FileOp::Delete { paths } => tree.delete(&host, paths).map(|n| {
-                out.push(ServiceEvent::FileOpProgress { id, host: host.clone(), done: n, total: Some(n) });
+                let ev = FileOpEvent::Progress { id, host: host.clone(), done: n, total: Some(n) };
+                out.push(ServiceEvent::FileOp(ev));
             }),
         };
         let ok = result.is_ok();
         match result {
-            Ok(()) => out.push(ServiceEvent::FileOpDone { id, host: host.clone() }),
+            Ok(()) => out.push(ServiceEvent::FileOp(FileOpEvent::Done { id, host: host.clone() })),
             Err(Error::ConnectionLost) => {
-                out.push(ServiceEvent::FileOpFailed { id, host: host.clone(), error: Error::ConnectionLost });
+                out.push(ServiceEvent::FileOp(FileOpEvent::Failed {
+                    id,
+                    host: host.clone(),
+                    error: Error::ConnectionLost,
+                }));
                 return self.drive(&host, Work::Life(Event::Lost), out);
             }
-            Err(error) => out.push(ServiceEvent::FileOpFailed { id, host: host.clone(), error }),
+            Err(error) => out.push(ServiceEvent::FileOp(FileOpEvent::Failed { id, host: host.clone(), error })),
         }
         let folders = self.conns.get(&host).map(|c| c.watch.folders()).unwrap_or_default();
         for path in folders.into_iter().filter(|p| op.relists(p, ok)) {
@@ -192,36 +197,10 @@ impl Core {
         }
     }
 
-    /// The Properties sheet's Calculate, walked at once over the trees: one progress event,
-    /// then Done, or Failed when the walk can't go on (a folder whose listing loses the
-    /// connection drops it, as a file operation's does). Not connected: `ConnectionLost` at
-    /// once. A walk is over by the time its sheet could cancel it, so cancelling does nothing.
-    fn folder_size(&mut self, id: SizeId, host: HostId, path: RemotePath, out: &mut Vec<ServiceEvent>) {
-        if !self.up(&host) {
-            out.push(ServiceEvent::FolderSizeFailed {
-                id,
-                host,
-                total: SizeTotal::default(),
-                error: Error::ConnectionLost,
-            });
-            return;
-        }
-        let mut sizes = Sizes::new(|_| {});
-        let walked = self.transfers.tree.walk(&host, &path, &mut sizes);
-        let total = sizes.total;
-        match walked {
-            Ok(()) => {
-                out.push(ServiceEvent::FolderSizeProgress { id, host: host.clone(), total });
-                out.push(ServiceEvent::FolderSizeDone { id, host, total });
-            }
-            Err(error) => {
-                let lost = error == Error::ConnectionLost;
-                out.push(ServiceEvent::FolderSizeFailed { id, host: host.clone(), total, error });
-                if lost {
-                    self.drive(&host, Work::Life(Event::Lost), out);
-                }
-            }
-        }
+    /// A folder walk (a folder size, a search) found `host`'s connection lost: it drops, as
+    /// a file operation's does.
+    pub(super) fn walk_lost(&mut self, host: &HostId, out: &mut Vec<ServiceEvent>) {
+        self.drive(host, Work::Life(Event::Lost), out);
     }
 
     /// A transfer command: the engine runs it to rest, and a folder on screen that a finished
@@ -716,6 +695,10 @@ impl Core {
     pub(super) fn run(&mut self, cmd: Command) -> Vec<ServiceEvent> {
         let mut out = Vec::new();
         match cmd {
+            Command::AnswerPrompt { id, answer } => match self.owner(id) {
+                Some(host) => self.drive(&host, Work::Answer(answer), &mut out),
+                None => wipe(answer),
+            },
             Command::Connect { host } => {
                 if self.conns.get(&host).is_some_and(|c| c.verbose) {
                     out.push(ServiceEvent::Verbose { host: host.clone(), on: true });
@@ -735,7 +718,6 @@ impl Core {
                     self.drive(&host, Work::Life(Event::Connect), &mut out);
                 }
             }
-            Command::List { host, path } => self.list(&host, path, &mut out),
             Command::Disconnect { host } => {
                 if self.conns.contains_key(&host) {
                     self.drive(&host, Work::Life(Event::Disconnect), &mut out);
@@ -744,12 +726,22 @@ impl Core {
                     out.push(ServiceEvent::Status { host, status: ConnStatus::Disconnected });
                 }
             }
-            Command::AnswerPrompt { id, answer } => match self.owner(id) {
-                Some(host) => self.drive(&host, Work::Answer(answer), &mut out),
-                None => wipe(answer),
-            },
-            Command::Transfer(cmd) => self.transfer(cmd, &mut out),
             Command::FileOp { id, host, op } => self.file_op(id, host, op, &mut out),
+            Command::FolderSize(cmd) => self.folder_size(cmd, &mut out),
+            Command::HostBook(cmd) => self.book.command(cmd, &mut out),
+            Command::List { host, path } => self.list(&host, path, &mut out),
+            // Fixture servers have no live updates: their hosts stay polled (`Live::Off`).
+            Command::LiveUpdates { .. } => {}
+            Command::Poll { host } => self.poll(&host, &mut out),
+            Command::Search(cmd) => self.search(cmd, &mut out),
+            Command::ShowPrompts { host } => self.show_prompts(&host, &mut out),
+            Command::Transfer(cmd) => self.transfer(cmd, &mut out),
+            // No network: a check finds nothing newer, so there's never anything to install.
+            Command::Update(UpdateCommand::Check) => {
+                out.extend([UpdateEvent::Checking, UpdateEvent::UpToDate].map(ServiceEvent::Update));
+            }
+            Command::Update(UpdateCommand::Auto(_) | UpdateCommand::Install) => {}
+            Command::Verbose { host, on } => self.verbose(host, on, &mut out),
             Command::Window { visible, focused } => {
                 let vis = match (visible, focused) {
                     (false, _) => Visibility::Hidden,
@@ -758,27 +750,6 @@ impl Core {
                 };
                 self.windows.insert(self.from, vis);
             }
-            Command::Poll { host } => self.poll(&host, &mut out),
-            Command::FolderSize { id, host, path } => self.folder_size(id, host, path, &mut out),
-            Command::CancelFolderSize { .. } | Command::CancelSearch { .. } => {}
-            // Fixture servers have no live updates: their hosts stay polled (`Live::Off`).
-            Command::LiveUpdates { .. } => {}
-            Command::Search { id, host, root, query, show_hidden } => {
-                let up = self.up(&host);
-                out.extend(search::run(&self.transfers.tree, up, id, &host, &root, &query, show_hidden));
-                // A folder whose listing loses the connection drops it, as a folder size's does.
-                if up && matches!(out.last(), Some(ServiceEvent::SearchFailed { error: Error::ConnectionLost, .. })) {
-                    self.drive(&host, Work::Life(Event::Lost), &mut out);
-                }
-            }
-            Command::Verbose { host, on } => self.verbose(host, on, &mut out),
-            Command::ShowPrompts { host } => self.show_prompts(&host, &mut out),
-            Command::HostBook(cmd) => self.book.command(cmd, &mut out),
-            // No network: a check finds nothing newer, so there's never anything to install.
-            Command::Update(UpdateCommand::Check) => {
-                out.extend([UpdateEvent::Checking, UpdateEvent::UpToDate].map(ServiceEvent::Update));
-            }
-            Command::Update(UpdateCommand::Auto(_) | UpdateCommand::Install) => {}
             Command::WindowClosed => {
                 self.windows.remove(&self.from);
                 let now = Instant::now();

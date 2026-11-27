@@ -7,7 +7,7 @@
 use rune::{Env, Runtime};
 use serde_json::Value;
 
-use crate::state::{Action, App, ServiceEvent};
+use crate::state::{Action, App, FileOpEvent, ServiceEvent};
 use crate::{app, scenes};
 
 const SIZE: (f32, f32) = (1080.0, 680.0);
@@ -534,7 +534,7 @@ fn finished_work_and_lost_connections_are_announced() {
         let op = s.ops.ops.last().unwrap();
         let (id, host) = (op.id, op.host.clone());
         let error = dromon_core::Error::PermissionDenied(dromon_core::RemotePath::new("/var/www/site/assets"));
-        s.apply(ServiceEvent::FileOpFailed { id, host, error });
+        s.apply(ServiceEvent::FileOp(FileOpEvent::Failed { id, host, error }));
     });
     assert!(failed.starts_with("Couldn't delete ‘assets’"), "{failed:?}");
 

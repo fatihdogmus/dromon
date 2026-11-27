@@ -3,7 +3,7 @@
 //! Dromon checks for updates by itself, and live updates.
 //!
 //! The values live in each main window's state ([`App::settings`]), the same in all of them.
-//! Each main window shows them on its Settings page (`page.rs`, `views/settings.rs`), which
+//! Each main window shows them on its Settings page (`page.rs`, `views/settings/`), which
 //! reads them from its state and sends each change as [`Action::Setting`](super::Action::Setting).
 //! A change applies there at once, is remembered in `prefs.json`
 //! ([`Saved::settings`](super::Saved::settings)) and reaches the other main windows as
@@ -123,33 +123,33 @@ impl Terminal {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
-    pub theme: Appearance,
+    /// Check GitHub for a newer Dromon at launch and once a day (`update.rs`).
+    pub check_updates: bool,
     pub density: Density,
     /// The folder downloads go to; `None` (or empty in the file) is the OS Downloads folder.
     pub download_folder: Option<PathBuf>,
-    /// Files running at once per host, within [`AT_ONCE`].
-    pub transfers_at_once: usize,
+    /// Watch the folder on screen live where the server can (`service/live.rs`); off: polls only.
+    pub live_updates: bool,
     /// Show dotfiles in hosts opened from now on (⌘⇧. still switches them for the session).
     pub show_hidden: bool,
     /// Where "Open in Terminal" opens ssh.
     pub terminal: Terminal,
-    /// Check GitHub for a newer Dromon at launch and once a day (`update.rs`).
-    pub check_updates: bool,
-    /// Watch the folder on screen live where the server can (`service/live.rs`); off: polls only.
-    pub live_updates: bool,
+    pub theme: Appearance,
+    /// Files running at once per host, within [`AT_ONCE`].
+    pub transfers_at_once: usize,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            theme: Appearance::System,
+            check_updates: true,
             density: Density::Comfortable,
             download_folder: None,
-            transfers_at_once: AT_ONCE_DEFAULT,
+            live_updates: true,
             show_hidden: true,
             terminal: Terminal::System,
-            check_updates: true,
-            live_updates: true,
+            theme: Appearance::System,
+            transfers_at_once: AT_ONCE_DEFAULT,
         }
     }
 }
@@ -168,14 +168,14 @@ impl Settings {
     pub fn with(&self, change: SettingsChange) -> Settings {
         let mut s = self.clone();
         match change {
-            SettingsChange::Theme(theme) => s.theme = theme,
+            SettingsChange::CheckUpdates(on) => s.check_updates = on,
             SettingsChange::Density(density) => s.density = density,
             SettingsChange::DownloadFolder(folder) => s.download_folder = folder,
-            SettingsChange::TransfersAtOnce(n) => s.transfers_at_once = n,
+            SettingsChange::LiveUpdates(on) => s.live_updates = on,
             SettingsChange::ShowHidden(show) => s.show_hidden = show,
             SettingsChange::Terminal(terminal) => s.terminal = terminal,
-            SettingsChange::CheckUpdates(on) => s.check_updates = on,
-            SettingsChange::LiveUpdates(on) => s.live_updates = on,
+            SettingsChange::Theme(theme) => s.theme = theme,
+            SettingsChange::TransfersAtOnce(n) => s.transfers_at_once = n,
         }
         s.clamped()
     }
@@ -184,15 +184,15 @@ impl Settings {
 /// One control of the Settings page, set to a value.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SettingsChange {
-    Theme(Appearance),
+    CheckUpdates(bool),
     Density(Density),
     /// "Choose…" picked a folder; `None` is "Reset" (the OS Downloads folder).
     DownloadFolder(Option<PathBuf>),
-    TransfersAtOnce(usize),
+    LiveUpdates(bool),
     ShowHidden(bool),
     Terminal(Terminal),
-    CheckUpdates(bool),
-    LiveUpdates(bool),
+    Theme(Appearance),
+    TransfersAtOnce(usize),
 }
 
 /// What the Settings page shows: the settings, and the folder "default" stands for.

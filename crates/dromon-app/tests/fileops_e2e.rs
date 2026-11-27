@@ -21,14 +21,14 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use dromon_app::service::{self, Config, Sink};
-use dromon_app::state::{Backend, Command, FileOp, OpId, ServiceEvent};
+use dromon_app::state::{Backend, Command, FileOp, FileOpEvent, OpId, ServiceEvent};
 use dromon_core::{ConnStatus, Error, HostId, RemotePath};
 use dromon_testkit::{Fixture, NULL_DEVICE, Role, copy_private_key};
 
 const HELPER: &str = env!("CARGO_BIN_EXE_dromon");
 const WAIT: Duration = Duration::from_secs(60);
 
-/// One `FileOpProgress`: `(done, total)`.
+/// One `FileOpEvent::Progress`: `(done, total)`.
 type Progress = (u64, Option<u64>);
 
 fn host() -> HostId {
@@ -146,12 +146,12 @@ impl Harness {
         let id = OpId(id);
         let mut progress = Vec::new();
         let result = self.wait_for("the operation to end", |ev| match ev {
-            ServiceEvent::FileOpProgress { id: i, done, total, .. } if *i == id => {
+            ServiceEvent::FileOp(FileOpEvent::Progress { id: i, done, total, .. }) if *i == id => {
                 progress.push((*done, *total));
                 None
             }
-            ServiceEvent::FileOpDone { id: i, .. } if *i == id => Some(Ok(())),
-            ServiceEvent::FileOpFailed { id: i, error, .. } if *i == id => Some(Err(error.clone())),
+            ServiceEvent::FileOp(FileOpEvent::Done { id: i, .. }) if *i == id => Some(Ok(())),
+            ServiceEvent::FileOp(FileOpEvent::Failed { id: i, error, .. }) if *i == id => Some(Err(error.clone())),
             _ => None,
         });
         (result, progress)

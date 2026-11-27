@@ -27,8 +27,9 @@ use dromon_sftp::Sftp;
 use tokio::task::{JoinHandle, JoinSet};
 
 use super::Sink;
+use super::conn::{ConnCmd, ConnHandle};
 use super::fileops::Throttle;
-use crate::state::{ServiceEvent, SizeId, SizeTotal, WindowId};
+use crate::state::{ServiceEvent, SizeCommand, SizeEvent, SizeId, SizeTotal, WindowId};
 
 /// Folder listings a walk keeps in flight at once.
 pub const LISTS_IN_FLIGHT: usize = 8;
@@ -48,6 +49,24 @@ pub trait Visit {
 pub enum SizeCmd {
     Start { id: SizeId, path: RemotePath },
     Cancel(SizeId),
+}
+
+/// A folder size command from window `from`: the host's task walks the folder, or stops the
+/// walk; a host without one isn't connected, and the walk fails at once.
+pub(super) fn route<S: Sink>(from: WindowId, cmd: SizeCommand, conns: &HashMap<HostId, ConnHandle>, sink: &S) {
+    let send =
+        |host: &HostId, cmd: SizeCmd| conns.get(host).is_some_and(|c| c.cmds.send(ConnCmd::Size(from, cmd)).is_ok());
+    match cmd {
+        SizeCommand::Start { id, host, path } => {
+            if !send(&host, SizeCmd::Start { id, path }) {
+                let ev = SizeEvent::Failed { id, host, total: SizeTotal::default(), error: Error::ConnectionLost };
+                sink.emit_to(from, ServiceEvent::FolderSize(ev));
+            }
+        }
+        SizeCommand::Cancel { id, host } => {
+            send(&host, SizeCmd::Cancel(id));
+        }
+    }
 }
 
 /// The walks of one kind running on one connection, by id.
@@ -94,26 +113,27 @@ impl Walks<SizeId> {
         match cmd {
             SizeCmd::Start { id, path } => {
                 let Some(sftp) = sftp else {
-                    let ev = ServiceEvent::FolderSizeFailed {
+                    let ev = SizeEvent::Failed {
                         id,
                         host: host.clone(),
                         total: SizeTotal::default(),
                         error: Error::ConnectionLost,
                     };
-                    return sink.emit_to(window, ev);
+                    return sink.emit_to(window, ServiceEvent::FolderSize(ev));
                 };
                 let (host, sink) = (host.clone(), sink.clone());
                 self.start(id, async move {
                     let mut sizes = Sizes::new(|total| {
-                        sink.emit_to(window, ServiceEvent::FolderSizeProgress { id, host: host.clone(), total })
+                        let ev = SizeEvent::Progress { id, host: host.clone(), total };
+                        sink.emit_to(window, ServiceEvent::FolderSize(ev))
                     });
                     let ended = walk(&sftp, &path, &mut sizes).await;
                     let total = sizes.total;
                     let ev = match ended {
-                        Ok(()) => ServiceEvent::FolderSizeDone { id, host, total },
-                        Err(error) => ServiceEvent::FolderSizeFailed { id, host, total, error },
+                        Ok(()) => SizeEvent::Done { id, host, total },
+                        Err(error) => SizeEvent::Failed { id, host, total, error },
                     };
-                    sink.emit_to(window, ev);
+                    sink.emit_to(window, ServiceEvent::FolderSize(ev));
                 });
             }
             SizeCmd::Cancel(id) => self.cancel(&id),

@@ -61,8 +61,9 @@ pub use selection::{Selection, TypeSelect};
 #[cfg(test)]
 pub use service::Recorder;
 pub use service::{
-    Backend, Command, FileOp, FileOpKind, Found, HostBookCommand, HostBookEvent, Live, LiveUnavailable, OpId, SearchId,
-    ServiceEvent, Silent, SizeId, SizeTotal, TransferCommand, WindowId,
+    Backend, Command, FileOp, FileOpEvent, FileOpKind, Found, HostBookCommand, HostBookEvent, Live, LiveUnavailable,
+    OpId, SearchCommand, SearchEvent, SearchId, ServiceEvent, Silent, SizeCommand, SizeEvent, SizeId, SizeTotal,
+    TransferCommand, WindowId,
 };
 pub use settings::{Density, Settings, SettingsChange, SettingsView};
 pub use sheets::{Sheet, Sheets};
@@ -413,18 +414,29 @@ impl App {
 
     fn apply_one(&mut self, ev: ServiceEvent) {
         match ev {
+            ServiceEvent::FileOp(ev) => self.ops.event(ev),
+            ServiceEvent::FolderSize(ev) => self.size_event(ev),
+            ServiceEvent::HostBook(ev) => self.host_event(ev),
             // Discovery owns the SSH Config section; saved and recent hosts stay.
             ServiceEvent::Hosts(specs) => self.set_config_hosts(specs),
-            ServiceEvent::HostBook(ev) => self.host_event(ev),
-            ServiceEvent::Status { host, status } => {
-                if matches!(status, ConnStatus::Ready | ConnStatus::Failed(_) | ConnStatus::Disconnected) {
-                    self.ui.sheets.on_settled(&host);
+            ServiceEvent::ListFailed { host, path, error } => {
+                // The folder on screen is gone: up to the nearest one that exists (§6.8).
+                if self.vanished(&host, &path, &error) {
+                    return;
                 }
-                if let Some(c) = self.conns.get_mut(&host) {
-                    c.status = status;
+                let Some(c) = self.conns.get_mut(&host) else { return };
+                // The folder remembered from last time is gone or closed now: go home instead.
+                if path == c.cwd
+                    && let Some(home) = c.fallback.take()
+                    && c.go(home.clone(), Nav::Replace)
+                {
+                    self.remember_folder(&host, &home);
+                    self.send(Command::List { host, path: home });
+                    return;
                 }
+                c.set_failed(&path, error.into());
+                self.vanish_landed(&host, &path);
             }
-            ServiceEvent::Opened { host, start } => self.opened(host, start),
             ServiceEvent::Listing { host, path, entries } | ServiceEvent::Refreshed { host, path, entries } => {
                 let query = self.folder_query();
                 if let Some(c) = self.conns.get_mut(&host) {
@@ -461,34 +473,24 @@ impl App {
                 }
                 self.vanish_landed(&host, &path);
             }
-            ServiceEvent::ListFailed { host, path, error } => {
-                // The folder on screen is gone: up to the nearest one that exists (§6.8).
-                if self.vanished(&host, &path, &error) {
-                    return;
-                }
-                let Some(c) = self.conns.get_mut(&host) else { return };
-                // The folder remembered from last time is gone or closed now: go home instead.
-                if path == c.cwd
-                    && let Some(home) = c.fallback.take()
-                    && c.go(home.clone(), Nav::Replace)
-                {
-                    self.remember_folder(&host, &home);
-                    self.send(Command::List { host, path: home });
-                    return;
-                }
-                c.set_failed(&path, error.into());
-                self.vanish_landed(&host, &path);
+            ServiceEvent::Live { host, live } => {
+                self.conns.entry(host).and_modify(|c| c.live = live);
             }
-            ServiceEvent::Prompt(prompt) => self.ui.sheets.on_prompt(prompt),
-            ServiceEvent::PromptClosed(id) => self.ui.sheets.on_closed(id),
             ServiceEvent::Log { host, line } => {
                 if let Some(c) = self.conns.get_mut(&host) {
                     c.log.push((self.wall_ms)(), line);
                 }
             }
-            ServiceEvent::Verbose { host, on } => {
+            ServiceEvent::Opened { host, start } => self.opened(host, start),
+            ServiceEvent::Prompt(prompt) => self.ui.sheets.on_prompt(prompt),
+            ServiceEvent::PromptClosed(id) => self.ui.sheets.on_closed(id),
+            ServiceEvent::Search(ev) => self.search_event(ev),
+            ServiceEvent::Status { host, status } => {
+                if matches!(status, ConnStatus::Ready | ConnStatus::Failed(_) | ConnStatus::Disconnected) {
+                    self.ui.sheets.on_settled(&host);
+                }
                 if let Some(c) = self.conns.get_mut(&host) {
-                    c.log.verbose = on;
+                    c.status = status;
                 }
             }
             ServiceEvent::Transfers(jobs) => {
@@ -504,18 +506,11 @@ impl App {
                     }
                 }
             }
-            ServiceEvent::FileOpProgress { id, host, done, total } => self.ops.progress(id, &host, done, total),
-            ServiceEvent::FileOpDone { id, host } => self.ops.done(id, &host),
-            ServiceEvent::FileOpFailed { id, host, error } => self.ops.failed(id, &host, error),
-            ev @ (ServiceEvent::FolderSizeProgress { .. }
-            | ServiceEvent::FolderSizeDone { .. }
-            | ServiceEvent::FolderSizeFailed { .. }) => self.size_event(ev),
-            ev @ (ServiceEvent::SearchFound { .. }
-            | ServiceEvent::SearchDone { .. }
-            | ServiceEvent::SearchFailed { .. }) => self.search_event(ev),
             ServiceEvent::Update(ev) => self.update_event(ev),
-            ServiceEvent::Live { host, live } => {
-                self.conns.entry(host).and_modify(|c| c.live = live);
+            ServiceEvent::Verbose { host, on } => {
+                if let Some(c) = self.conns.get_mut(&host) {
+                    c.log.verbose = on;
+                }
             }
         }
     }

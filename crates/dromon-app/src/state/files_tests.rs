@@ -8,7 +8,7 @@ use super::*;
 use crate::fixture;
 use crate::state::drag::DragTarget;
 use crate::state::edit::Edit;
-use crate::state::{Action, App, Command, Effect, Recorder, ServiceEvent, Sheet, TransferCommand};
+use crate::state::{Action, App, Command, Effect, FileOpEvent, Recorder, ServiceEvent, Sheet, TransferCommand};
 
 const SITE: &str = "/var/www/site";
 
@@ -198,9 +198,9 @@ fn delete_asks_then_deletes_with_a_toast_until_done() {
     let id = s.ops.ops.last().unwrap().id;
     let texts = |s: &App| s.toasts().into_iter().map(|t| t.text).collect::<Vec<_>>();
     assert_eq!(texts(&s), ["Deleting 2 items…"]);
-    s.apply(ServiceEvent::FileOpProgress { id, host: host("prod"), done: 1204, total: Some(5005) });
+    s.apply(ServiceEvent::FileOp(FileOpEvent::Progress { id, host: host("prod"), done: 1204, total: Some(5005) }));
     assert_eq!(texts(&s), ["Deleting… 1,204 of 5,005"]);
-    s.apply(ServiceEvent::FileOpDone { id, host: host("prod") });
+    s.apply(ServiceEvent::FileOp(FileOpEvent::Done { id, host: host("prod") }));
     assert!(texts(&s).is_empty());
 }
 
@@ -214,11 +214,11 @@ fn a_failed_delete_keeps_its_toast_until_dismissed_and_several_stack() {
     }
     let ids: Vec<OpId> = s.ops.ops.iter().map(|o| o.id).collect();
     assert_eq!(s.toasts().len(), 2, "they stack");
-    s.apply(ServiceEvent::FileOpFailed {
+    s.apply(ServiceEvent::FileOp(FileOpEvent::Failed {
         id: ids[0],
         host: host("prod"),
         error: Error::PermissionDenied(p("/var/www/site/assets/x")),
-    });
+    }));
     let t = s.toasts();
     assert_eq!(t[0].text, "Couldn't delete ‘assets’: You don't have access to /var/www/site/assets/x");
     assert_eq!(t[1].text, "Deleting ‘uploads’…");

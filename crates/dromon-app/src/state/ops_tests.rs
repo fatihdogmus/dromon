@@ -68,11 +68,54 @@ fn events_for_unknown_ids_or_another_host_are_ignored() {
 fn the_app_applies_file_op_events_to_its_ops() {
     let mut s: App = fixture::app(fixture::demo());
     let id = s.ops.begin(prod(), &delete(&["/var/www/site/old"]));
-    s.apply(ServiceEvent::FileOpProgress { id, host: prod(), done: 3, total: Some(9) });
+    s.apply(ServiceEvent::FileOp(FileOpEvent::Progress { id, host: prod(), done: 3, total: Some(9) }));
     assert_eq!(s.ops.get(id).map(|o| (o.done, o.total)), Some((3, Some(9))));
-    s.apply(ServiceEvent::FileOpFailed { id, host: prod(), error: Error::ConnectionLost });
+    s.apply(ServiceEvent::FileOp(FileOpEvent::Failed { id, host: prod(), error: Error::ConnectionLost }));
     assert_eq!(s.ops.get(id).and_then(|o| o.error.clone()), Some(Error::ConnectionLost));
     let next = s.ops.begin(prod(), &FileOp::Mkdir { path: RemotePath::new("/tmp/n") });
-    s.apply(ServiceEvent::FileOpDone { id: next, host: prod() });
+    s.apply(ServiceEvent::FileOp(FileOpEvent::Done { id: next, host: prod() }));
     assert!(s.ops.get(next).unwrap().succeeded());
+}
+
+fn p(s: &str) -> RemotePath {
+    RemotePath::new(s)
+}
+
+#[test]
+fn file_ops_name_what_they_change() {
+    let mk = FileOp::Mkdir { path: p("/a/new") };
+    assert_eq!((mk.kind(), mk.affected(), mk.removed()), (FileOpKind::Mkdir, vec![&p("/a/new")], vec![]));
+    let mv = FileOp::Rename { from: p("/a/x"), to: p("/a/y") };
+    assert_eq!(
+        (mv.kind(), mv.affected(), mv.removed()),
+        (FileOpKind::Rename, vec![&p("/a/x"), &p("/a/y")], vec![&p("/a/x")])
+    );
+    assert!(FileOp::Rename { from: p("/a/x"), to: p("/a/x") }.removed().is_empty());
+    let rm = FileOp::Delete { paths: vec![p("/a/x"), p("/b")] };
+    assert_eq!((rm.kind(), rm.removed()), (FileOpKind::Delete, vec![&p("/a/x"), &p("/b")]));
+    assert_eq!(FileOpKind::Delete.name(), "Delete");
+}
+
+#[test]
+fn the_folder_on_screen_is_listed_again_when_it_changed_and_still_exists() {
+    let rm = FileOp::Delete { paths: vec![p("/srv/www/old"), p("/srv/logs")] };
+    // The parent of a deleted item: listed again, whether or not the delete got through.
+    assert!(rm.relists(&p("/srv/www"), true) && rm.relists(&p("/srv/www"), false));
+    assert!(rm.relists(&p("/srv"), true));
+    // Unrelated folders aren't.
+    assert!(!rm.relists(&p("/srv/www/new"), true) && !rm.relists(&p("/"), true));
+    // The deleted folder itself, or one inside it: gone after a success, so not listed;
+    // after a failure it may still be there, and is.
+    assert!(!rm.relists(&p("/srv/www/old"), true) && !rm.relists(&p("/srv/www/old/a/b"), true));
+    assert!(rm.relists(&p("/srv/www/old"), false) && rm.relists(&p("/srv/logs/x"), false));
+
+    let mk = FileOp::Mkdir { path: p("/home/u/new") };
+    assert!(mk.relists(&p("/home/u"), true) && mk.relists(&p("/home/u"), false));
+    assert!(!mk.relists(&p("/home"), true));
+
+    let mv = FileOp::Rename { from: p("/home/u/a"), to: p("/home/u/b") };
+    assert!(mv.relists(&p("/home/u"), true));
+    // Renaming the folder on screen: its old path is gone.
+    assert!(!mv.relists(&p("/home/u/a"), true) && mv.relists(&p("/home/u/a"), false));
+    assert!(!mv.relists(&p("/home/u/c"), true));
 }

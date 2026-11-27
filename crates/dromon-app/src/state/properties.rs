@@ -19,11 +19,71 @@
 use dromon_core::{Entry, EntryKind, Error, HostId, LinkTarget, RemotePath};
 
 use super::App;
-use super::service::{Command, ServiceEvent, SizeId, SizeTotal};
+use super::service::Command;
 
 #[cfg(test)]
 #[path = "properties_tests.rs"]
 mod tests;
+
+/// Identifies one folder size walk, chosen by the UI (unique per session: each window numbers
+/// its own, as it does its [`OpId`](super::OpId)s).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct SizeId(pub u64);
+
+/// What a folder holds, as far as a walk got. Counted as Finder counts a folder's size, not as
+/// `du` does: `bytes` adds up the sizes of the files, symlinks (the links themselves, never
+/// followed) and other non-folders; folders add no bytes. `folders` are those inside it (the
+/// walked folder itself isn't counted); `unreadable` the folders whose listing failed (no
+/// access, or gone meanwhile), the walked one included: what's in them isn't counted.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SizeTotal {
+    pub bytes: u64,
+    pub files: u64,
+    pub folders: u64,
+    pub unreadable: u64,
+}
+
+impl SizeTotal {
+    /// Everything found so far: files and folders.
+    pub fn items(&self) -> u64 {
+        self.files + self.folders
+    }
+}
+
+/// What the UI asks of the service about folder sizes (`Command::FolderSize`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SizeCommand {
+    /// The Properties sheet's Calculate: walk the folder `path` on the host's session and add up
+    /// what's in it ([`SizeTotal`]). Nothing on the server changes and nothing is listed again.
+    /// Answered to the sending window only with [`SizeEvent::Progress`] (at most about ten times
+    /// a second), then [`SizeEvent::Done`], or [`SizeEvent::Failed`] when the walk can't go on; a
+    /// host that isn't connected answers `Failed` with [`Error::ConnectionLost`] at once.
+    Start { id: SizeId, host: HostId, path: RemotePath },
+    /// Stop the walk `id` (its sheet closed). Nothing answers; a walk that already ended, or an
+    /// unknown id, is ignored.
+    Cancel { id: SizeId, host: HostId },
+}
+
+/// What the service tells the UI about a folder size walk (`ServiceEvent::FolderSize`).
+#[derive(Clone, Debug, PartialEq)]
+pub enum SizeEvent {
+    /// How far the walk `id` got.
+    Progress { id: SizeId, host: HostId, total: SizeTotal },
+    /// The walk `id` went through the whole folder; folders it couldn't read are counted in
+    /// `total.unreadable` and left out of the rest.
+    Done { id: SizeId, host: HostId, total: SizeTotal },
+    /// The walk `id` stopped (the connection was lost): `total` is what it had counted.
+    Failed { id: SizeId, host: HostId, total: SizeTotal, error: Error },
+}
+
+/// A `FolderSize` event's trace line (`DROMON_TRACE=1`): its kind, host and id only.
+pub fn trace_line(ev: &SizeEvent) -> String {
+    match ev {
+        SizeEvent::Progress { id, host, .. } => format!("FolderSizeProgress host={host} id={}", id.0),
+        SizeEvent::Done { id, host, .. } => format!("FolderSizeDone host={host} id={}", id.0),
+        SizeEvent::Failed { id, host, .. } => format!("FolderSizeFailed host={host} id={}", id.0),
+    }
+}
 
 /// Where the size of a folder on the sheet stands.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -41,7 +101,7 @@ pub enum SizePhase {
 
 /// What happens to a folder's size.
 #[derive(Clone, Debug, PartialEq)]
-pub enum SizeEvent {
+pub enum SizeStep {
     /// Calculate (or Recalculate) sent the walk `id`.
     Start(SizeId),
     Progress(SizeId, SizeTotal),
@@ -51,16 +111,16 @@ pub enum SizeEvent {
 
 /// Steps `phase` by `ev`; whether it changed. A walk starts unless one is running; the walk's
 /// answers count only while it's the one running (anything else is stale and ignored).
-pub fn step(phase: &mut SizePhase, ev: SizeEvent) -> bool {
+pub fn step(phase: &mut SizePhase, ev: SizeStep) -> bool {
     let running = match phase {
         SizePhase::Calculating { id, .. } => Some(*id),
         _ => None,
     };
     let next = match ev {
-        SizeEvent::Start(id) if running.is_none() => SizePhase::Calculating { id, found: SizeTotal::default() },
-        SizeEvent::Progress(id, found) if running == Some(id) => SizePhase::Calculating { id, found },
-        SizeEvent::Done(id, total) if running == Some(id) => SizePhase::Done { total },
-        SizeEvent::Failed(id, total, error) if running == Some(id) => SizePhase::Failed { total, error },
+        SizeStep::Start(id) if running.is_none() => SizePhase::Calculating { id, found: SizeTotal::default() },
+        SizeStep::Progress(id, found) if running == Some(id) => SizePhase::Calculating { id, found },
+        SizeStep::Done(id, total) if running == Some(id) => SizePhase::Done { total },
+        SizeStep::Failed(id, total, error) if running == Some(id) => SizePhase::Failed { total, error },
         _ => return false,
     };
     *phase = next;
@@ -214,25 +274,24 @@ impl App {
         self.files.sizes.last += 1;
         let id = SizeId((u64::from(self.window.0) << 32) + self.files.sizes.last);
         let Some(v) = self.ui.sheets.properties_mut() else { return };
-        step(&mut v.size, SizeEvent::Start(id));
+        step(&mut v.size, SizeStep::Start(id));
         let (host, path) = (v.host.clone(), v.folder.join(&v.entry.name));
         // Recorded before sending: a fixture answers inside the send.
         self.files.sizes.running = Some((host.clone(), id));
-        self.send(Command::FolderSize { id, host, path });
+        self.send(Command::FolderSize(SizeCommand::Start { id, host, path }));
     }
 
     /// A folder size event from the service: it steps the open sheet's size if it's that
     /// sheet's walk on that host; anything else is stale.
-    pub(super) fn size_event(&mut self, ev: ServiceEvent) {
+    pub(super) fn size_event(&mut self, ev: SizeEvent) {
         let (host, ev) = match ev {
-            ServiceEvent::FolderSizeProgress { id, host, total } => (host, SizeEvent::Progress(id, total)),
-            ServiceEvent::FolderSizeDone { id, host, total } => (host, SizeEvent::Done(id, total)),
-            ServiceEvent::FolderSizeFailed { id, host, total, error } => (host, SizeEvent::Failed(id, total, error)),
-            _ => return,
+            SizeEvent::Progress { id, host, total } => (host, SizeStep::Progress(id, total)),
+            SizeEvent::Done { id, host, total } => (host, SizeStep::Done(id, total)),
+            SizeEvent::Failed { id, host, total, error } => (host, SizeStep::Failed(id, total, error)),
         };
         let ended = match &ev {
-            SizeEvent::Done(id, _) | SizeEvent::Failed(id, ..) => Some(*id),
-            SizeEvent::Start(_) | SizeEvent::Progress(..) => None,
+            SizeStep::Done(id, _) | SizeStep::Failed(id, ..) => Some(*id),
+            SizeStep::Start(_) | SizeStep::Progress(..) => None,
         };
         if let Some(id) = ended
             && self.files.sizes.running.as_ref().is_some_and(|(h, r)| *h == host && *r == id)
@@ -251,6 +310,6 @@ impl App {
             return;
         }
         self.files.sizes.running = None;
-        self.send(Command::CancelFolderSize { id, host });
+        self.send(Command::FolderSize(SizeCommand::Cancel { id, host }));
     }
 }

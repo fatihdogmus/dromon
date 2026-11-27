@@ -31,7 +31,7 @@ use dromon_core::{ConnStatus, Error, HostId, HostSpec, Prompt, PromptAnswer, Pro
 use tokio::sync::mpsc;
 
 use super::{Config, Sink, serve};
-use crate::state::{Command, FileOp, OpId, ServiceEvent, WindowId};
+use crate::state::{Command, FileOp, FileOpEvent, OpId, ServiceEvent, WindowId};
 
 const SFTP_SERVERS: [&str; 2] = ["/usr/lib/openssh/sftp-server", "/usr/lib/ssh/sftp-server"];
 const WAIT: Duration = Duration::from_secs(20);
@@ -309,8 +309,8 @@ impl Fixture {
     pub(super) async fn op_end(&mut self, id: u64) -> Result<(), Error> {
         let id = OpId(id);
         self.until("the operation to end", |ev| match ev {
-            ServiceEvent::FileOpDone { id: i, .. } if *i == id => Some(Ok(())),
-            ServiceEvent::FileOpFailed { id: i, error, .. } if *i == id => Some(Err(error.clone())),
+            ServiceEvent::FileOp(FileOpEvent::Done { id: i, .. }) if *i == id => Some(Ok(())),
+            ServiceEvent::FileOp(FileOpEvent::Failed { id: i, error, .. }) if *i == id => Some(Err(error.clone())),
             _ => None,
         })
         .await
@@ -379,7 +379,7 @@ async fn file_ops_run_on_the_session_and_list_the_folder_on_screen_again() {
     let mark = fx.seen.len();
     fx.op(7, FileOp::Delete { paths: vec![start.join("tree"), start.join("new")] });
     assert_eq!(fx.op_end(7).await, Ok(()));
-    assert!(fx.saw_since(mark, |ev| matches!(ev, ServiceEvent::FileOpProgress { id: OpId(7), .. })));
+    assert!(fx.saw_since(mark, |ev| matches!(ev, ServiceEvent::FileOp(FileOpEvent::Progress { id: OpId(7), .. }))));
     assert_eq!(fx.listing(&start).await, [".hidden", "b.txt", "sub"]);
     assert!(fx.local("sub/keep.txt").is_file());
 
@@ -403,7 +403,7 @@ async fn file_ops_run_on_the_session_and_list_the_folder_on_screen_again() {
     fx.op(10, FileOp::Delete { paths: vec![start.join("d2"), start.join("missing")] });
     let order = fx
         .until("the first delete to end", |ev| match ev {
-            ServiceEvent::FileOpDone { id, .. } | ServiceEvent::FileOpFailed { id, .. } => Some(*id),
+            ServiceEvent::FileOp(FileOpEvent::Done { id, .. } | FileOpEvent::Failed { id, .. }) => Some(*id),
             _ => None,
         })
         .await;
@@ -433,8 +433,10 @@ async fn a_connection_dropped_mid_delete_fails_it_with_connection_lost() {
     let start = fx.sign_in().await;
     fx.op(1, FileOp::Delete { paths: vec![start.join("big")] });
     // Once removing has begun, the network drops.
-    fx.until("removal progress", |ev| matches!(ev, ServiceEvent::FileOpProgress { total: Some(_), .. }).then_some(()))
-        .await;
+    fx.until("removal progress", |ev| {
+        matches!(ev, ServiceEvent::FileOp(FileOpEvent::Progress { total: Some(_), .. })).then_some(())
+    })
+    .await;
     // (Here the whole delete takes about a second; the drop ends it within ~0.1 s.)
     std::fs::write(fx.dir.path().join("drop"), "").unwrap();
     assert_eq!(fx.op_end(1).await, Err(Error::ConnectionLost));

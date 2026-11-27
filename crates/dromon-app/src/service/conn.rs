@@ -44,7 +44,7 @@ use super::transfers::EngineMsg;
 use super::wake::{ProbeGate, Why};
 use super::windows::{Route, Watch, status_of};
 use super::{Config, Sink};
-use crate::state::{FileOp, OpId, SearchId, ServiceEvent, SizeId, WindowId};
+use crate::state::{FileOp, FileOpEvent, OpId, SearchId, ServiceEvent, SizeId, WindowId};
 
 /// Entries per listing page (§4.4).
 pub const PAGE: usize = 512;
@@ -53,31 +53,31 @@ const DRAIN: Duration = Duration::from_millis(300);
 
 /// What the manager sends a connection; the window is the one the command came from.
 pub enum ConnCmd {
-    Connect(WindowId, HostSpec),
-    List(WindowId, RemotePath),
     Answer(WindowId, PromptId, PromptAnswer),
-    /// The window's Sign in: the host's open prompts, shown there.
-    ShowPrompts(WindowId),
-    Disconnect,
-    FileOp(OpId, FileOp),
-    /// How the window shows now (`windows.rs`).
-    Window(WindowId, Visibility),
-    /// Poll the window's folder on screen now, if it's polled at all (it gained focus).
-    PollNow(WindowId),
     /// The window closed.
     Closed(WindowId),
-    /// The computer woke from sleep (`wake.rs`).
-    Wake,
+    Connect(WindowId, HostSpec),
+    Disconnect,
+    FileOp(OpId, FileOp),
     /// A window gained focus: check the session, at most every 30 s.
     Focus,
-    /// Run ssh with `-v` or without from now on (`Command::Verbose`).
-    Verbose(bool),
-    /// A folder size walk for the window, or stopping one (`sizes.rs`).
-    Size(WindowId, SizeCmd),
-    /// A search in subfolders for the window, or stopping one (`search.rs`).
-    Search(WindowId, SearchCmd),
+    List(WindowId, RemotePath),
     /// Watch folders live or not from now on (`Command::LiveUpdates`).
     Live(bool),
+    /// Poll the window's folder on screen now, if it's polled at all (it gained focus).
+    PollNow(WindowId),
+    /// A search in subfolders for the window, or stopping one (`search.rs`).
+    Search(WindowId, SearchCmd),
+    /// The window's Sign in: the host's open prompts, shown there.
+    ShowPrompts(WindowId),
+    /// A folder size walk for the window, or stopping one (`sizes.rs`).
+    Size(WindowId, SizeCmd),
+    /// Run ssh with `-v` or without from now on (`Command::Verbose`).
+    Verbose(bool),
+    /// The computer woke from sleep (`wake.rs`).
+    Wake,
+    /// How the window shows now (`windows.rs`).
+    Window(WindowId, Visibility),
 }
 
 /// What the connection tasks share: configuration, the askpass endpoint, the password store,
@@ -279,7 +279,10 @@ impl<S: Sink> Task<S> {
     fn file_op(&mut self, id: OpId, op: FileOp) {
         match self.sftp() {
             Some(sftp) => self.ops.start(id, op, &sftp, self.epoch, &self.host, &self.sink),
-            None => self.emit(ServiceEvent::FileOpFailed { id, host: self.host.clone(), error: Error::ConnectionLost }),
+            None => {
+                let ev = FileOpEvent::Failed { id, host: self.host.clone(), error: Error::ConnectionLost };
+                self.emit(ServiceEvent::FileOp(ev));
+            }
         }
     }
 
@@ -291,10 +294,10 @@ impl<S: Sink> Task<S> {
         let host = self.host.clone();
         let ok = result.is_ok();
         let lost = matches!(result, Err(Error::ConnectionLost));
-        match result {
-            Ok(()) => self.emit(ServiceEvent::FileOpDone { id, host: host.clone() }),
-            Err(error) => self.emit(ServiceEvent::FileOpFailed { id, host: host.clone(), error }),
-        }
+        self.emit(ServiceEvent::FileOp(match result {
+            Ok(()) => FileOpEvent::Done { id, host: host.clone() },
+            Err(error) => FileOpEvent::Failed { id, host: host.clone(), error },
+        }));
         let drop_session = lost && epoch == self.epoch && self.sftp().is_some();
         if drop_session {
             self.drive(Event::Lost, None).await;

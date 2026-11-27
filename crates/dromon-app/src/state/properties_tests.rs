@@ -8,7 +8,7 @@ use dromon_core::{ConnStatus, Entry, EntryKind, Error, HostId, LinkTarget, Promp
 use super::*;
 use crate::fixture;
 use crate::state::menu::MenuKind;
-use crate::state::{Action, App, FileAction, Recorder, Sheet};
+use crate::state::{Action, App, FileAction, Recorder, ServiceEvent, Sheet};
 
 fn prod() -> HostId {
     HostId("prod".into())
@@ -47,10 +47,7 @@ fn view(s: &App) -> &PropertiesView {
 }
 
 fn sizes_sent(rec: &Recorder) -> Vec<Command> {
-    rec.sent()
-        .into_iter()
-        .filter(|c| matches!(c, Command::FolderSize { .. } | Command::CancelFolderSize { .. }))
-        .collect()
+    rec.sent().into_iter().filter(|c| matches!(c, Command::FolderSize(_))).collect()
 }
 
 fn total(bytes: u64, files: u64, folders: u64, unreadable: u64) -> SizeTotal {
@@ -60,21 +57,21 @@ fn total(bytes: u64, files: u64, folders: u64, unreadable: u64) -> SizeTotal {
 #[test]
 fn the_size_machine_runs_one_walk_at_a_time_and_ignores_stale_answers() {
     let mut phase = SizePhase::Idle;
-    assert!(!step(&mut phase, SizeEvent::Progress(SizeId(1), total(1, 1, 0, 0))), "nothing is running");
-    assert!(step(&mut phase, SizeEvent::Start(SizeId(1))));
+    assert!(!step(&mut phase, SizeStep::Progress(SizeId(1), total(1, 1, 0, 0))), "nothing is running");
+    assert!(step(&mut phase, SizeStep::Start(SizeId(1))));
     assert_eq!(phase, SizePhase::Calculating { id: SizeId(1), found: SizeTotal::default() });
-    assert!(!step(&mut phase, SizeEvent::Start(SizeId(2))), "one walk at a time");
-    assert!(step(&mut phase, SizeEvent::Progress(SizeId(1), total(10, 2, 1, 0))));
-    assert!(!step(&mut phase, SizeEvent::Done(SizeId(9), total(0, 0, 0, 0))), "another walk's answer");
+    assert!(!step(&mut phase, SizeStep::Start(SizeId(2))), "one walk at a time");
+    assert!(step(&mut phase, SizeStep::Progress(SizeId(1), total(10, 2, 1, 0))));
+    assert!(!step(&mut phase, SizeStep::Done(SizeId(9), total(0, 0, 0, 0))), "another walk's answer");
     assert_eq!(phase, SizePhase::Calculating { id: SizeId(1), found: total(10, 2, 1, 0) });
-    assert!(step(&mut phase, SizeEvent::Done(SizeId(1), total(30, 3, 1, 1))));
+    assert!(step(&mut phase, SizeStep::Done(SizeId(1), total(30, 3, 1, 1))));
     assert_eq!(phase, SizePhase::Done { total: total(30, 3, 1, 1) });
-    assert!(!step(&mut phase, SizeEvent::Progress(SizeId(1), total(1, 1, 1, 1))), "late progress after the end");
+    assert!(!step(&mut phase, SizeStep::Progress(SizeId(1), total(1, 1, 1, 1))), "late progress after the end");
     // Recalculate, and a failure.
-    assert!(step(&mut phase, SizeEvent::Start(SizeId(2))));
-    assert!(step(&mut phase, SizeEvent::Failed(SizeId(2), total(5, 1, 0, 0), Error::ConnectionLost)));
+    assert!(step(&mut phase, SizeStep::Start(SizeId(2))));
+    assert!(step(&mut phase, SizeStep::Failed(SizeId(2), total(5, 1, 0, 0), Error::ConnectionLost)));
     assert_eq!(phase, SizePhase::Failed { total: total(5, 1, 0, 0), error: Error::ConnectionLost });
-    assert!(step(&mut phase, SizeEvent::Start(SizeId(3))), "and again after a failure");
+    assert!(step(&mut phase, SizeStep::Start(SizeId(3))), "and again after a failure");
 }
 
 fn entry(kind: EntryKind, mode: Option<u32>) -> Entry {
@@ -168,15 +165,15 @@ fn calculate_shows_progress_then_the_total() {
     assert_eq!(id.0 >> 32, u64::from(s.window.0), "numbered in this window's own range");
     assert_eq!(
         sizes_sent(&rec),
-        [Command::FolderSize { id, host: prod(), path: RemotePath::new("/var/www/site/releases") }]
+        [Command::FolderSize(SizeCommand::Start { id, host: prod(), path: RemotePath::new("/var/www/site/releases") })]
     );
     assert!(!s.can_calculate(), "not twice at once");
     file(&mut s, FileAction::Calculate);
     assert_eq!(sizes_sent(&rec).len(), 1);
 
-    s.apply(ServiceEvent::FolderSizeProgress { id, host: prod(), total: total(14_812, 1, 2, 0) });
+    s.apply(ServiceEvent::FolderSize(SizeEvent::Progress { id, host: prod(), total: total(14_812, 1, 2, 0) }));
     assert_eq!(view(&s).size, SizePhase::Calculating { id, found: total(14_812, 1, 2, 0) });
-    s.apply(ServiceEvent::FolderSizeDone { id, host: prod(), total: total(303_365, 3, 4, 0) });
+    s.apply(ServiceEvent::FolderSize(SizeEvent::Done { id, host: prod(), total: total(303_365, 3, 4, 0) }));
     assert_eq!(view(&s).size, SizePhase::Done { total: total(303_365, 3, 4, 0) });
 
     // Recalculate: a new walk with a new id; closing after it ended cancels nothing.
@@ -184,12 +181,12 @@ fn calculate_shows_progress_then_the_total() {
     file(&mut s, FileAction::Calculate);
     let again = view(&s).walking().expect("walking again");
     assert_ne!(again, id);
-    s.apply(ServiceEvent::FolderSizeFailed {
+    s.apply(ServiceEvent::FolderSize(SizeEvent::Failed {
         id: again,
         host: prod(),
         total: total(9, 1, 0, 0),
         error: Error::ConnectionLost,
-    });
+    }));
     assert_eq!(view(&s).size, SizePhase::Failed { total: total(9, 1, 0, 0), error: Error::ConnectionLost });
     s.act(Action::DismissSheet);
     assert_eq!(sizes_sent(&rec).len(), 2, "nothing to cancel: {:?}", sizes_sent(&rec));
@@ -202,16 +199,16 @@ fn closing_the_sheet_cancels_its_walk_once() {
     file(&mut s, FileAction::Calculate);
     let id = view(&s).walking().unwrap();
     s.act(Action::DismissSheet);
-    assert_eq!(sizes_sent(&rec).last(), Some(&Command::CancelFolderSize { id, host: prod() }));
+    assert_eq!(sizes_sent(&rec).last(), Some(&Command::FolderSize(SizeCommand::Cancel { id, host: prod() })));
     // Its late answers are ignored, and nothing is cancelled twice.
-    s.apply(ServiceEvent::FolderSizeProgress { id, host: prod(), total: total(1, 1, 0, 0) });
-    s.apply(ServiceEvent::FolderSizeDone { id, host: prod(), total: total(1, 1, 0, 0) });
+    s.apply(ServiceEvent::FolderSize(SizeEvent::Progress { id, host: prod(), total: total(1, 1, 0, 0) }));
+    s.apply(ServiceEvent::FolderSize(SizeEvent::Done { id, host: prod(), total: total(1, 1, 0, 0) }));
     assert!(!s.ui.sheets.is_open());
     click(&mut s, "index.html");
     assert_eq!(sizes_sent(&rec).len(), 2);
     // A stale answer doesn't touch the next sheet either.
     opened(&mut s, "releases");
-    s.apply(ServiceEvent::FolderSizeDone { id, host: prod(), total: total(1, 1, 0, 0) });
+    s.apply(ServiceEvent::FolderSize(SizeEvent::Done { id, host: prod(), total: total(1, 1, 0, 0) }));
     assert_eq!(view(&s).size, SizePhase::Idle);
 }
 
@@ -224,7 +221,7 @@ fn a_prompt_or_a_disconnect_taking_the_sheet_away_cancels_its_walk() {
     let prompt = Prompt { id: PromptId(7), host: prod(), kind: PromptKind::Password, text: "pw: ".into(), error: None };
     s.apply(ServiceEvent::Prompt(prompt));
     assert!(matches!(s.ui.sheets.open(), Some(Sheet::Ask { .. })), "ssh's question comes first");
-    assert_eq!(sizes_sent(&rec).last(), Some(&Command::CancelFolderSize { id, host: prod() }));
+    assert_eq!(sizes_sent(&rec).last(), Some(&Command::FolderSize(SizeCommand::Cancel { id, host: prod() })));
 
     let (mut s, rec) = recorded();
     opened(&mut s, "releases");
@@ -232,7 +229,7 @@ fn a_prompt_or_a_disconnect_taking_the_sheet_away_cancels_its_walk() {
     let id = view(&s).walking().unwrap();
     s.act(Action::Disconnect(prod()));
     assert!(!s.ui.sheets.is_open());
-    assert!(sizes_sent(&rec).contains(&Command::CancelFolderSize { id, host: prod() }));
+    assert!(sizes_sent(&rec).contains(&Command::FolderSize(SizeCommand::Cancel { id, host: prod() })));
 }
 
 #[test]
@@ -242,8 +239,8 @@ fn answers_for_another_host_or_walk_change_nothing() {
     file(&mut s, FileAction::Calculate);
     let id = view(&s).walking().unwrap();
     let nas = HostId("nas".into());
-    s.apply(ServiceEvent::FolderSizeDone { id, host: nas, total: total(1, 1, 0, 0) });
-    s.apply(ServiceEvent::FolderSizeDone { id: SizeId(id.0 + 1), host: prod(), total: total(1, 1, 0, 0) });
+    s.apply(ServiceEvent::FolderSize(SizeEvent::Done { id, host: nas, total: total(1, 1, 0, 0) }));
+    s.apply(ServiceEvent::FolderSize(SizeEvent::Done { id: SizeId(id.0 + 1), host: prod(), total: total(1, 1, 0, 0) }));
     assert_eq!(view(&s).walking(), Some(id), "still waiting for its own");
 }
 
