@@ -10,6 +10,11 @@
 //! phases are `state::transfers::Flourish`, stepped by [`poll`]. Under reduce motion the check
 //! is there at once and nothing pulses.
 //!
+//! The download-started animation (Chrome's, [`started`]): a download the user starts in this
+//! window sends an accent circle with the button's glyph from the middle of the content area
+//! up into the button, fading in, then out. Its phases are `state::transfers::Started`,
+//! stepped by [`poll`] with the flourishes. Under reduce motion it doesn't play.
+//!
 //! Outside the window ([`connect_os`], [`connect_window`]): the taskbar button's bar and badge
 //! (Windows), the Dock badge (macOS), and system notifications, from the effects of the leading
 //! main window's `state::transfers::Watch`. The flourish plays in every window.
@@ -19,8 +24,8 @@ use std::sync::mpsc;
 
 use dromon_transfer::{JobId, JobKind, JobView, Reveal, TaskState, format_bytes, progress_line};
 use rune::{
-    Align, AppHandle, Beat, Color, Easing, El, LineCap, MotionIntent, ScrollSpec, Sequence, Shape, Side, Taskbar,
-    TaskbarProgress, Transition, Tx, WindowHandle, canvas, col, el, icon, row, text,
+    Align, AppHandle, Beat, Color, Cx, Easing, El, LineCap, LoopSpec, MotionIntent, ScrollSpec, Sequence, Shape, Side,
+    Taskbar, TaskbarProgress, Transition, Tx, WindowHandle, canvas, col, el, icon, row, text,
 };
 
 use super::widgets::Keyboard;
@@ -28,7 +33,7 @@ use super::{Paint, run};
 use crate::fmt;
 use crate::icons::{self, IconPair};
 use crate::service::RuneSink;
-use crate::state::transfers::{Bar, Dock, Flourish, Notice, OsEffect, PULSE};
+use crate::state::transfers::{Bar, Dock, Flourish, Notice, OsEffect, PULSE, STARTED};
 use crate::state::{Action, App, Tab, TransferCommand};
 use crate::theme::{motion, radius, size, space, type_};
 
@@ -47,6 +52,8 @@ const DETAIL_LINES: usize = 8;
 
 /// The key of the toolbar button, which the popover hangs from.
 pub const BUTTON: &str = "tb-transfers";
+/// The toolbar button's width and height.
+const BUTTON_SIZE: f32 = 28.0;
 
 /// The toolbar's transfers button. Idle, it's the plain glyph (as quiet as a disabled button
 /// until the session has any job); with jobs running, the glyph sits in a ring of their
@@ -62,7 +69,7 @@ pub fn button(s: &App, p: Paint) -> El {
         .role("button")
         .label(label)
         .expanded(tr.open)
-        .size(28.0, 28.0)
+        .size(BUTTON_SIZE, BUTTON_SIZE)
         .radius(radius::ROW)
         .center()
         .hover(t.hover)
@@ -146,6 +153,86 @@ fn pulse(p: Paint, n: u32) -> El {
         .sequence(Sequence::new(PULSE_BEATS))
         .motion_intent(MotionIntent::PULSE)
         .a11y_hidden()
+}
+
+/// The download-started circle's diameter and its glyph's size.
+const STARTED_SIZE: f32 = 48.0;
+const STARTED_GLYPH: f32 = 20.0;
+/// How far below the button the rise ends, and how much room the content area needs for the
+/// animation to play at all (the circle and this much), as Chrome has it.
+const STARTED_GAP: f32 = 40.0;
+/// Where the rise ends: the circle centred [`STARTED_GAP`] below the button's bottom, this far
+/// below its centre.
+const STARTED_TURN: f32 = BUTTON_SIZE / 2.0 + STARTED_GAP;
+/// The rise's share of [`STARTED`] (Chrome's 60 %), in seconds.
+const STARTED_RISE: f64 = 0.3;
+
+/// The download-started animation after its rise ([`started`] carries the rise): it fades in
+/// on the way up, then goes into the button as it fades out, at an even speed throughout.
+const STARTED_BEATS: &[Beat] = &[
+    Beat::new(0.0).opacity(0.0),
+    Beat::new(STARTED_RISE).opacity(1.0).easing(Easing::LINEAR),
+    Beat::new(STARTED).opacity(0.0).translate(0.0, -STARTED_TURN).easing(Easing::LINEAR),
+];
+
+/// Where the download-started animation flies, from the laid-out window (in window points):
+/// the button's centre, and the middle of the content area between the toolbar and the
+/// status bar.
+#[derive(Clone, Copy, Debug)]
+pub struct Flight {
+    x: f32,
+    button: f32,
+    from: f32,
+}
+
+/// The [`Flight`] of the download-started animation while one plays, `None` when the content
+/// area hasn't room for it. Read only then, so layout changes don't re-run the view otherwise.
+pub fn flight(s: &App, cx: &Cx<App>) -> Option<Flight> {
+    s.transfers.flourish.started()?;
+    // All three every time: the first run doesn't know them yet, and a commit re-runs the view
+    // only twice more for reads it hasn't seen, so stopping at the first unknown one would
+    // leave the last one unread.
+    let (button, top, bottom) =
+        (cx.layout(BUTTON), cx.layout_with("toolbar", |r| r[1] + r[3]), cx.layout_with("status", |r| r[1]));
+    let (b, top, bottom) = (button?, top?, bottom?);
+    let roomy = bottom - top >= STARTED_SIZE + STARTED_GAP;
+    roomy.then_some(Flight { x: b[0] + b[2] / 2.0, button: b[1] + b[3] / 2.0, from: (top + bottom) / 2.0 })
+}
+
+/// Download-started animation `n` (each one a new element, so each plays), on its `flight`
+/// over the main column, x fixed on the button's centre. Under reduce motion nothing plays.
+/// Decoration: never focused, never read, and the pointer passes through it.
+pub fn started(s: &App, p: Paint, flight: Option<Flight>) -> Option<El> {
+    let n = s.transfers.flourish.started().filter(|_| !p.reduced)?;
+    let f = flight?;
+    let half = STARTED_SIZE / 2.0;
+    let turn = f.button + STARTED_TURN;
+    // Beats are fixed, and how far the rise goes is the window's: a slide, in the carrier's
+    // own heights, takes it from the content area's middle up to the turn; the beats do the
+    // rest.
+    let rise = LoopSpec::slide(STARTED_RISE, [0.0, (f.from - turn) / STARTED_SIZE], [0.0, 0.0]).easing(Easing::LINEAR);
+    let circle = el()
+        .size(STARTED_SIZE, STARTED_SIZE)
+        .radius(half)
+        .center()
+        .fill(p.t.accent)
+        .sequence(Sequence::new(STARTED_BEATS))
+        .child(icon(icons::DOWNLOAD.at(p.scale), STARTED_GLYPH).color(p.t.on_accent));
+    let carrier = el()
+        .key(format!("tb-started-{n}"))
+        // At rest on whole points, its glyph on the pixel grid where it turns.
+        .absolute((f.x - half).round(), (turn - half).round())
+        .size(STARTED_SIZE, STARTED_SIZE)
+        .looping(rise)
+        .loop_times(1)
+        // It shows whole as it mounts (the beats fade it) and is gone the frame it ends.
+        .transition(Transition::none())
+        // An even speed that changes at the turn, and a fade in and out.
+        .motion_intent(MotionIntent::IMPULSE | MotionIntent::PULSE)
+        .inert()
+        .a11y_hidden()
+        .child(circle);
+    Some(carrier)
 }
 
 /// `top` drawn over `bottom` as the screen blends them (in sRGB), as one opaque colour.

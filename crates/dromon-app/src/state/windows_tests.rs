@@ -206,6 +206,19 @@ fn running_job() -> JobView {
 }
 
 #[test]
+fn a_download_plays_the_started_animation_only_in_the_window_that_started_it() {
+    let (mut a, peers) = first();
+    a.act(Action::SelectHost(prod()));
+    let mut b = second(&mut a, &peers);
+    b.act(Action::SelectHost(prod()));
+    let file = a.conn().unwrap().rows().find(|e| !e.kind.is_dir_like()).unwrap().name.clone();
+    a.act(Action::Open(file));
+    b.catch_up();
+    assert_eq!(b.transfers.jobs.len(), 1, "b shows the job");
+    assert_eq!((a.transfers.flourish.started(), b.transfers.flourish.started()), (Some(1), None));
+}
+
+#[test]
 fn only_the_last_window_asks_before_closing_with_transfers_running() {
     let (mut a, peers) = first();
     let mut b = second(&mut a, &peers);

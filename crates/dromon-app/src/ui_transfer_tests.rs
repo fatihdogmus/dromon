@@ -501,6 +501,65 @@ fn the_conflict_sheet_shows_both_sizes_and_dates_and_says_which_is_newer() {
     assert!(!shown(&rt, "conflict-sides") && shown(&rt, "conflict-replace") && shown(&rt, "conflict-explain"));
 }
 
+/// The horizontal centre of `k`'s rect.
+fn centre_x(rt: &Runtime<App>, k: &str) -> f32 {
+    let r = get(rt, k).rect;
+    r[0] + r[2] / 2.0
+}
+
+/// ⌘D on robots.txt, and one frame.
+fn download_robots(rt: &mut Runtime<App>) {
+    click(rt, "rows/robots.txt");
+    rt.key(KeyEvent { key: Key::Command('d'), mods: primary() });
+    rt.frame(1.0 / 60.0);
+}
+
+#[test]
+fn a_download_sends_a_circle_from_the_list_up_into_the_transfers_button() {
+    let mut rt = runtime();
+    download_robots(&mut rt);
+    let first = get(&rt, "tb-started-1");
+    assert!((centre_x(&rt, "tb-started-1") - centre_x(&rt, "tb-transfers")).abs() <= 0.5, "on the button's centre");
+    // From the middle of the content area, between the toolbar and the status bar.
+    let (toolbar, status) = (get(&rt, "toolbar").rect, get(&rt, "status").rect);
+    let middle = (toolbar[1] + toolbar[3] + status[1]) / 2.0;
+    assert!((first.rect[1] + first.rect[3] / 2.0 - middle).abs() <= 1.0, "{:?} from {middle}", first.rect);
+    assert!(first.inert, "the pointer passes through it");
+    let read = crate::ui_a11y_tests::tree(&rt);
+    assert!(!read.iter().any(|n| n.key.starts_with("tb-started")), "screen readers don't hear it");
+    // It rises at an even x, toward the button.
+    let mut y = first.rect[1];
+    for _ in 0..20 {
+        rt.frame(1.0 / 60.0);
+        let e = get(&rt, "tb-started-1");
+        assert!(e.rect[1] <= y, "it only rises ({} after {y})", e.rect[1]);
+        assert!((centre_x(&rt, "tb-started-1") - centre_x(&rt, "tb-transfers")).abs() <= 0.5);
+        y = e.rect[1];
+    }
+    assert!(y < first.rect[1], "it moved");
+    // Half a second in, it's gone.
+    for _ in 0..12 {
+        rt.frame(1.0 / 60.0);
+    }
+    assert!(!rt.elements().iter().any(|e| e.key.as_deref() == Some("tb-started-1")), "gone");
+    assert_eq!(rt.state.transfers.flourish.started(), None);
+}
+
+#[test]
+fn under_reduce_motion_a_download_sends_nothing_flying() {
+    for (forced, system) in [(true, false), (false, true)] {
+        let mut rt = runtime();
+        rt.set_system_reduced_motion(system);
+        rt.update(move |s, _| s.ui.access.reduce_motion = forced);
+        download_robots(&mut rt);
+        assert_eq!(rt.state.transfers.flourish.started(), Some(1), "it's the view that keeps still");
+        for _ in 0..40 {
+            assert!(!rt.elements().iter().any(|e| e.key.as_deref() == Some("tb-started-1")), "({forced}, {system})");
+            rt.frame(1.0 / 60.0);
+        }
+    }
+}
+
 #[test]
 fn a_clash_waits_in_the_open_popover_until_resolve_brings_its_sheet() {
     let (mut rt, rec) = recorded();

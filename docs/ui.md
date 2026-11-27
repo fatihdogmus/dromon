@@ -247,6 +247,10 @@ All motion is interruptible and respects reduce motion.
   (`UiState::access`); `views::view` marks the commit with `Cx::reduced_motion`, and Rune turns
   travel into instant changes and opacity cross-fades. A view that picks a spring itself reads
   `Paint::reduced`.
+- A one-shot choreography (the ring's pulse, the download-started animation) is a `Sequence`
+  of `Beat`s on a new keyed element per play. Beats are static, so travel whose length is the
+  window's goes in a finite `LoopSpec::slide` (in fractions of the element's own size) on a
+  carrier around it, read from `Cx::layout` while it plays.
 - Increased contrast and reduce transparency switch tokens (`theme::tokens_for`), not views.
 
 ### Agent checklist
