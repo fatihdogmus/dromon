@@ -106,6 +106,43 @@ fn the_empty_areas_menu() {
     );
 }
 
+#[test]
+fn the_add_menu_uploads_files_or_a_folder_or_makes_a_folder() {
+    let mut s = demo();
+    let add = MenuKind::Add;
+    assert_eq!(shape(&s, &add), [("upload-files", true), ("upload-folder", true), ("new-folder", true)]);
+    let items: Vec<MenuItem> = s.menu(&add).into_iter().filter_map(|e| e.item().cloned()).collect();
+    let shown: Vec<_> = items.iter().map(|i| (i.title, i.shortcut)).collect();
+    assert_eq!(
+        shown,
+        [("Upload files…", Some("mod+u")), ("Upload folder…", None), ("New folder", Some("mod+shift+n"))],
+        "the same chords as ⌘U and ⌘⇧N"
+    );
+    assert_eq!(s.menu_action(&add, "upload-files"), Some(Action::PickUpload));
+    assert_eq!(s.menu_action(&add, "upload-folder"), Some(Action::PickUploadFolder));
+    assert_eq!(s.menu_action(&add, "new-folder"), Some(Action::File(FileAction::NewFolder)));
+    // Picking runs it, as ⌘U and the palette do, and closes the drawn menu.
+    s.act(Action::File(FileAction::OpenMenu { kind: add.clone(), at: Some((120.0, 46.0)) }));
+    let fx = s.act(Action::File(FileAction::Pick { kind: add.clone(), id: "upload-files".into() }));
+    assert_eq!(fx, s.act(Action::PickUpload));
+    assert_eq!(fx, [Effect::PickUpload { folder: "site".into() }]);
+    assert!(s.files.menu.is_none());
+    let fx = s.act(Action::File(FileAction::Pick { kind: add.clone(), id: "upload-folder".into() }));
+    assert_eq!(fx, [Effect::PickUploadFolder { folder: "site".into() }]);
+    s.act(Action::File(FileAction::Pick { kind: add.clone(), id: "new-folder".into() }));
+    assert!(s.files.edit.field().is_some(), "the new folder's field");
+    // Reconnecting: all three are off and do nothing.
+    s.act(Action::File(FileAction::EditCancel));
+    s.apply(ServiceEvent::Status { host: prod(), status: ConnStatus::Reconnecting { attempt: 1 } });
+    assert_eq!(shape(&s, &add), [("upload-files", false), ("upload-folder", false), ("new-folder", false)]);
+    for id in ["upload-files", "upload-folder", "new-folder"] {
+        assert_eq!(s.menu_action(&add, id), None, "{id}");
+    }
+    // No host on screen: off too.
+    let welcome = fixture::app(fixture::demo());
+    assert!(shape(&welcome, &add).iter().all(|(_, on)| !on));
+}
+
 /// The effect every "Open in Terminal" asks for, on prod (an ssh-config host) in `folder`.
 fn terminal_at(s: &App, folder: &str) -> Vec<Effect> {
     vec![Effect::OpenTerminal {

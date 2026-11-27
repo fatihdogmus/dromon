@@ -172,6 +172,13 @@ pub static SEARCH: IconPair = pair!(
 );
 pub static PLUS: IconPair =
     pair!("dromon-plus", r#"<path d="M7.5 3V12M3 7.5H12"/>"#, r#"<path d="M7.75 3.25V12.25M3.25 7.75H12.25"/>"#);
+/// The toolbar's add button's plus, on an accent fill: arms twice the set's weight (2 pt at 1×,
+/// 3 pt at 2×), centred on whole points so both edges sit on pixels, as `FILE_PDF`'s bar.
+pub static PLUS_BOLD: IconPair = pair!(
+    "dromon-plus-bold",
+    r#"<path d="M8 4V12M4 8H12" stroke-width="2"/>"#,
+    r#"<path d="M8 4V12M4 8H12" stroke-width="3"/>"#
+);
 pub static CLOSE: IconPair =
     pair!("dromon-close", r#"<path d="M5 5L11 11M11 5L5 11"/>"#, r#"<path d="M5 5L11 11M11 5L5 11"/>"#);
 pub static DOWNLOAD: IconPair = pair!(
@@ -183,6 +190,12 @@ pub static UPLOAD: IconPair = pair!(
     "dromon-upload",
     r#"<path d="M7.5 10.5V3M4 6.5L7.5 3L11 6.5M2.5 13.5H12.5"/>"#,
     r#"<path d="M7.75 10.5V3M4.25 6.5L7.75 3L11.25 6.5M2.75 13.75H12.75"/>"#
+);
+/// The transfers button's glyph (⇅): an up arrow beside a down arrow, both ways at once.
+pub static TRANSFERS: IconPair = pair!(
+    "dromon-transfers",
+    r#"<path d="M5.5 13V3.5M3 6L5.5 3.5L8 6M10.5 3V12.5M8 10L10.5 12.5L13 10"/>"#,
+    r#"<path d="M5.25 13V3.5M2.75 6L5.25 3.5L7.75 6M10.75 3V12.5M8.25 10L10.75 12.5L13.25 10"/>"#
 );
 pub static GEAR: IconPair = pair!(
     "dromon-gear",

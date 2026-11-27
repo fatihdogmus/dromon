@@ -149,6 +149,10 @@ in tests and headless runs, so goldens, flows and tests see the drawn menu on ev
 ### Rules and examples
 
 - Add an item to the model once; both paths show it. Item keys are `ctx-<id>`.
+- A context menu opens at the pointer (Shift+F10 and the Menu key: under the cursor row). A menu
+  button, the toolbar's add button (`MenuKind::Add`: Upload files…, Upload folder…, New folder),
+  opens its menu under itself (`views::menu::open_under`) on a click, Space or Return; from the
+  keyboard the first item has focus, and Escape gives it back to the button.
 - Items that change the server, and Open in Terminal, are disabled while the host isn't
   connected; Paste also needs a clip; Edit also needs a file quick preview reads as text.
 - Shortcut hints are chord specs (`mod+c`, `mod+shift+n`, `mod+alt+c`) rendered by
@@ -416,7 +420,7 @@ Writing a script that drives the app.
 
 | Area | Keys |
 | --- | --- |
-| Hosts and navigation | `host-<alias>` (a recent host's id is `[user@]host:port`), `rows/<name>`, `crumb-<n>`, `col-Name`, `col-Size`, `tb-back`, `tb-forward` |
+| Hosts and navigation | `host-<alias>` (a recent host's id is `[user@]host:port`), `rows/<name>`, `crumb-<n>`, `col-Name`, `col-Size`, `tb-back`, `tb-forward`, the add button `tb-upload` (its menu `ctx-menu`: `ctx-upload-files`, `ctx-upload-folder`, `ctx-new-folder`) |
 | Sheets and states | `sheet-input`, `sheet-submit`, `sheet-cancel`, `sheet-no`, `state-go-up`, `state-retry`, `state-show-log`, `status-conn`, `log-disconnect`, `log-close` |
 | Transfers | `tb-transfers`, `tr-tab-downloads`, `tr-tab-uploads`, `tr-<id>`, `tr-pause-<id>`, `tr-resume-<id>`, `tr-cancel-<id>`, `tr-retry-<id>`, `tr-resolve-<id>`, `tr-clear`; the conflict sheet's `conflict-replace`, `conflict-keep-both`, `conflict-skip`, `conflict-apply-all` |
 | Editing | the popover's section `editing`, rows `edit-<id>` (`edit-title-<id>`, `edit-line-<id>`), `edit-stop-<id>`, `edit-resolve-<id>`, `edit-retry-<id>`; the edit conflict sheet `edit-conflict` with `edit-conflict-replace`, `edit-conflict-discard`, `edit-conflict-keep-both`, `edit-conflict-server-*`, `edit-conflict-local-*`; a failed save's toast `toast-note-<n>-retry` |

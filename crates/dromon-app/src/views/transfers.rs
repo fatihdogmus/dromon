@@ -1,6 +1,6 @@
-//! Transfers (§6.8): the toolbar's transfers button (an arrow inside a progress ring over every
-//! active job, with a count badge) and the popover it opens (Downloads / Uploads tabs, one row
-//! per job, "Clear finished").
+//! Transfers (§6.8): the toolbar's transfers button (the transfers glyph, ⇅, inside a progress
+//! ring over every active job, with a count badge) and the popover it opens (Downloads / Uploads
+//! tabs, one row per job, "Clear finished").
 //!
 //! The ring is two half rings, each turned into view behind a clip as the fraction grows, so
 //! it sweeps on the `move` spring and retargets from wherever it is.
@@ -11,7 +11,7 @@
 //! is there at once and nothing pulses.
 //!
 //! The download-started animation (Chrome's, [`started`]): a download the user starts in this
-//! window sends an accent circle with the button's glyph from the middle of the content area
+//! window sends an accent circle with the download glyph from the middle of the content area
 //! up into the button, fading in, then out. Its phases are `state::transfers::Started`,
 //! stepped by [`poll`] with the flourishes. Under reduce motion it doesn't play.
 //!
@@ -91,7 +91,7 @@ pub fn button(s: &App, p: Paint) -> El {
     if let Some(n) = tr.flourish.pulse().filter(|_| !p.reduced) {
         b = b.child(pulse(p, n));
     }
-    b = b.child(icon(icons::DOWNLOAD.at(p.scale), size::ICON).color(glyph_color));
+    b = b.child(icon(icons::TRANSFERS.at(p.scale), size::ICON).color(glyph_color));
     if active > 0 {
         b = b.child(badge(p, active));
     }

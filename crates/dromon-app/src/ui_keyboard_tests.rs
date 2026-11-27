@@ -162,11 +162,11 @@ fn tab_walks_the_window_in_reading_order() {
         "host-prod",
         "sb-quick-connect",
         "sidebar-settings",
+        "tb-upload",
         "crumb-0",
         "crumb-1",
         "crumb-2",
         "tb-filter",
-        "tb-upload",
         "tb-transfers",
         "tb-palette",
         "col-Name",
@@ -255,6 +255,7 @@ fn popovers_menus_and_sheets_keep_tab_inside() {
         ("menu-row", scenes::menu_row, "ctx-menu"),
         ("menu-empty", scenes::menu_empty, "ctx-menu"),
         ("host-menu", scenes::host_menu, "ctx-menu"),
+        ("add-menu", scenes::add_menu, "ctx-menu"),
     ];
     for (name, start, modal) in modals {
         let order = walk(name, *start, Some(modal));
@@ -515,6 +516,31 @@ fn the_drawn_menu_moves_by_arrows_and_return_picks() {
     press(&mut rt, Key::Enter, Mods::default());
     assert!(rt.state.files.menu.is_none(), "Return picks and closes");
     assert!(rt.state.clip().is_some(), "Copy ran");
+}
+
+/// The add button is a menu button: Space or Return opens its menu on its first item, ↓ walks the
+/// items, Escape closes it and the keyboard is back on the button, with its ring.
+#[test]
+fn the_add_menu_opens_from_the_keyboard_and_escape_returns_to_the_button() {
+    for open in [Key::Text(" ".into()), Key::Enter] {
+        let mut rt = listing();
+        tab_to(&mut rt, "tb-upload");
+        press(&mut rt, open.clone(), Mods::default());
+        settle(&mut rt);
+        assert_eq!(rt.state.files.menu.as_ref().map(|m| &m.kind), Some(&MenuKind::Add), "{open:?} opens it");
+        assert_eq!(rt.state.conn().unwrap().cwd.as_str(), "/var/www/site", "{open:?} doesn't reach the list");
+        assert_eq!(focused_key(&rt), "ctx-upload-files", "{open:?}: the keyboard is on the first item");
+        press(&mut rt, Key::Down, Mods::default());
+        assert_eq!(focused_key(&rt), "ctx-upload-folder");
+        press(&mut rt, Key::Down, Mods::default());
+        assert_eq!(focused_key(&rt), "ctx-new-folder");
+        assert!(shows_focus(&rt, true), "the item is highlighted");
+        press(&mut rt, Key::Escape, Mods::default());
+        settle(&mut rt);
+        assert!(rt.state.files.menu.is_none(), "Escape closes it");
+        assert_eq!(focused_key(&rt), "tb-upload", "focus is back on the button");
+        assert!(shows_focus(&rt, true), "with its ring");
+    }
 }
 
 #[test]

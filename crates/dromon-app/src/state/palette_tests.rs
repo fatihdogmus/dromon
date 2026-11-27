@@ -115,12 +115,12 @@ fn actions_that_cant_run_now_are_hidden() {
             "pal-refresh",
             "pal-new-folder",
             "pal-upload",
+            "pal-upload-folder",
             "pal-copy-path",
             "pal-show-transfers",
-            "pal-hidden",
-            "pal-log"
+            "pal-hidden"
         ],
-        "nothing selected: no Download, Rename or Delete (and the cap of {MAX_ACTIONS} trims Disconnect, listed last)"
+        "nothing selected: no Download, Rename or Delete (and the cap of {MAX_ACTIONS} trims the log and Disconnect)"
     );
     s.act(Action::Click { name: "index.html".into(), extend: false, toggle: false });
     let a = actions(&s);
@@ -149,6 +149,29 @@ fn actions_that_cant_run_now_are_hidden() {
     // Disconnect names the host it closes.
     let disconnect = s.palette_items().into_iter().find(|i| i.key == "pal-disconnect").unwrap();
     assert_eq!((disconnect.detail.as_deref(), disconnect.action), (Some("prod"), Action::Disconnect(host("prod"))));
+}
+
+#[test]
+fn upload_folder_follows_upload_files_and_hides_with_it() {
+    let mut s = on_prod();
+    pal(&mut s, PaletteAction::Toggle);
+    let a = actions(&s);
+    let at = a.iter().position(|k| k == "pal-upload").expect("Upload files…");
+    assert_eq!(a[at + 1], "pal-upload-folder", "{a:?}");
+    let item = s.palette_items().into_iter().find(|i| i.key == "pal-upload-folder").unwrap();
+    assert_eq!((item.title.as_str(), item.shortcut, item.action), ("Upload folder…", None, Action::PickUploadFolder));
+    let fx = pal(&mut s, PaletteAction::Pick("pal-upload-folder".into()));
+    assert_eq!(fx, [Effect::Blur, Effect::PickUploadFolder { folder: "site".into() }]);
+    assert!(!s.ui.palette.is_open(), "running it closes the palette");
+    // Reconnecting, and with no host on screen: neither upload is listed.
+    s.apply(ServiceEvent::Status { host: host("prod"), status: ConnStatus::Reconnecting { attempt: 1 } });
+    pal(&mut s, PaletteAction::Toggle);
+    type_in(&mut s, "upload");
+    assert!(!keys(&s).iter().any(|k| k.starts_with("pal-upload")), "{:?}", keys(&s));
+    let mut none = demo();
+    pal(&mut none, PaletteAction::Toggle);
+    type_in(&mut none, "upload");
+    assert!(!keys(&none).iter().any(|k| k.starts_with("pal-upload")), "{:?}", keys(&none));
 }
 
 #[test]

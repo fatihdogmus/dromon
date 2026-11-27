@@ -631,3 +631,18 @@ fn picking_files_to_upload_asks_for_the_picker_only_while_interactive() {
     assert!(none.shortcut(crate::state::Shortcut::Upload, 0.0).is_empty());
     assert!(palette_upload(&mut none).is_none());
 }
+
+#[test]
+fn picking_a_folder_to_upload_asks_for_the_folder_picker_titled_for_the_folder_on_screen() {
+    let (mut s, rec) = connected();
+    assert_eq!(s.act(Action::PickUploadFolder), [Effect::PickUploadFolder { folder: "site".into() }]);
+    assert!(started(&rec).is_empty(), "asking uploads nothing");
+    // At the root the folder is the host's, as its breadcrumb names it.
+    s.act(Action::GoTo(RemotePath::new("/")));
+    assert_eq!(s.act(Action::PickUploadFolder), [Effect::PickUploadFolder { folder: "prod".into() }]);
+
+    s.conn_mut().unwrap().status = dromon_core::ConnStatus::Reconnecting { attempt: 1 };
+    assert!(s.act(Action::PickUploadFolder).is_empty(), "reconnecting");
+    let mut none = fixture::app(fixture::demo());
+    assert!(none.act(Action::PickUploadFolder).is_empty(), "no host on screen");
+}

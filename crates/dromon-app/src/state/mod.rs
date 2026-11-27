@@ -252,9 +252,12 @@ pub enum Action {
         paths: Vec<PathBuf>,
         folder: Option<String>,
     },
-    /// The toolbar's Upload button, ⌘U, the palette: ask for the native file picker
+    /// The toolbar's add menu, ⌘U, the palette: ask for the native file picker
     /// ([`Effect::PickUpload`]); what it picks goes to [`Action::Upload`].
     PickUpload,
+    /// The toolbar's add menu, the palette: ask for the native folder picker
+    /// ([`Effect::PickUploadFolder`]); the folder picked goes to [`Action::Upload`].
+    PickUploadFolder,
     /// A transfer row's buttons: pause, resume, cancel, retry, clear finished.
     Transfer(TransferCommand),
     /// The conflict sheet's buttons, for the clash on screen.
@@ -333,6 +336,9 @@ pub enum Effect {
     /// Open the native multi-file picker, titled for `folder` (the folder on screen); the files
     /// picked upload into it (`Action::Upload` with no folder).
     PickUpload { folder: String },
+    /// Open the native folder picker, titled for `folder` (the folder on screen); the folder
+    /// picked uploads into it, with all it holds (`Action::Upload` with no folder).
+    PickUploadFolder { folder: String },
     /// The preview panel opened: the keyboard goes into it.
     FocusPreview,
     /// The preview panel closed: the keyboard, if it was in it, goes back to the list.
@@ -645,6 +651,7 @@ impl App {
             Action::Download
             | Action::Upload { .. }
             | Action::PickUpload
+            | Action::PickUploadFolder
             | Action::Transfer(_)
             | Action::ResolveConflict(_)
             | Action::ToggleApplyAll
@@ -652,11 +659,7 @@ impl App {
             | Action::TransfersTab(_)
             | Action::RevealTransfer(_)
             | Action::DropHover { .. } => self.transfer_action(action, &mut fx),
-            Action::QuitAnyway => {
-                self.ui.confirm_quit = false;
-                self.ui.quit_approved = true;
-                fx.push(Effect::CloseWindow);
-            }
+            Action::QuitAnyway => self.quit_anyway(&mut fx),
             Action::CancelQuit => self.ui.confirm_quit = false,
             Action::File(a) => self.file_action(a, &mut fx),
             Action::Palette(a) => self.palette_action(a, &mut fx),
@@ -685,6 +688,13 @@ impl App {
         }
         self.ui.confirm_quit = true;
         false
+    }
+
+    /// The quit sheet's Quit: closing is approved, and the window closes (quitting the app).
+    fn quit_anyway(&mut self, fx: &mut Vec<Effect>) {
+        self.ui.confirm_quit = false;
+        self.ui.quit_approved = true;
+        fx.push(Effect::CloseWindow);
     }
 
     fn select_host(&mut self, host: HostId) {
