@@ -178,6 +178,14 @@ fn chosen_fixture() -> Result<Option<std::sync::Arc<fixture::Fixture>>, String> 
 /// Returns when the app quits.
 pub fn run() {
     rune::set_app_id("dromon");
+    // The brand kit's app icon on every window and the taskbar on Windows, and on the windows
+    // on Linux. macOS keeps the bundle's: Rune leaves the Dock alone until asked. The bytes are
+    // ours, checked by a test (`views/brand_tests.rs`).
+    #[cfg(not(target_os = "macos"))]
+    {
+        let set = rune::set_app_icon_choice(rune::AppIcon::Image(views::APP_ICON.to_vec()));
+        debug_assert!(set.is_ok(), "the embedded app icon: {set:?}");
+    }
     if let Err(msg) = choose_accent(rune::extra_args()) {
         eprintln!("dromon: {msg}");
         std::process::exit(2);

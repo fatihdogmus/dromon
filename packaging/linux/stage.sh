@@ -4,6 +4,7 @@
 #   usr/bin/dromon
 #   usr/share/applications/dromon.desktop
 #   usr/share/icons/hicolor/{16..512}x{16..512}/apps/dromon.png, scalable/apps/dromon.svg
+#                                               (the brand kit's assets/brand/linux/hicolor/, as is)
 #   usr/share/doc/dromon/copyright              (machine-readable, with the MIT and OFL texts)
 #   usr/share/doc/dromon/fonts/*.txt            (the embedded fonts' licenses, verbatim)
 #
@@ -18,10 +19,10 @@ root=${2:?usage: stage.sh <dromon binary> <root>}
 
 install -Dm755 "$bin" "$root/usr/bin/dromon"
 install -Dm644 "$PACKAGING_LINUX/dromon.desktop" "$root/usr/share/applications/dromon.desktop"
-for size in 16 32 48 64 128 256 512; do
-  install -Dm644 "$REPO_ROOT/packaging/icon/dromon-$size.png" "$root/usr/share/icons/hicolor/${size}x${size}/apps/dromon.png"
+hicolor="$REPO_ROOT/assets/brand/linux/hicolor"
+for icon in "$hicolor"/*/apps/dromon.*; do
+  install -Dm644 "$icon" "$root/usr/share/icons/hicolor/${icon#"$hicolor"/}"
 done
-install -Dm644 "$REPO_ROOT/packaging/icon/dromon.svg" "$root/usr/share/icons/hicolor/scalable/apps/dromon.svg"
 
 doc="$root/usr/share/doc/dromon"
 fonts="$REPO_ROOT/crates/dromon-app/assets/fonts"

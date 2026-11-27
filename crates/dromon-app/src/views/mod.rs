@@ -3,6 +3,7 @@
 //! handlers turn input into `state::Action`s and run them with [`run`].
 
 mod add_config;
+mod brand;
 mod conflict;
 mod delete;
 mod drag;
@@ -29,6 +30,9 @@ mod widgets;
 
 use rune::{ChromeInsets, Cx, El, Tx, col, row};
 
+/// The app's icon while it runs on Windows and Linux.
+#[cfg(any(not(target_os = "macos"), test))]
+pub use brand::APP_ICON;
 /// The native context menu for a menu's entries (tests read it).
 #[cfg(test)]
 pub use menu::popup as menu_popup;

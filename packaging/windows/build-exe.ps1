@@ -56,7 +56,7 @@ $Actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $Rcedit).Hash
 if ($Actual -ne $RceditSha256) { throw "rcedit's SHA-256 is $Actual, not $RceditSha256." }
 
 & $Rcedit $Exe `
-    --set-icon (Join-Path $Root 'packaging\icon\dromon.ico') `
+    --set-icon (Join-Path $Root 'assets\brand\windows\dromon.ico') `
     --set-file-version "$Numeric.0" `
     --set-product-version "$Numeric.0" `
     --set-version-string ProductName 'Dromon' `

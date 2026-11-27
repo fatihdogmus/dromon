@@ -1,7 +1,7 @@
 # Packaging Guide
 
 > Source: `packaging.md`
-> Purpose: How Dromon's installers are made: the `packaging/` tree, the icon, fixed identifiers and version numbers.
+> Purpose: How Dromon's installers are made: the `packaging/` tree, the icon (from the brand kit in `assets/brand/`), fixed identifiers and version numbers.
 
 ## Field contract
 
@@ -42,8 +42,6 @@ Finding the script or source of an installer.
 
 ```
 packaging/
-├─ icon/        dromon.svg (vector source), generate.py (renders the rest; fails if the SVG
-│               drifted), dromon-{16…1024}.png, dromon.ico (Windows), dromon.icns (macOS)
 ├─ linux/       common.sh (version, ELF arch, maintainer, dlopen table check), stage.sh (the
 │               /usr tree), build-deb.sh (dpkg-deb; Depends from dpkg-shlibdeps +
 │               dlopen-libs.txt + openssh-client), build-arch.sh (makepkg in
@@ -59,6 +57,12 @@ packaging/
 └─ update/      release-key.pub (the minisign key the app's updater trusts, built in)
 ```
 
+- The icons come from the brand kit, `assets/brand/` (its `BRAND.md` says which file is for
+  what): `build-app.sh` copies `macos/Dromon.icns` into the bundle (`CFBundleIconFile`
+  `Dromon`), `build-exe.ps1` stamps `windows/dromon.ico` into `dromon.exe` and `build-msi.ps1`
+  gives it to the MSI, and `stage.sh` installs `linux/hicolor/` as it is. The app sets
+  `png/app-icon/dromon-256.png` as its window and taskbar icon on Windows and Linux at run time
+  (`rune::set_app_icon_choice`); macOS keeps the bundle's.
 - `scripts/package-linux.sh` (`cargo package-linux`) builds the Linux binary, in an
   `ubuntu:22.04` container by default so it needs only glibc 2.35, and runs `build-deb.sh` and
   `build-arch.sh`; `--verify` installs the results in clean containers.
@@ -133,24 +137,30 @@ One version, written once, in every format's own spelling.
 
 ## Recipe: Change the Icon
 
-**Scope:** `packaging/icon/`
+**Scope:** `assets/brand/`
 
 ### Use when
 
-Changing the app icon's shapes or colours.
+Changing the app icon, the marks or the lockup: shapes, colours or sizes.
 
 ### Steps
 
-1. Change the shapes in `icon/generate.py`.
-2. Rewrite the vector source: `python3 packaging/icon/generate.py --svg`.
-3. Render everything else: `python3 packaging/icon/generate.py`.
-4. Commit the source and every output together, rendered with the same Pillow version, so the
-   bytes are reproducible.
+1. Change `assets/brand/tools/build_logo.py`, the kit's one generator. Never edit, recolour or
+   crop its outputs by hand; a size or format the kit lacks is added there too.
+2. Rebuild the kit: `cargo brand` (`scripts/brand.sh`; needs python3 with Pillow and fontTools,
+   and `rsvg-convert`). It renders with the repository's own Inter, and passes other arguments
+   on (`cargo brand --accent '#2DD4BF' --deep '#0F8F85'`); `--out DIR` writes elsewhere to
+   compare first.
+3. Look at every output that changed: the app icons, the marks the app draws (sidebar and
+   Welcome screen, so re-render the goldens) and the README's lockup. Another Pillow or
+   librsvg version re-encodes PNGs, `.ico` and `.icns` whose pixels didn't change, so compare
+   pixels, not bytes.
+4. Commit `build_logo.py` and every changed file under `assets/brand/` together.
 
 ### Done when
 
-`generate.py` runs without reporting drift, and the PNGs, `.ico` and `.icns` in the commit are
-its output.
+`cargo brand` leaves no change under `assets/brand/` beyond the ones you meant, and the goldens
+that show a mark are re-rendered and looked at.
 
 ## Recipe: Check a Package by Hand
 
