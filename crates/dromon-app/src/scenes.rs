@@ -12,8 +12,8 @@ use rune::TextEdit;
 use crate::fixture;
 use crate::state::log::LogBuffer;
 use crate::state::{
-    Action, App, DropTarget, Effect, FileAction, HostAction, Live, MenuKind, PaletteAction, RowTarget, SearchAction,
-    ServiceEvent, Silent, Tab,
+    Action, App, DropTarget, Effect, FileAction, FileOpEvent, HostAction, Live, MenuKind, PaletteAction, RowTarget,
+    SearchAction, ServiceEvent, Silent, Tab,
 };
 use crate::theme::Appearance;
 
@@ -394,7 +394,7 @@ pub fn delete_progress(s: &mut App) {
     s.backend = Box::new(Silent::default());
     deleting(s, &["releases", "node_modules", "backup-2026-11-01.tar.gz"]);
     let id = deleting(s, &["assets"]);
-    s.apply(ServiceEvent::FileOpProgress { id, host: prod(), done: 1204, total: Some(5005) });
+    s.apply(ServiceEvent::FileOp(FileOpEvent::Progress { id, host: prod(), done: 1204, total: Some(5005) }));
 }
 
 /// A delete that stopped: its toast stays with the reason and a dismiss button.
@@ -403,7 +403,7 @@ pub fn delete_failed(s: &mut App) {
     s.backend = Box::new(Silent::default());
     let id = deleting(s, &["uploads"]);
     let error = dromon_core::Error::PermissionDenied(RemotePath::new("/var/www/site/uploads/2026"));
-    s.apply(ServiceEvent::FileOpFailed { id, host: prod(), error });
+    s.apply(ServiceEvent::FileOp(FileOpEvent::Failed { id, host: prod(), error }));
 }
 
 /// index.html and robots.txt cut (⌘X): dimmed until they're pasted.

@@ -8,7 +8,7 @@ use dromon_transfer::{JobRequest, RemoteItem};
 use rune::clipboard::MemoryClipboard;
 use rune::{ClipboardContent, Env, Key, KeyEvent, KeyPlatform, Mods, PhysicalInput, Runtime};
 
-use crate::state::{Action, App, Command, FileOp, Recorder, ServiceEvent, TransferCommand};
+use crate::state::{Action, App, Command, FileOp, FileOpEvent, Recorder, ServiceEvent, TransferCommand};
 use crate::{app, scenes};
 
 const SIZE: (f32, f32) = (1080.0, 680.0);
@@ -254,16 +254,16 @@ fn a_delete_shows_its_progress_toast_and_a_failure_stays_until_dismissed() {
     let id = rt.state.ops.ops.last().unwrap().id;
     let key = format!("toast-op-{}", id.0);
     assert_eq!(text_of(&rt, &format!("{key}-text")), "Deleting 2 items…");
-    let ev = ServiceEvent::FileOpProgress { id, host: host("prod"), done: 1204, total: Some(5005) };
+    let ev = ServiceEvent::FileOp(FileOpEvent::Progress { id, host: host("prod"), done: 1204, total: Some(5005) });
     rt.update(move |s, _| s.apply(ev));
     settle(&mut rt);
     assert_eq!(text_of(&rt, &format!("{key}-text")), "Deleting… 1,204 of 5,005");
     assert!(!shown(&rt, &format!("{key}-dismiss")), "a running delete can't be dismissed");
-    let ev = ServiceEvent::FileOpFailed {
+    let ev = ServiceEvent::FileOp(FileOpEvent::Failed {
         id,
         host: host("prod"),
         error: Error::PermissionDenied(p("/var/www/site/uploads")),
-    };
+    });
     rt.update(move |s, _| s.apply(ev));
     settle(&mut rt);
     assert_eq!(

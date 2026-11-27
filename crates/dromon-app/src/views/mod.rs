@@ -1,5 +1,5 @@
 //! The single window (§6.2): sidebar | toolbar, content, status bar, or the Settings page in
-//! place of the last three (`settings.rs`). Each part is a function of `&App` and a [`Paint`];
+//! place of the last three (`settings/`). Each part is a function of `&App` and a [`Paint`];
 //! handlers turn input into `state::Action`s and run them with [`run`].
 
 mod add_config;

@@ -3,6 +3,9 @@
 # PowerShell and WiX read LF files fine.
 * text=auto eol=lf
 
+# The progress log: parallel branches each append to it, so a merge keeps both sides' lines.
+.plans/progress.md merge=union
+
 # Binary: never touched.
 *.png binary
 *.ico binary

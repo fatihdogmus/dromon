@@ -85,9 +85,7 @@ use tokio::sync::mpsc;
 
 use self::auth::PromptIds;
 use self::conn::{ConnCmd, ConnHandle, Shared};
-use self::search::SearchCmd;
-use self::sizes::SizeCmd;
-use crate::state::{App, Backend, Command, ServiceEvent, WindowId};
+use crate::state::{App, Backend, Command, FileOpEvent, ServiceEvent, WindowId};
 
 /// Where the service's events go.
 pub trait Sink: Clone + Send + Sync + 'static {
@@ -327,44 +325,6 @@ fn dispatch<S: Sink>(
     windows: &mut BTreeMap<WindowId, Visibility>,
 ) {
     match cmd {
-        Command::Connect { host } => {
-            let Some(spec) = known.get(&host).cloned() else {
-                let status = ConnStatus::Failed("Dromon doesn't know this host any more.".into());
-                sink.emit_to(from, ServiceEvent::Status { host, status });
-                return;
-            };
-            let c = task(spec.clone(), conns, shared, sink, windows);
-            let _ = c.cmds.send(ConnCmd::Connect(from, spec));
-        }
-        Command::Verbose { host, on } => {
-            // A host that never connected keeps it for when it does.
-            let c = match known.get(&host) {
-                Some(spec) => Some(task(spec.clone(), conns, shared, sink, windows)),
-                None => conns.get(&host),
-            };
-            if let Some(c) = c {
-                let _ = c.cmds.send(ConnCmd::Verbose(on));
-            }
-        }
-        Command::ShowPrompts { host } => {
-            if let Some(c) = conns.get(&host) {
-                let _ = c.cmds.send(ConnCmd::ShowPrompts(from));
-            }
-        }
-        Command::List { host, path } => {
-            if let Some(c) = conns.get(&host) {
-                let _ = c.cmds.send(ConnCmd::List(from, path));
-            }
-        }
-        Command::Disconnect { host } => match conns.get(&host) {
-            Some(c) => {
-                let _ = c.cmds.send(ConnCmd::Disconnect);
-            }
-            None => {
-                auth::lock(&shared.store).clear(&host);
-                sink.emit(ServiceEvent::Status { host, status: ConnStatus::Disconnected });
-            }
-        },
         Command::AnswerPrompt { id, answer } => {
             let conn = shared.ids.owner(id).and_then(|host| conns.get(&host));
             match conn {
@@ -378,9 +338,24 @@ fn dispatch<S: Sink>(
                 None => auth::wipe(answer),
             }
         }
-        Command::Transfer(cmd) => {
-            let _ = shared.engine.send(transfers::EngineMsg::Command(cmd));
+        Command::Connect { host } => {
+            let Some(spec) = known.get(&host).cloned() else {
+                let status = ConnStatus::Failed("Dromon doesn't know this host any more.".into());
+                sink.emit_to(from, ServiceEvent::Status { host, status });
+                return;
+            };
+            let c = task(spec.clone(), conns, shared, sink, windows);
+            let _ = c.cmds.send(ConnCmd::Connect(from, spec));
         }
+        Command::Disconnect { host } => match conns.get(&host) {
+            Some(c) => {
+                let _ = c.cmds.send(ConnCmd::Disconnect);
+            }
+            None => {
+                auth::lock(&shared.store).clear(&host);
+                sink.emit(ServiceEvent::Status { host, status: ConnStatus::Disconnected });
+            }
+        },
         Command::FileOp { id, host, op } => {
             // The host's task runs it; a host without one isn't connected.
             let cmd = ConnCmd::FileOp(id, op);
@@ -389,25 +364,18 @@ fn dispatch<S: Sink>(
                 None => true,
             };
             if unsent {
-                sink.emit(ServiceEvent::FileOpFailed { id, host, error: dromon_core::Error::ConnectionLost });
+                let ev = FileOpEvent::Failed { id, host, error: dromon_core::Error::ConnectionLost };
+                sink.emit(ServiceEvent::FileOp(ev));
             }
         }
-        Command::Window { visible, focused } => window_shows(from, visible, focused, conns, windows),
-        Command::Poll { host } => {
+        Command::FolderSize(cmd) => sizes::route(from, cmd, conns, sink),
+        // The manager's loop takes these first.
+        Command::HostBook(_) | Command::Update(_) => {}
+        Command::List { host, path } => {
             if let Some(c) = conns.get(&host) {
-                let _ = c.cmds.send(ConnCmd::PollNow(from));
+                let _ = c.cmds.send(ConnCmd::List(from, path));
             }
         }
-        Command::WindowClosed => {
-            windows.remove(&from);
-            for c in conns.values() {
-                let _ = c.cmds.send(ConnCmd::Closed(from));
-            }
-        }
-        cmd @ (Command::FolderSize { .. }
-        | Command::CancelFolderSize { .. }
-        | Command::Search { .. }
-        | Command::CancelSearch { .. }) => walk(from, cmd, conns, sink),
         Command::LiveUpdates { on } => {
             // Tasks that start later read it from here.
             shared.live.store(on, Ordering::Relaxed);
@@ -415,35 +383,37 @@ fn dispatch<S: Sink>(
                 let _ = c.cmds.send(ConnCmd::Live(on));
             }
         }
-        // The manager's loop takes these first.
-        Command::HostBook(_) | Command::Update(_) => {}
-    }
-}
-
-/// A folder walk from window `from`, or stopping one: the host's task walks it; a host without
-/// one isn't connected, and the walk fails at once.
-fn walk<S: Sink>(from: WindowId, cmd: Command, conns: &HashMap<HostId, ConnHandle>, sink: &S) {
-    let lost = dromon_core::Error::ConnectionLost;
-    let send = |host: &HostId, cmd: ConnCmd| conns.get(host).is_some_and(|c| c.cmds.send(cmd).is_ok());
-    match cmd {
-        Command::FolderSize { id, host, path } => {
-            if !send(&host, ConnCmd::Size(from, SizeCmd::Start { id, path })) {
-                let total = crate::state::SizeTotal::default();
-                sink.emit_to(from, ServiceEvent::FolderSizeFailed { id, host, total, error: lost });
+        Command::Poll { host } => {
+            if let Some(c) = conns.get(&host) {
+                let _ = c.cmds.send(ConnCmd::PollNow(from));
             }
         }
-        Command::CancelFolderSize { id, host } => {
-            send(&host, ConnCmd::Size(from, SizeCmd::Cancel(id)));
-        }
-        Command::Search { id, host, root, query, show_hidden } => {
-            if !send(&host, ConnCmd::Search(from, SearchCmd::Start { id, root, query, show_hidden })) {
-                sink.emit_to(from, ServiceEvent::SearchFailed { id, host, error: lost });
+        Command::Search(cmd) => search::route(from, cmd, conns, sink),
+        Command::ShowPrompts { host } => {
+            if let Some(c) = conns.get(&host) {
+                let _ = c.cmds.send(ConnCmd::ShowPrompts(from));
             }
         }
-        Command::CancelSearch { id, host } => {
-            send(&host, ConnCmd::Search(from, SearchCmd::Cancel(id)));
+        Command::Transfer(cmd) => {
+            let _ = shared.engine.send(transfers::EngineMsg::Command(cmd));
         }
-        _ => {}
+        Command::Verbose { host, on } => {
+            // A host that never connected keeps it for when it does.
+            let c = match known.get(&host) {
+                Some(spec) => Some(task(spec.clone(), conns, shared, sink, windows)),
+                None => conns.get(&host),
+            };
+            if let Some(c) = c {
+                let _ = c.cmds.send(ConnCmd::Verbose(on));
+            }
+        }
+        Command::Window { visible, focused } => window_shows(from, visible, focused, conns, windows),
+        Command::WindowClosed => {
+            windows.remove(&from);
+            for c in conns.values() {
+                let _ = c.cmds.send(ConnCmd::Closed(from));
+            }
+        }
     }
 }
 

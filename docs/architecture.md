@@ -119,8 +119,15 @@ only through the boundary in `state/service.rs`:
   host's session as it comes and goes. See [transfers.md](transfers.md).
 - Secrets cross the boundary in one place only, `Command::AnswerPrompt`'s `PromptAnswer`; no
   event carries one. See [security.md](security.md).
-- A new kind of work adds a `Command` variant and the `ServiceEvent`s that answer it, and the
-  fixture backend learns to answer it too, so scenes and UI tests keep working.
+- A new kind of work adds one variant to `Command` and one to `ServiceEvent`, each holding a
+  sub-enum the feature owns in its own module (`Search(SearchCommand)`, `FolderSize(SizeEvent)`,
+  as `HostBook` and `Update` do), and one routing arm in each central dispatch (`App::apply_one`,
+  `trace_line`, the service's `dispatch`, the fixture backend's `Core::run`; one `ConnCmd`
+  variant when a host's task runs it), all kept in alphabetical order. Its types, trace
+  formatting and handling live in its modules (`state/search.rs`, `service/search.rs`,
+  `fixture/search.rs`), and the fixture backend answers it too, so scenes and UI tests keep
+  working. Parallel branches then add lines in different places of the shared files and don't
+  collide.
 
 ### Consequences
 
@@ -371,7 +378,7 @@ Finding the file for a change.
 | `fixture/` | The data-driven fake backend and the demo. |
 | `scenes.rs`, `scenes_settings.rs` | Named states for `--scene`, the goldens and the audits. |
 | `windows.rs` | Rune windows: the main windows' `Fleet`, opening and placing them. |
-| `state/settings.rs`, `views/settings.rs` | Settings: the values, and their view. |
+| `state/settings.rs`, `views/settings/` | Settings: the values, and their view: the page and its shared controls in `mod.rs`, each section one file (`appearance.rs`, `transfers.rs`, `browsing.rs`, `general.rs`). |
 | `fmt.rs`, `persist.rs`, `reveal.rs`, `terminal.rs` | Number and date text, the prefs writer, "Show in Finder", "Open in Terminal" (finding and starting the user's terminal app). |
 | `ui_*_tests.rs` | Headless UI tests. See [testing.md](testing.md). |
 

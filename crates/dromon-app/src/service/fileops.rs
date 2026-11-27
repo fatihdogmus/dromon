@@ -19,7 +19,7 @@ use dromon_sftp::Sftp;
 use tokio::sync::mpsc;
 
 use super::Sink;
-use crate::state::{FileOp, OpId, ServiceEvent};
+use crate::state::{FileOp, FileOpEvent, OpId, ServiceEvent};
 
 /// The least time between two progress events of one delete.
 pub const PROGRESS_EVERY: Duration = Duration::from_millis(100);
@@ -105,7 +105,11 @@ impl FileOps {
     /// The session went away: the deletes waiting fail.
     pub fn fail_queued<S: Sink>(&mut self, host: &HostId, sink: &S) {
         for (id, _) in self.queued.drain(..) {
-            sink.emit(ServiceEvent::FileOpFailed { id, host: host.clone(), error: Error::ConnectionLost });
+            sink.emit(ServiceEvent::FileOp(FileOpEvent::Failed {
+                id,
+                host: host.clone(),
+                error: Error::ConnectionLost,
+            }));
         }
     }
 
@@ -127,7 +131,7 @@ async fn run<S: Sink>(id: OpId, op: &FileOp, sftp: &Sftp, host: &HostId, sink: &
             let mut throttle = Throttle::default();
             let progress = |done, total| {
                 if throttle.due(Instant::now()) {
-                    sink.emit(ServiceEvent::FileOpProgress { id, host: host.clone(), done, total });
+                    sink.emit(ServiceEvent::FileOp(FileOpEvent::Progress { id, host: host.clone(), done, total }));
                 }
             };
             sftp.remove_all_of(paths, progress).await.map(drop)

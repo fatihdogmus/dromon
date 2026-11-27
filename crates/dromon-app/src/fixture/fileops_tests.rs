@@ -9,7 +9,7 @@ use dromon_core::{ConnStatus, Error, HostId, RemotePath};
 use dromon_transfer::{ConflictChoice, JobRequest, JobView, RemoteItem, Reveal, TaskState};
 
 use super::*;
-use crate::state::{Backend, Command, FileOp, OpId, ServiceEvent, TransferCommand};
+use crate::state::{Backend, Command, FileOp, FileOpEvent, OpId, ServiceEvent, TransferCommand};
 
 const HOME: &str = "/home/deploy";
 
@@ -53,11 +53,11 @@ fn op(b: &mut FixtureBackend, id: u64, op: FileOp) -> Vec<ServiceEvent> {
 }
 
 fn done(id: u64) -> ServiceEvent {
-    ServiceEvent::FileOpDone { id: OpId(id), host: prod() }
+    ServiceEvent::FileOp(FileOpEvent::Done { id: OpId(id), host: prod() })
 }
 
 fn failed(id: u64, error: Error) -> ServiceEvent {
-    ServiceEvent::FileOpFailed { id: OpId(id), host: prod(), error }
+    ServiceEvent::FileOp(FileOpEvent::Failed { id: OpId(id), host: prod(), error })
 }
 
 /// The names of the listing of `path` in `evs` (pages joined), sorted.
@@ -186,7 +186,7 @@ fn a_delete_counts_then_removes_everything_below_with_one_progress_event() {
     let evs = op(&mut b, 1, FileOp::Delete { paths: vec![p("tree"), p("x.txt"), p("tree/sub")] });
     assert_eq!(
         evs[..2],
-        [ServiceEvent::FileOpProgress { id: OpId(1), host: prod(), done: 7, total: Some(7) }, done(1)]
+        [ServiceEvent::FileOp(FileOpEvent::Progress { id: OpId(1), host: prod(), done: 7, total: Some(7) }), done(1)]
     );
     assert_eq!(listed(&evs, &p("")), Some(names(&["flaky", "keep", "locked", "many"])));
     assert_eq!(ls(&mut b, &p("tree")), Err(Error::NotFound(p("tree"))));
@@ -195,7 +195,10 @@ fn a_delete_counts_then_removes_everything_below_with_one_progress_event() {
 
     // A big folder is counted whole.
     let evs = op(&mut b, 2, FileOp::Delete { paths: vec![p("many")] });
-    assert_eq!(evs[0], ServiceEvent::FileOpProgress { id: OpId(2), host: prod(), done: 601, total: Some(601) });
+    assert_eq!(
+        evs[0],
+        ServiceEvent::FileOp(FileOpEvent::Progress { id: OpId(2), host: prod(), done: 601, total: Some(601) })
+    );
 
     // Missing, unreadable: fails, and nothing goes (it counts first).
     let evs = op(&mut b, 3, FileOp::Delete { paths: vec![p("keep"), p("gone")] });
@@ -221,7 +224,10 @@ fn deleting_the_folder_on_screen_lists_nothing_again() {
     let mut b = connected();
     ls(&mut b, &p("tree/sub")).unwrap();
     let evs = op(&mut b, 1, FileOp::Delete { paths: vec![p("tree")] });
-    assert_eq!(evs, [ServiceEvent::FileOpProgress { id: OpId(1), host: prod(), done: 6, total: Some(6) }, done(1)]);
+    assert_eq!(
+        evs,
+        [ServiceEvent::FileOp(FileOpEvent::Progress { id: OpId(1), host: prod(), done: 6, total: Some(6) }), done(1)]
+    );
 }
 
 #[test]
@@ -375,7 +381,10 @@ fn a_delete_after_an_upload_removes_the_uploaded_file_too() {
     assert_eq!(ls(&mut b, &p("keep")), Ok(names(&["k.txt", "report.pdf"])));
     // keep, k.txt and report.pdf.
     let evs = op(&mut b, 1, FileOp::Delete { paths: vec![p("keep")] });
-    assert_eq!(evs[0], ServiceEvent::FileOpProgress { id: OpId(1), host: prod(), done: 3, total: Some(3) });
+    assert_eq!(
+        evs[0],
+        ServiceEvent::FileOp(FileOpEvent::Progress { id: OpId(1), host: prod(), done: 3, total: Some(3) })
+    );
     op(&mut b, 2, FileOp::Mkdir { path: p("keep") });
     assert_eq!(ls(&mut b, &p("keep")), Ok(Vec::new()), "a recreated folder is empty");
 
@@ -384,7 +393,7 @@ fn a_delete_after_an_upload_removes_the_uploaded_file_too() {
     let evs = op(&mut b, 3, FileOp::Delete { paths: vec![p("notes.txt")] });
     assert_eq!(
         evs[..2],
-        [ServiceEvent::FileOpProgress { id: OpId(3), host: prod(), done: 1, total: Some(1) }, done(3)]
+        [ServiceEvent::FileOp(FileOpEvent::Progress { id: OpId(3), host: prod(), done: 1, total: Some(1) }), done(3)]
     );
     assert!(!ls(&mut b, &p("")).unwrap().contains(&"notes.txt".to_owned()));
     // And a renamed upload is found under its new name.
