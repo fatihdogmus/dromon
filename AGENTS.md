@@ -73,8 +73,8 @@ DROMON_REQUIRE_DOCKER=1 cargo test --workspace   # fail instead of skipping with
 cargo app [ARGS]                           # the app (debug) on your ssh config
 cargo demo [ARGS]                          # the app on the built-in demo, no servers
 cargo dev [--mock] [-- APP ARGS]           # live editing: view/theme fn-body edits patch in
-cargo goldens [--check]                    # re-render tests/goldens (--check: compare, as CI)
-cargo flows [OUT DIR] [FLOW…]              # render tests/flows/* to strips and trees
+cargo goldens [--check] [SCENE…]           # re-render tests/goldens, or the scenes named (--check: compare; --list)
+cargo flows [OUT DIR] [FLOW…]              # render tests/flows/* (or the flows named) to strips and trees
 cargo smoke [--window] [--connect]         # smoke-test the dromon binary
 cargo repro <issue|issue.md>               # replay a bug report headless into target/repro
 cargo perf [--gate …|all]                  # performance gates as one table
@@ -121,6 +121,12 @@ building again ([docs/testing.md](docs/testing.md#standard-build-once)).
 
 ## Testing Rules
 
+- After a change, run only the tests it affects, not the full suite: the changed crate's tests
+  narrowed by name (`cargo test -p dromon-app --lib properties`), the crates that use a changed
+  lower crate, the goldens of the scenes it reaches (`cargo goldens --check <scene>…`), the
+  flows it touches, and `cargo lint`. CI runs everything on every pull request. If a test
+  command can't run a subset, add that first, in its own change
+  ([docs/testing.md](docs/testing.md#standard-run-what-the-change-affects)).
 - A fix comes with a test that fails without it and passes with it; new behaviour comes with a
   test. Tests stay; never ignore or delete a failing test to get green.
 - Tests that need a server take users and homes from the fixture (`Role`, `Fixture::user`,

@@ -43,10 +43,15 @@ const COMMANDS: &[(&str, Run, &str, &str)] = &[
     (
         "goldens",
         Run::Script("goldens.sh"),
-        "[--check]",
-        "re-render the UI goldens in tests/goldens (--check: compare, as CI)",
+        "[--check] [SCENE…] | --list",
+        "re-render the UI goldens in tests/goldens, or only the SCENEs named (--check: compare, as CI)",
     ),
-    ("flows", Run::Script("flows.sh"), "[OUT DIR]", "render tests/flows/* to strips and trees in target/flows"),
+    (
+        "flows",
+        Run::Script("flows.sh"),
+        "[OUT DIR] [FLOW…]",
+        "render tests/flows/* (or the FLOWs named) to strips and trees",
+    ),
     ("smoke", Run::Script("smoke-app.sh"), "[--window] [--connect]", "smoke-test the dromon binary"),
     ("repro", Run::Script("repro.sh"), "<ISSUE|issue.md>", "replay a bug report headless into target/repro"),
     ("perf", Run::Script("perf.sh"), "[--gate …|all]", "the performance gates, as one table"),

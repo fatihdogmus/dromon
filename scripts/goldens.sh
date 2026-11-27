@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 # Regenerates or checks the UI goldens: every scene of the dromon binary, rendered headless at 2x.
 #
-#   bash scripts/goldens.sh            # writes tests/goldens/<scene>-<theme>@2x.png
-#   bash scripts/goldens.sh --check    # renders into target/goldens/new and compares (CI)
+#   bash scripts/goldens.sh                          # writes tests/goldens/<scene>-<theme>@2x.png
+#   bash scripts/goldens.sh --check                  # renders into target/goldens/new and compares (CI)
+#   bash scripts/goldens.sh menu-row file-ops-light  # just these scenes (with or without --check)
+#   bash scripts/goldens.sh --list                   # the scene names
 #   OUT=/tmp/snaps bash scripts/goldens.sh
 #
-# Scenes render with --theme dark; the `light` scene forces the light theme itself, so its
-# file is light-light@2x.png. Builds once, then loops.
+# The scenes are the binary's own (`dromon --list-scenes`, `SCENES` in
+# crates/dromon-app/src/scenes.rs): a new scene there gets a golden without touching this
+# script. Scenes render with --theme dark; the `light` scene forces the light theme itself, so
+# its file is light-light@2x.png. Builds once, then loops; named scenes run in the order given,
+# and an unknown name fails before anything renders.
 #
 # --check passes when every new image has the committed one's size and no pixel channel differs
 # by more than GOLDEN_TOLERANCE (default 2 of 255). Different Mesa (software Vulkan) versions
@@ -16,20 +21,20 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 check=0
-case "${1:-}" in
-  --check) check=1 ;;
-  "") ;;
-  *) echo "usage: goldens.sh [--check]" >&2; exit 2 ;;
-esac
+list=0
+picked=()
+for a in "$@"; do
+  case "$a" in
+    --check) check=1 ;;
+    --list) list=1 ;;
+    -*) echo "usage: goldens.sh [--check] [SCENE...] | --list" >&2; exit 2 ;;
+    *) picked+=("$a") ;;
+  esac
+done
 size="${SIZE:-1080x680}"
 scale="${SCALE:-2}"
-if [[ $check == 1 ]]; then
-  out="$root/target/goldens/new"
-  rm -rf "$root/target/goldens"
-else
-  out="${OUT:-$root/tests/goldens}"
-fi
 
 cd "$root"
 # DROMON_BIN: a dromon binary built already (scripts/smoke-app.sh says why).
@@ -40,18 +45,38 @@ else
   cargo build -p dromon-app --quiet
   bin="$root/target/debug/dromon"
 fi
-mkdir -p "$out"
 
-scenes=(welcome connecting listing listing-sorted-size big-folder empty-folder permission-denied reconnecting filter light
-  auth-password auth-password-error host-key confirm connection-log connection-log-verbose
-  transfers transfers-uploads transfer-conflict drop-list drop-folder toolbar-ring quit-confirm
-  new-folder rename-error delete-confirm delete-progress delete-failed cut-rows drag-folder menu-row menu-empty file-ops-light icons
-  poll-added folder-vanished
-  quick-connect quick-connect-more quick-connect-error add-to-config host-menu
-  sheet-light conflict-light delete-light transfers-light toast-light contrast contrast-light solid
-  palette palette-filtered palette-path
-  properties-file properties-folder properties-file-light properties-folder-light
-  listing-compact settings settings-light settings-transfers)
+# Every scene the binary has, in its order. DROMON_MOCK keeps it off the network and the
+# user's ssh config, as the renders below.
+scenes=()
+while IFS= read -r name; do
+  [[ -n $name ]] && scenes+=("$name")
+done < <(DROMON_MOCK=1 "$bin" --list-scenes)
+if [[ ${#scenes[@]} -eq 0 ]]; then
+  echo "goldens: $bin --list-scenes listed no scenes" >&2
+  exit 1
+fi
+if [[ $list == 1 ]]; then
+  printf '%s\n' "${scenes[@]}"
+  exit 0
+fi
+for a in ${picked[@]+"${picked[@]}"}; do
+  known=0
+  for s in "${scenes[@]}"; do [[ $s == "$a" ]] && known=1; done
+  if [[ $known == 0 ]]; then
+    echo "goldens: no scene \"$a\" (bash scripts/goldens.sh --list)" >&2
+    exit 2
+  fi
+done
+[[ ${#picked[@]} -eq 0 ]] || scenes=("${picked[@]}")
+
+if [[ $check == 1 ]]; then
+  out="$root/target/goldens/new"
+  rm -rf "$root/target/goldens"
+else
+  out="${OUT:-$root/tests/goldens}"
+fi
+mkdir -p "$out"
 
 for scene in "${scenes[@]}"; do
   theme=dark

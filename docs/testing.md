@@ -31,6 +31,7 @@ variables) is [test-servers.md](test-servers.md); this guide says how to test wi
 - [Reference: The Server Matrix](#reference-the-server-matrix)
 - [Reference: Performance Gates](#reference-performance-gates)
 - [Recipe: Measure Coverage](#recipe-measure-coverage)
+- [Standard: Run What the Change Affects](#standard-run-what-the-change-affects)
 - [Standard: Build Once](#standard-build-once)
 - [Reference: Commands](#reference-commands)
 
@@ -337,6 +338,41 @@ Looking for untested code in an area you are changing.
 You know which branches of the changed code no test reaches, and either covered them or said
 why not. Coverage figures don't go into documents or commit messages.
 
+## Standard: Run What the Change Affects
+
+**Scope:** local runs, by people and agents
+
+### Purpose
+
+Fast feedback: a change is checked by the tests that can see it, in minutes, not by the whole
+suite. CI runs everything on every pull request, on every platform.
+
+### Rules
+
+- After a change, run only the tests it affects, never the full suite as a habit:
+  - the changed crate's tests, narrowed by test-name filter:
+    `cargo test -p dromon-app --lib properties` (a module), `-- ui_menu` (a UI test file),
+    `--test properties_e2e` (one end-to-end binary);
+  - a changed lower crate (`dromon-core`, `dromon-ssh`, `dromon-sftp`, `dromon-transfer`) also
+    runs the tests of the crates above it that use what changed;
+  - the goldens of the scenes the change reaches (`cargo goldens --check <scene>…`), the flows
+    it touches (`cargo flows <flow>…`), the perf gate it could move (`cargo perf --gate …`);
+  - `cargo lint` always: it's fast and CI fails without it.
+- Run the full suite locally only when the change reaches everything: a Rune bump, workspace
+  dependencies or features, the test harness (`dromon-testkit`, `tests/docker/`), shared
+  chrome for goldens (see [ui.md](ui.md#recipe-change-something-visible)).
+- Every command needs a way to run a subset. When one lacks it, add that first (a filter
+  argument, a `--list`), in its own change, before relying on running everything.
+- Pick one build shape for the session: keep to `-p` runs (or to `--workspace`); mixing them
+  recompiles about a hundred crates ([Build Once](#standard-build-once)).
+- The pull request says which tests ran locally; CI's green run covers the rest.
+
+### Agent checklist
+
+- Did you run the tests of the changed code, and only those (plus `cargo lint`)?
+- Did a change to a lower crate run the tests of the crates that use it?
+- Did you check the goldens of the scenes the change reaches, by name?
+
 ## Standard: Build Once
 
 **Scope:** local runs and CI
@@ -379,11 +415,14 @@ cargo test -p dromon-sftp -- --ignored           # the slow copy-data tests
 DROMON_FIXTURE_KEEP=1 cargo test -p dromon-sftp --test fixture -- list_mixed_folder   # keep the server
 DROMON_SERVER_MATRIX=1 cargo test -p dromon-sftp -p dromon-transfer --test matrix
 DROMON_BIN=target/debug/dromon cargo goldens --check
+cargo goldens --check menu-row file-ops-light    # just these scenes; cargo goldens --list names them
 cargo flows                                      # tests/flows/* into target/flows
+cargo flows download                             # just these flows
 cargo smoke [--window] [--connect]
 cargo perf [--gate …|all]
 ```
 
 ### Agent note
 
-A `-p` filter is fine for a quick loop; run the full `cargo test --workspace` before you push.
+Run what the change affects ([the standard above](#standard-run-what-the-change-affects));
+CI runs the full suite on every pull request.

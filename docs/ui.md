@@ -270,8 +270,9 @@ Rendering a named state headless.
 
 - A scene is `(name, fn(&mut App))` in `scenes::SCENES`, reached by the same actions and events a
   user and the service would produce, starting from the demo fixture on its clock.
-- `SCENES` feeds `--scene NAME`, the accessibility audit and the icon grid test. The goldens are
-  rendered from the scene list in `scripts/goldens.sh`; a new scene is added to both.
+- `SCENES` feeds `--scene NAME`, the accessibility audit, the icon grid test and the goldens:
+  `scripts/goldens.sh` takes its list from `dromon --list-scenes`, so a new scene gets a golden
+  with no other edit.
 - Scene names are fixed: goldens and the README's images are named after them.
 - Settings has its own scenes in `scenes_settings.rs`.
 
@@ -292,12 +293,16 @@ A change alters any pixel of a scene.
 
 1. Make the change, then render the scene you changed:
    `cargo demo --scene <name> --snap target/<name>.png --scale 2` and open the PNG.
-2. Re-render every golden: `cargo goldens` (writes `tests/goldens/<scene>-<theme>@2x.png`).
+2. Re-render the goldens of the scenes the change reaches: `cargo goldens <scene>…` (writes
+   `tests/goldens/<scene>-<theme>@2x.png`; `cargo goldens --list` names them). A change to
+   shared chrome (the toolbar, the sidebar, the status bar, theme tokens, fonts) reaches every
+   scene: then `cargo goldens` with no names.
 3. Look at every golden that changed in `git status`, at full size, before and after. A change
    you didn't mean is a bug, not noise.
-4. `cargo goldens --check` must pass: it renders into `target/goldens/new` and allows ±2 per
-   channel (`GOLDEN_TOLERANCE`), for Mesa rounding. On a mismatch it writes the new image and a
-   red diff to `target/goldens/diff/`.
+4. `cargo goldens --check <scene>…` must pass for those scenes: it renders into
+   `target/goldens/new` and allows ±2 per channel (`GOLDEN_TOLERANCE`), for Mesa rounding. On a
+   mismatch it writes the new image and a red diff to `target/goldens/diff/`. CI checks every
+   scene.
 5. In the pull request, name the goldens that changed and say that you looked at each.
 
 ### Done when
