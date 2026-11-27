@@ -104,7 +104,9 @@ fn the_command_script_deletes_itself_then_becomes_the_quoted_ssh() {
     let ssh = terminal_ssh();
     let script = command_script(&ssh);
     assert_eq!(script, format!("#!/bin/sh\nrm -f -- \"$0\"\nexec {}\n", ssh.shell_line()));
-    assert!(script.starts_with("#!/bin/sh\nrm -f -- \"$0\"\nexec 'ssh' '-t' "), "{script}");
+    // The platform's ssh (`ssh`, or Windows' `C:\…\ssh.exe` where these tests also run).
+    let start = format!("#!/bin/sh\nrm -f -- \"$0\"\nexec '{}' '-t' ", ssh.program.display());
+    assert!(script.starts_with(&start), "{script}");
     assert!(script.contains(r"'\''"), "the folder's quote is quoted: {script}");
     assert_eq!(script.lines().count(), 3, "one command besides deleting itself");
 }
