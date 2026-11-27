@@ -245,6 +245,162 @@ fn option_values_are_quoted_and_escaped() {
     );
 }
 
+fn terminal(host: &HostSpec, folder: &str) -> Result<SshCommand, CommandError> {
+    SshCommand::terminal_with(PathBuf::from("ssh"), host, folder)
+}
+
+/// What a POSIX shell reads back from `line`: `sh -c 'printf "%s\0" <line>'`, split on NUL.
+#[cfg(unix)]
+fn sh_words(line: &str) -> Vec<String> {
+    let out = std::process::Command::new("/bin/sh").arg("-c").arg(format!("printf '%s\\0' {line}")).output().unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let text = String::from_utf8(out.stdout).unwrap();
+    text.split_terminator('\0').map(str::to_owned).collect()
+}
+
+#[test]
+fn terminal_options_are_the_base_ones_with_a_terminal() {
+    let mut expected = BASE.to_vec();
+    expected[0] = "-t";
+    assert_eq!(TERMINAL_ARGS, expected);
+}
+
+#[test]
+fn terminal_for_a_config_host_passes_the_alias_and_a_cd() {
+    let cmd = terminal(&HostSpec::from_config_alias("prod"), "/var/www/site").unwrap();
+    let mut expected = TERMINAL_ARGS.to_vec();
+    expected.extend(["prod", r#"cd -- '/var/www/site' && exec "$SHELL" -l || exec "$SHELL" -l"#]);
+    assert_eq!(args(&cmd), expected);
+    assert_eq!(cmd.program, PathBuf::from("ssh"));
+    // No askpass: the terminal's ssh asks for itself, and nothing Dromon remembers goes along.
+    assert!(cmd.env.is_empty() && cmd.env_remove.is_empty());
+    assert!(!args(&cmd).iter().any(|a| *a == "-s" || *a == "sftp" || *a == "-T"));
+}
+
+#[test]
+fn terminal_for_saved_quick_connect_and_jump_hosts_gets_their_options() {
+    let cmd = terminal(&saved("box"), "/srv").unwrap();
+    let a = args(&cmd);
+    assert_eq!(a[..TERMINAL_ARGS.len()], *TERMINAL_ARGS);
+    assert_eq!(
+        a[TERMINAL_ARGS.len()..],
+        [
+            "-o",
+            "HostName=10.0.0.4",
+            "-o",
+            "User=deploy",
+            "-o",
+            "Port=2222",
+            "-o",
+            "IdentityFile=~/.ssh/id_deploy",
+            "-o",
+            "ProxyJump=bastion",
+            "box",
+            r#"cd -- '/srv' && exec "$SHELL" -l || exec "$SHELL" -l"#
+        ]
+    );
+    // A recent quick connect with a jump host and nothing else.
+    let host = HostSpec {
+        source: HostSource::Recent,
+        user: None,
+        port: None,
+        identity_file: None,
+        proxy_jump: Some("j@bastion:2200".into()),
+        ..saved("10.0.0.4")
+    };
+    let cmd = terminal(&host, "/").unwrap();
+    let a = &args(&cmd)[TERMINAL_ARGS.len()..];
+    assert_eq!(a[..5], ["-o", "HostName=10.0.0.4", "-o", "ProxyJump=j@bastion:2200", "10.0.0.4"]);
+}
+
+#[test]
+fn terminal_refuses_what_sftp_refuses() {
+    for alias in ["-oProxyCommand=sh", "", "a\nb"] {
+        assert!(terminal(&HostSpec::from_config_alias(alias), "/").is_err(), "{alias:?}");
+    }
+    let host = HostSpec { proxy_jump: Some("-J evil".into()), ..saved("box") };
+    assert!(terminal(&host, "/").is_err());
+}
+
+#[test]
+fn a_windows_servers_folder_opens_ssh_without_a_cd() {
+    for folder in ["/C:/Users/deploy", "/C:", "/d:/data"] {
+        let cmd = terminal(&HostSpec::from_config_alias("win"), folder).unwrap();
+        assert_eq!(args(&cmd).last(), Some(&"win"), "{folder}");
+    }
+    // Look-alikes are POSIX paths.
+    for folder in ["/C:x", "/CC:/a", "C:/a", "/1:/a"] {
+        let cmd = terminal(&HostSpec::from_config_alias("box"), folder).unwrap();
+        assert!(args(&cmd).last().unwrap().starts_with("cd -- "), "{folder}");
+    }
+}
+
+#[test]
+fn quoting_keeps_every_awkward_path_one_word() {
+    assert_eq!(quote("/a b"), "'/a b'");
+    assert_eq!(quote("/it's"), r"'/it'\''s'");
+    assert_eq!(quote("/$HOME/`id`"), "'/$HOME/`id`'");
+    assert_eq!(quote("-rf"), "'-rf'");
+    assert_eq!(quote(""), "''");
+    assert_eq!(quote("/a\nb"), "'/a\nb'");
+    assert_eq!(quote(r#"/"x"\y"#), r#"'/"x"\y'"#);
+    assert_eq!(quote("/çağrı ğ 漢字"), "'/çağrı ğ 漢字'");
+}
+
+/// A real `sh` reads each awkward path back as it was, and the remote command `cd`s into it.
+#[cfg(unix)]
+#[test]
+fn a_real_shell_reads_quoted_paths_back() {
+    let awkward = [
+        "/srv/with space",
+        "/srv/it's 'quoted'",
+        r#"/srv/"double" \back\slash"#,
+        "/srv/$HOME ${x} $(id)",
+        "/srv/`id`",
+        "/srv/line\nbreak",
+        "-rf",
+        "/srv/;&|<>*?~#!",
+        "/srv/çağrı 漢字 🚀",
+    ];
+    for path in awkward {
+        assert_eq!(sh_words(&quote(path)), [path], "{path:?}");
+    }
+    // Nothing inside a quoted path runs.
+    let dir = tempfile::tempdir().unwrap();
+    let canary = dir.path().join("ran");
+    let inject = format!("/x`touch {0}`$(touch {0})';touch {0};'", canary.display());
+    assert_eq!(sh_words(&quote(&inject)), [inject.as_str()]);
+    assert!(!canary.exists(), "nothing in a path runs");
+    // The remote command, run by a shell: it lands in the folder (made here for the test).
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("it's a $dir `x`\nline");
+    std::fs::create_dir(&folder).unwrap();
+    let folder = folder.to_str().unwrap();
+    let cmd = terminal(&HostSpec::from_config_alias("box"), folder).unwrap();
+    let remote = args(&cmd).last().unwrap().replace(r#"exec "$SHELL" -l"#, "pwd");
+    let out = std::process::Command::new("/bin/sh").arg("-c").arg(&remote).output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim_end_matches('\n'), folder);
+    // A folder that's gone: the shell says so, and the second command still runs (at home).
+    let cmd = terminal(&HostSpec::from_config_alias("box"), "/no/such/folder").unwrap();
+    let remote = args(&cmd).last().unwrap().replace(r#"exec "$SHELL" -l"#, "echo started");
+    let out = std::process::Command::new("/bin/sh").arg("-c").arg(&remote).output().unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "started\n");
+    assert!(!out.stderr.is_empty(), "cd's own message shows");
+}
+
+/// The whole command as a shell line reads back as the same argument vector.
+#[cfg(unix)]
+#[test]
+fn the_shell_line_reads_back_as_the_argument_vector() {
+    let host = HostSpec { user: Some("first last".into()), ..saved("box") };
+    let cmd = terminal(&host, "/srv/it's here").unwrap();
+    let line = cmd.shell_line();
+    let mut expected = vec!["ssh".to_owned()];
+    expected.extend(args(&cmd).into_iter().map(str::to_owned));
+    assert_eq!(sh_words(&line), expected);
+    assert!(line.starts_with("'ssh' '-t' "), "{line}");
+}
+
 #[test]
 fn askpass_env_sets_everything() {
     let env = askpass().vars_with_display(None);
@@ -319,42 +475,11 @@ fn a_watch_refuses_what_the_session_refuses_and_a_folder_it_cant_pass() {
 }
 
 #[test]
-fn folders_are_single_quoted_whatever_they_hold() {
-    let cases = [
-        ("/srv/my site", "'/srv/my site'"),
-        ("/it's", r"'/it'\''s'"),
-        ("/''", r"'/'\'''\'''"),
-        ("/\"q\"", "'/\"q\"'"),
-        ("/$HOME/${x}", "'/$HOME/${x}'"),
-        ("/`rm -rf ~`", "'/`rm -rf ~`'"),
-        ("/$(id)", "'/$(id)'"),
-        ("/a\nb", "'/a\nb'"),
-        ("-rf", "'-rf'"),
-        ("/a\\b;c&d|e*f?", "'/a\\b;c&d|e*f?'"),
-    ];
-    for (folder, quoted) in cases {
-        assert_eq!(sh_quote(folder), quoted, "{folder:?}");
+fn a_watch_quotes_its_folder_whatever_it_holds() {
+    for folder in ["/srv/my site", "/it's", "/''", "/\"q\"", "/$HOME/${x}", "/`rm -rf ~`", "/$(id)", "/a\nb", "-rf"] {
+        let quoted = quote(folder);
         assert!(watch_script(folder).unwrap().contains(&format!(" -- {quoted} & w=$!;")), "{folder:?}");
     }
-}
-
-/// A POSIX shell reads each quoted folder back exactly, running nothing inside it.
-#[cfg(unix)]
-#[test]
-fn a_real_shell_reads_quoted_folders_back() {
-    let dir = tempfile::tempdir().unwrap();
-    let canary = dir.path().join("ran");
-    let inject = format!("/x`touch {0}`$(touch {0})';touch {0};'", canary.display());
-    for folder in ["/srv/my site", "/it's", "/''", "/$HOME", "/a\nb\n", "-n", "/tab\there", "/é ✓", &inject] {
-        let out = std::process::Command::new("/bin/sh")
-            .arg("-c")
-            .arg(format!("printf '%s' {}", sh_quote(folder)))
-            .output()
-            .unwrap();
-        assert!(out.status.success(), "{folder:?}: {}", String::from_utf8_lossy(&out.stderr));
-        assert_eq!(String::from_utf8(out.stdout).unwrap(), folder);
-    }
-    assert!(!canary.exists(), "nothing in a folder name runs");
 }
 
 /// The watch's command in a real shell, with a fake `inotifywait` (`body`) on its `PATH`, its

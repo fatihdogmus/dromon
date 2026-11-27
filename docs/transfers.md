@@ -214,6 +214,9 @@ downloads `<name>.dromon-part` (`download_part_name`), uploads and remote copies
   (`Action::Cleanup`); pause keeps it.
 - mtime is kept both ways.
 - `is_part_file` recognises leftovers.
+- A refused write or rename of a remote part names the destination folder, not the hidden part
+  (`io::cant_write_in`: "You don't have permission to write in /srv/x"); each failed file is also
+  a line in its host's Connection log ("Upload failed: a.txt: …").
 
 ### Consequences
 

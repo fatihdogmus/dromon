@@ -109,7 +109,9 @@ impl Announcer {
                 let what = format!("{} of {}", kind_word(j.kind), j.title);
                 match &j.state {
                     TaskState::Done => said.push(format!("{what} finished")),
-                    TaskState::Failed { error } => said.push(format!("{what} failed: {error}")),
+                    TaskState::Failed { .. } => {
+                        said.push(format!("{what} failed: {}", super::transfers::failure_text(j)));
+                    }
                     _ => {}
                 }
             }

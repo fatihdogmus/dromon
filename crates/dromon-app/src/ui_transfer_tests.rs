@@ -309,7 +309,7 @@ fn row_buttons_send_their_commands_and_finished_rows_clear() {
         ]),
     );
     click(&mut rt, "tb-transfers");
-    assert_eq!(text_of(&rt, "tr-line-6"), "Failed: 1 file failed");
+    assert_eq!(text_of(&rt, "tr-line-6"), "Failed: a: denied");
     assert_eq!(text_of(&rt, "tr-line-4"), "Paused");
     click(&mut rt, "tr-pause-5");
     click(&mut rt, "tr-retry-6");
@@ -327,6 +327,38 @@ fn row_buttons_send_their_commands_and_finished_rows_clear() {
         ]
     );
     assert!(!shown(&rt, "tr-pause-3") && !shown(&rt, "tr-retry-3"), "a done row has no buttons");
+}
+
+/// prod on screen in its `~/.gradle`, a folder its user can read but not write in.
+const READ_ONLY: &str = r#"{"version": 1, "now": "2026-11-25T14:00:00Z",
+    "hosts": [{"alias": "prod", "source": "ssh-config", "user": "u", "hostname": "prod.example.com"}],
+    "servers": {"prod": {"home": "/home/u/.gradle", "tree": {
+        "/home/u": [{"name": ".gradle", "kind": "dir", "mode": "0555"}],
+        "/home/u/.gradle": [{"name": "gradle.properties", "kind": "file", "size": 120}]}}}}"#;
+
+#[test]
+fn a_failed_upload_says_why_in_its_row_and_in_the_connection_log() {
+    let mut rt = app().headless_runtime(SIZE, Env::new(true, 1.0));
+    rt.update(|s, _| {
+        *s = crate::fixture::app(std::sync::Arc::new(crate::fixture::parse(READ_ONLY).unwrap()));
+        s.act(Action::SelectHost(prod()));
+    });
+    settle(&mut rt);
+    rt.paste_content(ClipboardContent::default().with_files(paths(&["key.pem"])));
+    settle(&mut rt);
+    click(&mut rt, "tb-transfers");
+    let why = "You don't have permission to write in /home/u/.gradle";
+    assert_eq!(text_of(&rt, "tr-line-1"), format!("Failed: {why}"), "the reason, not a count");
+    assert_eq!(get(&rt, "tr-1").label.as_deref(), Some(format!("key.pem, Failed: {why}").as_str()), "read out too");
+    assert!(shown(&rt, "tr-retry-1"), "and it can be retried");
+
+    key(&mut rt, Key::Escape, Mods::default());
+    rt.update(|s, _| {
+        s.act(Action::OpenLog);
+    });
+    settle(&mut rt);
+    let log = text_of(&rt, "log-lines");
+    assert!(log.ends_with(&format!("14:00:00.000  Upload failed: key.pem: {why}")), "{log}");
 }
 
 #[test]

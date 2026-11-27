@@ -165,6 +165,22 @@ pub(crate) fn local_err(verb: &str, path: &Path, err: &std::io::Error) -> Error 
     Error::Io(format!("Couldn't {verb} {}: {}", path.display(), os_message(err)))
 }
 
+/// The error for a remote folder that doesn't let the user create or rename files in it: "You
+/// don't have permission to write in `folder`". The fixture backend says it the same way.
+pub fn cant_write_in(folder: &RemotePath) -> Error {
+    Error::Io(format!("You don't have permission to write in {folder}"))
+}
+
+/// For `map_err` on writing `dst`'s part file and renaming it into place: a refusal names
+/// `dst`'s folder and says it is about writing ([`cant_write_in`]), not the hidden part file
+/// the user never asked for. Other errors pass through.
+fn write_denied(dst: &RemotePath) -> impl Fn(Error) -> Error + '_ {
+    move |e| match e {
+        Error::PermissionDenied(_) => cant_write_in(&dst.parent().unwrap_or_else(RemotePath::root)),
+        e => e,
+    }
+}
+
 /// The OS's description of `err` without Rust's " (os error N)" suffix.
 fn os_message(err: &std::io::Error) -> String {
     let text = err.to_string();

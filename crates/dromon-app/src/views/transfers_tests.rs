@@ -54,6 +54,31 @@ fn each_state_has_its_line() {
 }
 
 #[test]
+fn a_failed_row_says_why_not_how_many() {
+    let failed = |title: &str, errors: &[&str]| JobView {
+        title: title.into(),
+        errors: errors.iter().map(|e| (*e).to_owned()).collect(),
+        ..job(TaskState::Failed { error: format!("{} files failed", errors.len()) }, 0, 9)
+    };
+    // One file: its error, without its name again when it's the row's title.
+    let denied = "You don't have permission to write in /home/u/.gradle";
+    let pem = format!("key.pem: {denied}");
+    assert_eq!(status_line(&failed("key.pem", &[&pem])), format!("Failed: {denied}"));
+    // One file of a folder: its name says which.
+    assert_eq!(status_line(&failed("photos", &["a.jpg: denied"])), "Failed: a.jpg: denied");
+    // Several: how many, and the first.
+    let several = failed("photos", &["a.jpg: denied", "b.jpg: denied", "c.jpg: gone"]);
+    assert_eq!(status_line(&several), "3 files failed: a.jpg: denied");
+    // Some files done, some failed: still a failure, with why (the queue reports it Failed).
+    let mut partial = failed("site", &["a.html: denied", "b.css: denied"]);
+    (partial.files_done, partial.files_total, partial.progress) = (3, 5, Progress { done: 6, total: 9 });
+    partial.skipped = vec!["cache: a link to a folder".into()];
+    assert_eq!(status_line(&partial), "2 files failed: a.html: denied · 1 skipped");
+    // The tooltip still lists them all.
+    assert_eq!(details(&several).unwrap(), "a.jpg: denied\nb.jpg: denied\nc.jpg: gone");
+}
+
+#[test]
 fn waiting_and_clashes_say_so_before_the_numbers() {
     let mut j = job(TaskState::Running, 1, 2);
     j.waiting_for_connection = true;

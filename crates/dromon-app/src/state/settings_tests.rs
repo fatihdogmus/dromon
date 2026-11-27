@@ -97,6 +97,7 @@ fn settings_round_trip_through_the_prefs_file_format() {
         download_folder: Some(folder("dl")),
         transfers_at_once: 6,
         show_hidden: false,
+        terminal: Terminal::Iterm2,
         live_updates: false,
     };
     let saved = Saved { settings: Some(settings), ..Saved::default() };
@@ -104,11 +105,49 @@ fn settings_round_trip_through_the_prefs_file_format() {
     let section = &json["settings"];
     assert_eq!((section["theme"].as_str(), section["density"].as_str()), (Some("light"), Some("compact")));
     assert_eq!(section["transfers_at_once"], 6);
+    assert_eq!(section["terminal"].as_str(), Some("iterm2"));
     let back: Saved = serde_json::from_value(json).unwrap();
     assert_eq!(back, saved);
     // A section missing some keys (another version) takes the defaults for those alone.
     let partial: Saved = serde_json::from_str(r#"{"settings": {"density": "compact"}}"#).unwrap();
     assert_eq!(partial.settings, Some(Settings { density: Density::Compact, ..Settings::default() }));
+}
+
+#[test]
+fn the_terminal_is_remembered_and_an_unknown_one_reads_as_the_default() {
+    let (mut s, store) = app_with(Saved::default());
+    assert_eq!(s.settings.terminal, Terminal::System);
+    set(&mut s, SettingsChange::Terminal(Terminal::GnomeTerminal));
+    assert_eq!(s.settings.terminal, Terminal::GnomeTerminal);
+    assert_eq!(store.last().settings.map(|x| x.terminal), Some(Terminal::GnomeTerminal));
+    let (next, _) = app_with(store.last());
+    assert_eq!(next.settings.terminal, Terminal::GnomeTerminal, "the next launch starts with it");
+    // Every name reads back as itself; one from another version is System default, the rest kept.
+    for t in [Terminal::TerminalApp, Terminal::WezTerm, Terminal::WindowsTerminal, Terminal::Console, Terminal::Xterm] {
+        let json = serde_json::to_string(&t).unwrap();
+        assert_eq!(serde_json::from_str::<Terminal>(&json).unwrap(), t, "{json}");
+    }
+    let other: Saved = serde_json::from_str(r#"{"settings": {"terminal": "hyper", "density": "compact"}}"#).unwrap();
+    assert_eq!(other.settings, Some(Settings { density: Density::Compact, ..Settings::default() }));
+}
+
+#[test]
+fn general_looks_for_terminals_and_offers_them_with_the_one_chosen() {
+    let mut s = fixture::app(fixture::demo());
+    s.act(Action::OpenSettings);
+    let fx = s.act(Action::SettingsSection(SettingsSection::General));
+    assert_eq!(fx, [crate::state::Effect::DetectTerminals { window: s.window }]);
+    assert!(s.act(Action::SettingsSection(SettingsSection::General)).is_empty(), "already there: no second look");
+    assert!(s.act(Action::SettingsSection(SettingsSection::Browsing)).is_empty());
+    let page = |s: &App| s.ui.settings_page.terminal_choices(s.settings.terminal);
+    assert_eq!(page(&s), [Terminal::System], "nothing found yet");
+    s.act(Action::TerminalsFound(vec![Terminal::Kitty, Terminal::Xterm]));
+    assert_eq!(page(&s), [Terminal::System, Terminal::Kitty, Terminal::Xterm]);
+    // A choice that isn't found (any more) still shows, last.
+    set(&mut s, SettingsChange::Terminal(Terminal::Foot));
+    assert_eq!(page(&s), [Terminal::System, Terminal::Kitty, Terminal::Xterm, Terminal::Foot]);
+    assert_eq!(SettingsSection::ALL.last(), Some(&SettingsSection::General));
+    assert_eq!((SettingsSection::General.title(), SettingsSection::General.key()), ("General", "settings-tab-general"));
 }
 
 #[test]
