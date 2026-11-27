@@ -9,10 +9,15 @@
 //! "Open in Terminal" is in both (and in the palette, and ⌘⇧T): the user's terminal app, signed
 //! in over its own ssh, in a folder row's folder, else in the folder on screen. The state only
 //! says what to open ([`Effect::OpenTerminal`]); `crate::terminal` starts it off the UI thread.
+//!
+//! A row's "Edit" opens its file in a local editor (`remote_edit.rs`); it's disabled for what
+//! quick preview wouldn't read as text (folders, links, images, binaries) and while the host
+//! isn't connected.
 
 use dromon_core::HostId;
 
 use super::files::FileAction;
+use super::remote_edit::{EDIT_CHORD, RemoteEditAction};
 use super::{Action, App, Effect};
 
 /// "Open in Terminal"'s chord: ⌘⇧T (Ctrl+Shift+T elsewhere).
@@ -94,10 +99,11 @@ impl App {
         let live = self.conn().is_some_and(|c| c.interactive());
         let paste = live && self.clip().is_some();
         match kind {
-            MenuKind::Row(_) => {
+            MenuKind::Row(name) => {
                 let one = self.conn().is_some_and(|c| c.selection.len() == 1);
                 vec![
                     item("open", "Open", live, None),
+                    item("edit", "Edit", self.editable(name), Some(EDIT_CHORD)),
                     item("download", "Download", live, Some("mod+d")),
                     // A folder row's folder; a file's is the folder on screen.
                     item("terminal", "Open in Terminal", live, Some(TERMINAL_CHORD)),
@@ -166,6 +172,7 @@ impl App {
         entries.iter().filter_map(MenuEntry::item).find(|i| i.id == id && i.enabled)?;
         Some(match (kind, id) {
             (MenuKind::Row(name), "open") => Action::Open(name.clone()),
+            (MenuKind::Row(name), "edit") => Action::RemoteEdit(RemoteEditAction::Edit(Some(name.clone()))),
             (_, "download") => Action::Download,
             (_, "upload-files") => Action::PickUpload,
             (_, "upload-folder") => Action::PickUploadFolder,

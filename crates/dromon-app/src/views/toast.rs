@@ -1,6 +1,7 @@
 //! The toast stack, bottom centre above the status bar: ssh's notices first, then the app's
 //! toasts (`state::toast`), oldest on top. Each rises 8 pt as it fades in and leaves the same
-//! way (`move`). Running ones show a spinner; failures a warning glyph and a dismiss button.
+//! way (`move`). Running ones show a spinner; failures a warning glyph and a dismiss button (and
+//! a failed save of a file being edited, Retry).
 //! The update toast (`state::update`) comes last, with its buttons under its text.
 
 use rune::{El, LoopSpec, Transition, Tx, col, el, icon, row, text};
@@ -8,6 +9,7 @@ use rune::{El, LoopSpec, Transition, Tx, col, el, icon, row, text};
 use super::widgets::Keyboard;
 use super::{Paint, run, sheets};
 use crate::icons;
+use crate::state::remote_edit::RemoteEditAction;
 use crate::state::toast::{Toast, Tone};
 use crate::state::update::{Button, UpdateToast};
 use crate::state::{Action, App, FileAction};
@@ -122,6 +124,25 @@ pub fn toast(toast: &Toast, p: Paint) -> El {
                 .min_w(0.0)
                 .wrap(),
         );
+    // A failed save of a file being edited: upload it again (`state/remote_edit.rs`).
+    if let Some(edit) = toast.retry {
+        let retry = Action::RemoteEdit(RemoteEditAction::Retry(edit));
+        e = e.child(
+            row()
+                .key(format!("{key}-retry"))
+                .role("button")
+                .label("Retry")
+                .h(24.0)
+                .px(space::S2)
+                .radius(radius::ROW)
+                .center()
+                .hover(t.hover)
+                .press(t.press)
+                .on_press_tx(move |s: &mut App, tx: &mut Tx| run(s, retry.clone(), tx))
+                .tab_press()
+                .child(text("Retry").font(type_::BODY_STRONG).color(t.text)),
+        );
+    }
     if toast.dismissible() {
         let id = toast.id;
         e = e.child(

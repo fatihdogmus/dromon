@@ -39,13 +39,14 @@ use super::lifecycle::{Effect, Event, Lifecycle, Phase, step};
 use super::live::{self, Heard, Updates};
 use super::poll::Outcome;
 use super::preview::{PreviewCmd, Reads};
+use super::remote_edit::{Editing, Edits};
 use super::search::SearchCmd;
 use super::sizes::{SizeCmd, Walks};
 use super::transfers::EngineMsg;
 use super::wake::{ProbeGate, Why};
 use super::windows::{Route, Watch, status_of};
 use super::{Config, Sink};
-use crate::state::{FileOp, FileOpEvent, OpId, SearchId, ServiceEvent, SizeId, WindowId};
+use crate::state::{FileOp, FileOpEvent, OpId, RemoteEditCommand, SearchId, ServiceEvent, SizeId, WindowId};
 
 /// Entries per listing page (§4.4).
 pub const PAGE: usize = 512;
@@ -69,6 +70,8 @@ pub enum ConnCmd {
     PollNow(WindowId),
     /// A quick preview read for the window, or stopping one (`preview.rs`).
     Preview(WindowId, PreviewCmd),
+    /// Editing a file in a local editor (`remote_edit.rs`); its news goes to every window.
+    RemoteEdit(RemoteEditCommand),
     /// A search in subfolders for the window, or stopping one (`search.rs`).
     Search(WindowId, SearchCmd),
     /// The window's Sign in: the host's open prompts, shown there.
@@ -84,8 +87,9 @@ pub enum ConnCmd {
 }
 
 /// What the connection tasks share: configuration, the askpass endpoint, the password store,
-/// prompt ids, the transfer engine (told when a session comes and goes), and whether folders
-/// are watched live (the setting, for tasks that start later).
+/// prompt ids, the transfer engine (told when a session comes and goes), whether folders are
+/// watched live (the setting, for tasks that start later), and the folder of files being
+/// edited.
 #[derive(Clone)]
 pub struct Shared {
     pub cfg: Arc<Config>,
@@ -94,6 +98,8 @@ pub struct Shared {
     pub ids: PromptIds,
     pub engine: mpsc::UnboundedSender<EngineMsg>,
     pub live: Arc<AtomicBool>,
+    /// The local copies' folder; `None`: editing isn't available (`Config::editing_root`).
+    pub editing: Option<Arc<Editing>>,
 }
 
 /// The manager's end of a connection task.
@@ -107,6 +113,7 @@ pub fn start<S: Sink>(spec: HostSpec, shared: Shared, sink: S) -> ConnHandle {
     let (cmds, cmd_rx) = mpsc::unbounded_channel();
     let (asks, ask_rx) = mpsc::unbounded_channel();
     let live = Updates::new(shared.live.load(Ordering::Relaxed));
+    let edits = Edits::new(shared.editing.clone());
     let task = Task {
         host: spec.id.clone(),
         spec,
@@ -125,6 +132,7 @@ pub fn start<S: Sink>(spec: HostSpec, shared: Shared, sink: S) -> ConnHandle {
         walks: Walks::default(),
         searches: Walks::default(),
         reads: Reads::default(),
+        edits,
         epoch: 0,
         live,
     };
@@ -188,6 +196,8 @@ struct Task<S: Sink> {
     searches: Walks<SearchId>,
     /// Quick preview reads (`preview.rs`).
     reads: Reads,
+    /// Files being edited in a local editor (`remote_edit.rs`).
+    edits: Edits,
     /// Counts SFTP sessions that came up: an operation's lost connection only ends the
     /// session it ran on.
     epoch: u64,
@@ -250,17 +260,19 @@ impl<S: Sink> Task<S> {
         self.emit(ServiceEvent::Log { host: self.host.clone(), line: line.into() });
     }
 
-    /// Hands the transfer engine this host's live SFTP session.
+    /// Hands the transfer engine and the files being edited this host's live SFTP session.
     fn session_up(&self) {
         if let Some(sftp) = self.session.as_ref().and_then(|s| s.sftp.clone()) {
+            self.edits.session(Some(sftp.clone()));
             let _ = self.shared.engine.send(EngineMsg::HostUp(self.host.clone(), sftp));
         }
     }
 
-    /// Tells the transfer engine a session it had is gone (`s` is being dropped), and fails
-    /// the deletes waiting for it.
+    /// Tells the transfer engine and the files being edited a session they had is gone (`s` is
+    /// being dropped), and fails the deletes waiting for it.
     fn session_gone(&mut self, s: &Session) {
         if s.sftp.is_some() {
+            self.edits.session(None);
             let _ = self.shared.engine.send(EngineMsg::HostDown(self.host.clone()));
             self.ops.fail_queued(&self.host, &self.sink);
         }
@@ -348,7 +360,11 @@ impl<S: Sink> Task<S> {
                     self.sink.emit_to(window, ServiceEvent::Prompt(prompt));
                 }
             }
-            ConnCmd::Disconnect => self.drive(Event::Disconnect, None).await,
+            ConnCmd::Disconnect => {
+                // Disconnecting ends every edit: its copy goes.
+                self.edits.stop_all();
+                self.drive(Event::Disconnect, None).await;
+            }
             ConnCmd::FileOp(id, op) => self.file_op(id, op),
             ConnCmd::Window(window, vis) => {
                 self.watch.window(window, vis, Instant::now());
@@ -372,6 +388,7 @@ impl<S: Sink> Task<S> {
             ConnCmd::Size(window, cmd) => self.walks.command(window, cmd, self.sftp(), &self.host, &self.sink),
             ConnCmd::Search(window, cmd) => self.searches.command(window, cmd, self.sftp(), &self.host, &self.sink),
             ConnCmd::Preview(window, cmd) => self.reads.command(window, cmd, self.sftp(), &self.host, &self.sink),
+            ConnCmd::RemoteEdit(cmd) => self.edits.command(cmd, &self.host, &self.sink),
             // The loop's `live_sync` starts or stops the watch.
             ConnCmd::Live(on) => self.live.on = on,
         }

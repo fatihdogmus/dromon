@@ -81,6 +81,7 @@ impl Harness {
             hosts_file: None,
             hosts: hosts.clone(),
             without_env: vec!["SSH_AUTH_SOCK".into()],
+            editing_root: None,
         };
         service::start(commands, TestSink(tx), cfg).expect("start the service thread");
         let scratch = fx.path(Role::Key, &format!("scratch/windows-{name}-{}", std::process::id()));

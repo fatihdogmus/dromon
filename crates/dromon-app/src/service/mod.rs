@@ -18,7 +18,9 @@
 //! (`conn.rs`), whose lifecycle is the pure machine in `lifecycle.rs` and whose prompts go
 //! through `auth.rs`; its file operations (new folder, rename, delete) run in `fileops.rs`
 //! on its SFTP session, its folder walks (the Properties sheet's sizes, search in subfolders)
-//! in `sizes.rs` and `search.rs`, quick preview reads in `preview.rs`, and live updates of its
+//! in `sizes.rs` and `search.rs`, quick preview reads in `preview.rs`, its files being edited in
+//! a local editor in `remote_edit.rs` (their local copies are in the app's cache folder, removed
+//! when the service stops and, for runs that are gone, when it starts), and live updates of its
 //! folder on screen, through a second ssh session, in `live.rs`. The password store lives here
 //! only: cleared per host on Disconnect, and all of it when the UI goes away. `hostfiles.rs`
 //! owns the files: discovery and its watcher, the saved hosts' `hosts.conf`, and "Add to SSH
@@ -45,6 +47,8 @@ mod live;
 pub(crate) mod poll;
 /// Quick preview reads: one range of one file.
 mod preview;
+/// Edit in a local editor: the local copies, their watch and their uploads.
+mod remote_edit;
 /// Search in subfolders, on the same walk; the fixture backend matches with it too.
 pub(crate) mod search;
 /// Folder walks, and the Properties sheet's sizes; the fixture backend counts with it too.
@@ -136,8 +140,9 @@ impl RuneSink {
     fn deliver(handle: &rune::AppHandle<App>, ev: ServiceEvent) {
         handle.update_if(move |app, tx| {
             app.apply(ev);
-            // An update in place: quit (and start the new version).
-            for fx in app.take_update_effects() {
+            // An update in place: quit (and start the new version); a file to edit is
+            // downloaded: open it.
+            for fx in app.take_update_effects().into_iter().chain(app.take_edit_effects()) {
                 crate::views::effect(fx, tx);
             }
             // A refresh that changed rows animates them (§4.5), though no input caused it.
@@ -223,10 +228,15 @@ pub struct Config {
     /// Inherited environment variables ssh must not see, for tests (`SSH_AUTH_SOCK`, so the
     /// developer's agent keys stay out). The app passes everything through.
     pub without_env: Vec<OsString>,
+    /// Where local copies of files being edited in a local editor go (`remote_edit.rs`): the
+    /// app's cache folder's `editing`, or a test's own folder. `None`: editing isn't available
+    /// (an edit fails at once) and nothing is swept.
+    pub editing_root: Option<PathBuf>,
 }
 
 impl Config {
-    /// The real app's: the system ssh, this executable as askpass helper, the user's config.
+    /// The real app's: the system ssh, this executable as askpass helper, the user's config, the
+    /// cache folder for files being edited.
     pub fn for_app() -> Config {
         Config {
             ssh: ssh_program(),
@@ -238,6 +248,7 @@ impl Config {
                 .map(|d| d.config().join(dromon_ssh::HOSTS_CONF)),
             hosts: Vec::new(),
             without_env: Vec::new(),
+            editing_root: remote_edit::default_root(),
         }
     }
 }
@@ -290,7 +301,20 @@ async fn serve<S: Sink>(mut commands: Commands, sink: S, cfg: Config, mut wakes:
     let store = Arc::new(Mutex::new(PasswordStore::new()));
     let engine = transfers::start(sink.clone());
     let live = Arc::new(AtomicBool::new(true));
-    let shared = Shared { cfg: Arc::new(cfg), askpass, store: store.clone(), ids: PromptIds::default(), engine, live };
+    // Local copies of files being edited: what runs that are gone left goes first.
+    let editing = cfg.editing_root.clone().map(|root| Arc::new(remote_edit::Editing::new(root)));
+    if let Some(editing) = &editing {
+        editing.sweep_later();
+    }
+    let shared = Shared {
+        cfg: Arc::new(cfg),
+        askpass,
+        store: store.clone(),
+        ids: PromptIds::default(),
+        engine,
+        live,
+        editing: editing.clone(),
+    };
     let mut conns: HashMap<HostId, ConnHandle> = HashMap::new();
     // How each window shows, as it last said; nothing polls for a window until it says.
     let mut windows: BTreeMap<WindowId, Visibility> = BTreeMap::new();
@@ -312,9 +336,13 @@ async fn serve<S: Sink>(mut commands: Commands, sink: S, cfg: Config, mut wakes:
             Some(slept) = wakes.recv() => woke(slept, &conns),
         }
     }
-    // The UI is gone: stop every connection and forget every secret.
+    // The UI is gone: stop every connection, forget every secret, and remove every local copy
+    // (should the app exit before this runs, the next start's sweep does).
     drop(conns);
     auth::lock(&store).clear_all();
+    if let Some(editing) = &editing {
+        editing.clear();
+    }
 }
 
 /// Carries out `cmd` from window `from`.
@@ -392,6 +420,7 @@ fn dispatch<S: Sink>(
             }
         }
         Command::Preview(cmd) => preview::route(from, cmd, conns, sink),
+        Command::RemoteEdit(cmd) => remote_edit::route(cmd, conns, sink),
         Command::Search(cmd) => search::route(from, cmd, conns, sink),
         Command::ShowPrompts { host } => {
             if let Some(c) = conns.get(&host) {

@@ -74,6 +74,7 @@ impl Harness {
             hosts_file: None,
             hosts: vec![dromon_core::HostSpec::from_config_alias("fx-key")],
             without_env: vec!["SSH_AUTH_SOCK".into()],
+            editing_root: None,
         };
         service::start(commands, TestSink(tx), cfg).expect("start the service thread");
         let scratch = fx.path(Role::Key, &format!("scratch/fileops-{name}-{}", std::process::id()));

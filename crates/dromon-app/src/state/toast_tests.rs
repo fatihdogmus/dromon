@@ -65,3 +65,28 @@ fn notes_stay_until_dismissed() {
     t.dismiss(n);
     assert_eq!(t.notes().count(), 1);
 }
+
+#[test]
+fn a_file_being_edited_has_one_toast_at_a_time_and_a_failed_save_offers_retry() {
+    use crate::state::EditId;
+    let mut t = Toasts::default();
+    t.push("a note of its own");
+    let (a, b) = (EditId(1), EditId(2));
+    let saved = t.put_edit(a, "Saved a.txt to prod", Tone::Note, false);
+    t.put_edit(b, "Saved b.txt to prod", Tone::Note, false);
+    assert!(t.shows(saved));
+    t.put_edit(a, "Couldn't save a.txt to prod: no space", Tone::Error, true);
+    assert!(!t.shows(saved), "replaced");
+    let shown: Vec<(String, Tone, Option<EditId>)> = t.notes().map(|n| (n.text, n.tone, n.retry)).collect();
+    assert_eq!(
+        shown,
+        [
+            ("a note of its own".to_owned(), Tone::Note, None),
+            ("Saved b.txt to prod".to_owned(), Tone::Note, None),
+            ("Couldn't save a.txt to prod: no space".to_owned(), Tone::Error, Some(a)),
+        ]
+    );
+    t.forget_edit(a);
+    t.put_edit(b, "Couldn't download b.txt again", Tone::Error, false);
+    assert_eq!(t.notes().map(|n| n.retry).collect::<Vec<_>>(), [None, None], "only a failed save retries");
+}

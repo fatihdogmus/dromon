@@ -1,5 +1,6 @@
 //! Sheets (§6.8): sign in, a new host key, a yes/no question, and the connection log (the
-//! delete, conflict, Add to SSH config and Properties sheets have files of their own). They drop
+//! delete, conflict, edit conflict, Add to SSH config and Properties sheets have files of their
+//! own). They drop
 //! from the toolbar's edge on the `move` spring, 12 pt radius, sheet elevation, over a veil
 //! that makes the window behind them inert. Escape cancels (Rune's modal dismissal); Return
 //! presses the primary button (`default_button`). Notices show as toasts that block nothing.
@@ -38,7 +39,8 @@ fn host_name(s: &App, host: &dromon_core::HostId) -> String {
 /// The veil and the open sheet, over the whole window below the toolbar band, so the sheet
 /// drops from the toolbar's edge.
 pub fn layer(s: &App, p: Paint) -> Option<El> {
-    // "Quit anyway?" comes first, then a prompt sheet; an upload's name clash waits behind both.
+    // "Quit anyway?" comes first, then a prompt sheet; an upload's name clash waits behind both,
+    // and an edited file's conflict behind that.
     let panel = match (quit::sheet(s, p), s.ui.sheets.open()) {
         (Some(quit), _) => quit,
         (None, Some(Sheet::Ask { prompt, .. })) => prompt_sheet(s, prompt, false, p),
@@ -47,7 +49,7 @@ pub fn layer(s: &App, p: Paint) -> Option<El> {
         (None, Some(Sheet::Delete { names, .. })) => super::delete::sheet(s, names, p),
         (None, Some(Sheet::AddToConfig(v))) => super::add_config::sheet(s, v, p),
         (None, Some(Sheet::Properties(v))) => super::properties::sheet(s, v, p),
-        (None, None) => conflict::sheet(s, p)?,
+        (None, None) => conflict::sheet(s, p).or_else(|| super::editing::conflict_sheet(s, p))?,
     };
     Some(
         col()

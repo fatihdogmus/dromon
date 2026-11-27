@@ -27,11 +27,13 @@ pub mod preview;
 pub mod properties;
 pub mod quick;
 pub mod refresh;
+pub mod remote_edit;
 pub mod search;
 pub mod selection;
 pub mod service;
 pub mod settings;
 pub mod sheets;
+mod shortcuts;
 pub mod toast;
 pub mod transfers;
 pub mod update;
@@ -63,9 +65,10 @@ pub use selection::{Selection, TypeSelect};
 #[cfg(test)]
 pub use service::Recorder;
 pub use service::{
-    Backend, Command, FileOp, FileOpEvent, FileOpKind, Found, HostBookCommand, HostBookEvent, Live, LiveUnavailable,
-    OpId, PreviewBytes, PreviewCommand, PreviewEvent, PreviewId, PreviewRange, SearchCommand, SearchEvent, SearchId,
-    ServiceEvent, Silent, SizeCommand, SizeEvent, SizeId, SizeTotal, TransferCommand, WindowId,
+    Backend, Command, EditChoice, EditId, EditStage, FileOp, FileOpEvent, FileOpKind, Found, HostBookCommand,
+    HostBookEvent, Live, LiveUnavailable, OpId, PreviewBytes, PreviewCommand, PreviewEvent, PreviewId, PreviewRange,
+    RemoteEditCommand, RemoteEditEvent, SearchCommand, SearchEvent, SearchId, ServiceEvent, Silent, SizeCommand,
+    SizeEvent, SizeId, SizeTotal, TransferCommand, WindowId,
 };
 pub use settings::{Density, Settings, SettingsChange, SettingsView};
 pub use sheets::{Sheet, Sheets};
@@ -176,6 +179,8 @@ pub struct App {
     pub poll: refresh::PollUi,
     /// A newer version, and installing it (`update.rs`).
     pub update: update::Update,
+    /// The files being edited in a local editor (`remote_edit.rs`).
+    pub edits: remote_edit::Edits,
 }
 
 /// What the user did, in the app's terms.
@@ -304,6 +309,8 @@ pub enum Action {
     TerminalFailed(String),
     /// The terminal apps found on this machine (from the thread that looked), for Settings.
     TerminalsFound(Vec<settings::Terminal>),
+    /// Edit in a local editor, Stop editing, the edit conflict sheet, Retry (`remote_edit.rs`).
+    RemoteEdit(remote_edit::RemoteEditAction),
 }
 
 /// What an action asks the view layer to do afterwards.
@@ -338,6 +345,8 @@ pub enum Effect {
     FocusList,
     /// Open this https link in the browser (a release's page).
     OpenUrl(String),
+    /// Open this local file in the app the system has for its type (a copy being edited).
+    OpenFile(PathBuf),
     /// Quit the app (every window), starting it again once it has exited when `relaunch`: an
     /// update is in place (`update.rs`).
     Quit { relaunch: bool },
@@ -372,6 +381,7 @@ impl App {
             inbox: VecDeque::new(),
             poll: refresh::PollUi::default(),
             update: update::Update::default(),
+            edits: remote_edit::Edits::default(),
         }
     }
 
@@ -509,6 +519,7 @@ impl App {
             ServiceEvent::Preview(ev) => self.preview_event(ev),
             ServiceEvent::Prompt(prompt) => self.ui.sheets.on_prompt(prompt),
             ServiceEvent::PromptClosed(id) => self.ui.sheets.on_closed(id),
+            ServiceEvent::RemoteEdit(ev) => self.remote_edit_event(ev),
             ServiceEvent::Search(ev) => self.search_event(ev),
             ServiceEvent::Status { host, status } => {
                 if matches!(status, ConnStatus::Ready | ConnStatus::Failed(_) | ConnStatus::Disconnected) {
@@ -648,11 +659,7 @@ impl App {
             | Action::TransfersTab(_)
             | Action::RevealTransfer(_)
             | Action::DropHover { .. } => self.transfer_action(action, &mut fx),
-            Action::QuitAnyway => {
-                self.ui.confirm_quit = false;
-                self.ui.quit_approved = true;
-                fx.push(Effect::CloseWindow);
-            }
+            Action::QuitAnyway => self.quit_anyway(&mut fx),
             Action::CancelQuit => self.ui.confirm_quit = false,
             Action::File(a) => self.file_action(a, &mut fx),
             Action::Palette(a) => self.palette_action(a, &mut fx),
@@ -667,99 +674,27 @@ impl App {
             Action::OpenTerminal(row) => self.open_terminal(row, &mut fx),
             Action::TerminalFailed(why) => self.terminal_failed(&why),
             Action::TerminalsFound(found) => self.ui.settings_page.terminals = found,
+            Action::RemoteEdit(a) => self.remote_edit_action(a, &mut fx),
         }
         fx
     }
 
-    /// The window's close button (⌘W, Alt+F4) was pressed: whether to close now. Closing the
-    /// last window quits, so then, with transfers running, it asks first (the quit sheet) and
-    /// says no; Quit there approves it. macOS ⌘Q and logging out don't come through here.
+    /// The window's close button (⌘W, Alt+F4) was pressed: whether to close now. Closing the last
+    /// window quits, so then, with transfers running or edits not on the server yet, it asks first
+    /// (the quit sheet) and says no; Quit there approves it. macOS ⌘Q and logging out don't come here.
     pub fn close_requested(&mut self) -> bool {
-        if self.ui.quit_approved || self.transfers.active() == 0 || self.windows_open() > 1 {
+        if self.ui.quit_approved || self.transfers.active() + self.edits.unsaved() == 0 || self.windows_open() > 1 {
             return true;
         }
         self.ui.confirm_quit = true;
         false
     }
 
-    /// Maps a shortcut to its action (`now` is for type-to-select). The conflict sheet is
-    /// modal like the prompt sheets: while it's up, the list's shortcuts do nothing.
-    pub fn shortcut(&mut self, sc: Shortcut, now: f64) -> Vec<Effect> {
-        // ⌘, shows the Settings page under whatever is modal here, as the app menu's item does;
-        // ⌘N and ⌘W are about windows, not this one's content.
-        match sc {
-            Shortcut::Settings => return self.act(Action::OpenSettings),
-            Shortcut::NewWindow => return self.act(Action::NewWindow),
-            Shortcut::CloseWindow => return self.act(Action::CloseWindow),
-            _ => {}
-        }
-        if self.conflict_on_screen().is_some() || self.ui.confirm_quit || self.update.confirming() {
-            return Vec::new();
-        }
-        // The quick-connect popover is modal too: Escape closes it, nothing reaches the list.
-        if self.ui.quick.open {
-            return match sc {
-                Shortcut::Escape => self.act(Action::HostBook(HostAction::CloseQuick)),
-                _ => Vec::new(),
-            };
-        }
-        // So is the palette: only its own keys (`palette.rs`).
-        if self.ui.palette.is_open() {
-            return self.palette_shortcut(sc);
-        }
-        // The Settings page has a few of its own; the folder view's wait for it (`page.rs`).
-        if self.on_settings() {
-            return self.settings_shortcut(sc);
-        }
-        // The preview panel takes a few, lets the cursor's through, and holds the rest.
-        if self.ui.preview.is_open()
-            && let Some(fx) = self.preview_shortcut(&sc, now)
-        {
-            return fx;
-        }
-        let action = match sc {
-            // ⌘K opens the palette from anywhere, a focused field included.
-            Shortcut::Palette => Action::Palette(PaletteAction::Toggle),
-            Shortcut::QuickConnect => Action::QuickConnect,
-            Shortcut::Settings | Shortcut::NewWindow | Shortcut::CloseWindow => return Vec::new(),
-            Shortcut::Download => Action::Download,
-            Shortcut::Upload => Action::PickUpload,
-            Shortcut::Back => Action::Back,
-            Shortcut::Forward => Action::Forward,
-            Shortcut::Up => Action::GoUp,
-            Shortcut::Open => Action::OpenSelection,
-            Shortcut::SelectAll => Action::SelectAll,
-            Shortcut::ToggleHidden => Action::ToggleHidden,
-            Shortcut::Filter => Action::OpenFilter,
-            Shortcut::Search => Action::Search(SearchAction::Open),
-            Shortcut::Escape => Action::Escape,
-            Shortcut::Move { delta, extend } => Action::Move { delta, extend },
-            Shortcut::Page { down, extend } => {
-                Action::Move { delta: if down { keys::PAGE_ROWS } else { -keys::PAGE_ROWS }, extend }
-            }
-            Shortcut::End { last, extend } => Action::End { last, extend },
-            Shortcut::Type(text) => Action::Type { text, now },
-            // Space types while type-to-select is collecting letters ("my file"), as in Finder.
-            Shortcut::Preview if self.ui.type_select.collecting(now) => Action::Type { text: " ".into(), now },
-            Shortcut::Preview => Action::Preview(PreviewAction::Toggle),
-            // Shift+F10 and the Menu key: the cursor row's menu, else the empty list's.
-            Shortcut::ContextMenu => return self.hit_menu_key().unwrap_or_else(|| self.context_menu_key()),
-            // A focused text field keeps its keys (§7): these are the list's.
-            Shortcut::File(_) | Shortcut::GoToPath | Shortcut::Host(_) | Shortcut::ShowTransfers
-                if self.text_focused() =>
-            {
-                return Vec::new();
-            }
-            Shortcut::File(k) => Action::File(k.action()),
-            Shortcut::GoToPath => Action::Palette(PaletteAction::OpenPath),
-            Shortcut::Host(n) => match n.checked_sub(1).and_then(|i| self.sidebar_order().get(i).cloned()) {
-                Some(host) => Action::SelectHost(host),
-                None => return Vec::new(),
-            },
-            Shortcut::ShowTransfers => Action::ToggleTransfers,
-            Shortcut::OpenTerminal => Action::OpenTerminal(self.cursor_row()),
-        };
-        self.act(action)
+    /// The quit sheet's Quit: closing is approved, and the window closes (quitting the app).
+    fn quit_anyway(&mut self, fx: &mut Vec<Effect>) {
+        self.ui.confirm_quit = false;
+        self.ui.quit_approved = true;
+        fx.push(Effect::CloseWindow);
     }
 
     fn select_host(&mut self, host: HostId) {

@@ -22,6 +22,7 @@ pub use super::hostbook::{HostBookCommand, HostBookEvent};
 pub use super::ops::{FileOp, FileOpEvent, FileOpKind, OpId};
 pub use super::preview::{PreviewBytes, PreviewCommand, PreviewEvent, PreviewId, PreviewRange};
 pub use super::properties::{SizeCommand, SizeEvent, SizeId, SizeTotal};
+pub use super::remote_edit::{EditChoice, EditId, EditStage, RemoteEditCommand, RemoteEditEvent};
 pub use super::search::{Found, SearchCommand, SearchEvent, SearchId};
 pub use super::update::{UpdateCommand, UpdateEvent};
 
@@ -67,6 +68,9 @@ pub enum Command {
     Poll { host: HostId },
     /// Quick preview, Space (`state/preview.rs`); answered with `Preview` events.
     Preview(PreviewCommand),
+    /// Edit in a local editor (`state/remote_edit.rs`); answered with `RemoteEdit` events, to
+    /// every window.
+    RemoteEdit(RemoteEditCommand),
     /// Search in subfolders (`state/search.rs`); answered with `Search` events.
     Search(SearchCommand),
     /// The reconnecting banner's Sign in (§3.9): the host's open, unanswered prompts again, to
@@ -219,6 +223,8 @@ pub enum ServiceEvent {
         path: RemotePath,
         entries: Vec<Entry>,
     },
+    /// How a file being edited in a local editor goes (`state/remote_edit.rs`).
+    RemoteEdit(RemoteEditEvent),
     /// What a search in subfolders found, and how it ended (`state/search.rs`).
     Search(SearchEvent),
     Status {
@@ -271,6 +277,7 @@ pub fn trace_line(ev: &ServiceEvent) -> String {
         ServiceEvent::Prompt(p) => format!("Prompt host={} id={}", p.host, p.id.0),
         ServiceEvent::PromptClosed(id) => format!("PromptClosed id={}", id.0),
         ServiceEvent::Refreshed { host, entries, .. } => format!("Refreshed host={host} entries={}", entries.len()),
+        ServiceEvent::RemoteEdit(ev) => super::remote_edit::trace_line(ev),
         ServiceEvent::Search(ev) => super::search::trace_line(ev),
         ServiceEvent::Status { host, status } => {
             let state = match status {

@@ -21,7 +21,7 @@
 //! backend lists and runs file operations on.
 //!
 //! Folder sizes and searches in subfolders walk the trees at once (`fixture/sizes.rs`,
-//! `fixture/search.rs`).
+//! `fixture/search.rs`); files being edited in a local editor are `fixture/remote_edit.rs`'s.
 //!
 //! Polling (§4.5) has no clock either: `Command::Poll` (the window gaining focus) polls at once
 //! through the service's own `Poller`, after the server's next changes made elsewhere
@@ -44,6 +44,7 @@ use tokio::time::{Duration, Instant};
 
 use super::changes;
 use super::hostbook::Book;
+use super::remote_edit::Edits;
 use super::transfers::Engine;
 use super::{Fixture, Step};
 use crate::service::lifecycle::{self, Event, Lifecycle, Phase};
@@ -75,6 +76,8 @@ pub struct Core {
     pub(super) from: WindowId,
     /// Saved and recent hosts (`fixture/hostbook.rs`).
     book: Book,
+    /// Files being edited in a local editor (`fixture/remote_edit.rs`).
+    pub(super) edits: Edits,
 }
 
 #[derive(Default)]
@@ -144,6 +147,7 @@ impl Core {
         let book = Book::new(fixture.clone());
         let windows = BTreeMap::from([(WindowId::FIRST, Visibility::Hidden)]);
         Core {
+            edits: Edits::at(fixture.now),
             fixture,
             conns: BTreeMap::new(),
             store: PasswordStore::new(),
@@ -564,6 +568,14 @@ impl Core {
         self.list_now(host, path, out);
     }
 
+    /// Lists `folder` of `host` again where a window shows it (a change the service's polling
+    /// would notice).
+    pub(super) fn relist(&mut self, host: &HostId, folder: RemotePath, out: &mut Vec<ServiceEvent>) {
+        if self.up(host) && self.conns.get(host).is_some_and(|c| c.watch.shows(&folder)) {
+            self.list_now(host, folder, out);
+        }
+    }
+
     fn list_now(&mut self, host: &HostId, path: RemotePath, out: &mut Vec<ServiceEvent>) {
         let listed = self.transfers.tree.list(host, &path);
         if let Some(c) = self.conns.get_mut(host) {
@@ -719,6 +731,7 @@ impl Core {
                 }
             }
             Command::Disconnect { host } => {
+                self.close_edits(&host, &mut out);
                 if self.conns.contains_key(&host) {
                     self.drive(&host, Work::Life(Event::Disconnect), &mut out);
                 } else {
@@ -732,8 +745,13 @@ impl Core {
             Command::List { host, path } => self.list(&host, path, &mut out),
             // Fixture servers have no live updates: their hosts stay polled (`Live::Off`).
             Command::LiveUpdates { .. } => {}
-            Command::Poll { host } => self.poll(&host, &mut out),
+            Command::Poll { host } => {
+                self.poll(&host, &mut out);
+                // Back from the editor: what's being edited there is saved.
+                self.save_edits(&host, &mut out);
+            }
             Command::Preview(cmd) => self.preview(cmd, &mut out),
+            Command::RemoteEdit(cmd) => self.remote_edit(cmd, &mut out),
             Command::Search(cmd) => self.search(cmd, &mut out),
             Command::ShowPrompts { host } => self.show_prompts(&host, &mut out),
             Command::Transfer(cmd) => self.transfer(cmd, &mut out),

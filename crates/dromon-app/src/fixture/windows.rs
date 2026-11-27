@@ -4,7 +4,8 @@
 //!
 //! A command's events go to the window that sent it at once (the answer of `Backend::send`),
 //! and to every other window through its [`Backend::pending`] list (calling the wake, so it
-//! catches up): hosts, statuses, log lines, listings, operations, transfers. Three kinds go to
+//! catches up): hosts, statuses, log lines, listings, operations, transfers, files being edited
+//! (each window lists them; the one that started an edit opens its copy). Three kinds go to
 //! one window only, as the service sends them: a prompt (to the window that asked to sign in
 //! with `Command::ShowPrompts`, else the focused window, else the sender; a `ShowPrompts` sends
 //! the host's open prompt again to its sender alone), `Opened` for a host that was up already for another window (to the sender),
@@ -55,6 +56,19 @@ impl FixtureBackend {
             wake: None,
         };
         FixtureBackend { shared: Rc::new(RefCell::new(shared)), window: WindowId::FIRST }
+    }
+
+    /// The same window's end again, for a test to look into the fixture after handing this one
+    /// to an app.
+    #[cfg(test)]
+    pub fn probe(&self) -> FixtureBackend {
+        FixtureBackend { shared: self.shared.clone(), window: self.window }
+    }
+
+    /// The local copies the fixture holds for files being edited (`remote_edit.rs`).
+    #[cfg(test)]
+    pub fn edited_copies(&self) -> Vec<std::path::PathBuf> {
+        self.shared.borrow().core.edits.copies()
     }
 }
 

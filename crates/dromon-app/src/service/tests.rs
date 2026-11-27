@@ -195,6 +195,7 @@ impl Fixture {
             hosts_file: None,
             hosts: ["pw", "hostkey", "vanish"].iter().map(|a| HostSpec::from_config_alias(a)).collect(),
             without_env: Vec::new(),
+            editing_root: None,
         };
         let (commands, rx) = mpsc::unbounded_channel();
         let (sink, events) = mpsc::unbounded_channel();

@@ -261,6 +261,16 @@ fn popovers_menus_and_sheets_keep_tab_inside() {
         let order = walk(name, *start, Some(modal));
         println!("{name}: {}", order.join(" → "));
     }
+    // Files being edited: the popover's Editing section, then the edit conflict sheet.
+    let order = walk("editing", scene("editing"), Some("transfers"));
+    let id = |s: fn(&mut App)| scene_runtime(s).state.edits.sessions.iter().map(|e| e.id.0).collect::<Vec<_>>();
+    let ids = id(scene("editing"));
+    for k in [format!("edit-stop-{}", ids[0]), format!("edit-resolve-{}", ids[2]), format!("edit-retry-{}", ids[3])] {
+        assert!(order.contains(&k), "{k} in {order:?}");
+    }
+    let mut order = walk("edit-conflict", scene("edit-conflict"), Some("edit-conflict"));
+    order.sort();
+    assert_eq!(order, ["edit-conflict-discard", "edit-conflict-keep-both", "edit-conflict-replace"]);
     // The transfers popover: its tab, then each row's pause, cancel, retry and reveal.
     let order = walk("transfers", scenes::transfers, Some("transfers"));
     for k in ["tr-tab-downloads", "tr-pause-9", "tr-cancel-9", "tr-resume-5", "tr-retry-3", "tr-1", "tr-clear"] {
@@ -495,6 +505,8 @@ fn the_drawn_menu_moves_by_arrows_and_return_picks() {
     press(&mut rt, Key::Down, Mods::default());
     let first = focused_key(&rt);
     assert_eq!(first, "ctx-open", "↓ highlights the first item");
+    press(&mut rt, Key::Down, Mods::default());
+    assert_eq!(focused_key(&rt), "ctx-edit");
     press(&mut rt, Key::Down, Mods::default());
     press(&mut rt, Key::Down, Mods::default());
     assert_eq!(focused_key(&rt), "ctx-terminal");

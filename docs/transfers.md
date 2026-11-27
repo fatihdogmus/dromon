@@ -31,6 +31,7 @@ User-facing behaviour (what each paste or drag does, conflict sheets, the popove
 - [Reference: Copies and Moves](#reference-copies-and-moves)
 - [Reference: Progress Maths](#reference-progress-maths)
 - [Pattern: How the App Drives the Engine](#pattern-how-the-app-drives-the-engine)
+- [Decision: Editing in a Local Editor Uploads Through the Engine's Write Path](#decision-editing-in-a-local-editor-uploads-through-the-engines-write-path)
 
 ---
 
@@ -320,3 +321,55 @@ Adding a transfer action or showing more of a job.
 
 - Does the UI only mirror `JobView`s, never keep its own job state?
 - Does the fixture engine handle the new command too?
+
+## Decision: Editing in a Local Editor Uploads Through the Engine's Write Path
+
+**Status:** Accepted
+**Scope:** `dromon-app/src/service/remote_edit.rs`, `state/remote_edit.rs`, `fixture/remote_edit.rs`
+
+### Context
+
+Edit (a text file's row menu, the palette, ⌘E) downloads a file into a local copy that the
+user's own app opens, and every save there goes back to the server. A save must never leave a
+half-written file on the server, and must not silently overwrite a change someone else made
+there meanwhile.
+
+### Decision
+
+Each edit is a task of its host's connection (`Edits` in `conn.rs`) that uses
+`dromon_transfer::io::download` and `io::upload` directly, on the host's session: the same part
+files and atomic rename as every transfer, but no queue job. They run quietly: a job per save
+would flood the transfers list, and the queue's name-clash check isn't the question an edit
+asks. The transfers popover's Editing section shows each edit instead.
+
+### Rules and examples
+
+- **Saves.** The local copy's modification time and size are looked at every second
+  (`WATCH_EVERY`); a change that held still for a whole look is a save (pure `Watch`), so an
+  editor's write-a-temporary-file-and-rename counts once.
+- **The conflict check.** Before each upload the server's copy is `lstat`ed; if its size or
+  mtime differs from what the edit last downloaded or uploaded (or it's gone), nothing uploads
+  and the UI asks (`RemoteEditEvent::Conflict`): **Replace** (upload with `overwrite`),
+  **Keep both** (upload without it: `upload`'s own free name, `notes (1).txt`, from
+  `unique_name`), **Discard my changes** (download the server's copy into a staging folder,
+  then rename it over the local copy).
+- After Keep both the edit stays on its original path, whose server copy is still the newer
+  one, so the next save asks again: no save ever replaces a change the user hasn't seen.
+- An upload never resumes from a part file (an earlier save's part holds other bytes); a
+  download of the server's copy always starts over too.
+- After an upload to the edit's path, the server's copy (stat again) is the next base.
+- An upload cut off by a lost connection is tried again when the host's session is back; any
+  other failure keeps the local copy and waits for Retry or the next save.
+- The fixture saves every edit of a host when a window gains focus (`Command::Poll`), checking
+  the tree as the service checks the server ([fixtures.md](fixtures.md)).
+
+### Consequences
+
+Edit uploads don't count against "Transfers at once" and show no progress bar, only how each
+edit stands. Where the local copies live and how they're cleaned up is
+[security.md](security.md#decision-local-copies-of-files-being-edited).
+
+### Agent checklist
+
+- Does a change to the edit path still write only through `io::upload`/`io::download`?
+- Is every upload preceded by the conflict check (or an explicit Replace/Keep both)?
