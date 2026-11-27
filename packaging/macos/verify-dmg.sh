@@ -4,7 +4,8 @@
 #
 #   - the DMG holds Dromon.app, an /Applications link and its installer window (the layout's
 #     .DS_Store and the background image)
-#   - Info.plist: the bundle id of packaging/macos/Info.plist, the version, macOS 14 minimum
+#   - Info.plist: the bundle id of packaging/macos/Info.plist, the version, macOS 14 minimum,
+#     and the icon its CFBundleIconFile names in Contents/Resources/
 #   - the executable is universal (arm64 and x86_64) and prints "dromon <version>" for --version
 #     (this Mac's half, and the Intel half too on Apple silicon with Rosetta)
 #   - codesign --verify --deep --strict passes (ad-hoc or Developer ID)
@@ -53,6 +54,8 @@ plist() { /usr/libexec/PlistBuddy -c "Print :$1" "$2"; }
 [ "$(plist CFBundleIdentifier "$app/Contents/Info.plist")" = "$(plist CFBundleIdentifier "$template")" ] || fail "wrong bundle identifier"
 [ "$(plist CFBundleShortVersionString "$app/Contents/Info.plist")" = "${version%%-*}" ] || fail "wrong CFBundleShortVersionString"
 [ "$(plist LSMinimumSystemVersion "$app/Contents/Info.plist")" = "$(plist LSMinimumSystemVersion "$template")" ] || fail "wrong LSMinimumSystemVersion"
+icon="$(plist CFBundleIconFile "$app/Contents/Info.plist").icns"
+[ -s "$app/Contents/Resources/$icon" ] || fail "Dromon.app has no Contents/Resources/$icon (its CFBundleIconFile)"
 archs=$(lipo -archs "$app/Contents/MacOS/dromon" | tr ' ' '\n' | sort | xargs)
 [ "$archs" = "arm64 x86_64" ] || fail "dromon is '$archs', not universal (arm64 x86_64)"
 ran=()

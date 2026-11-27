@@ -55,7 +55,7 @@ done
 
 sed "s/@VERSION@/$short/g" "$root/packaging/macos/Info.plist" > "$app/Contents/Info.plist"
 plutil -lint "$app/Contents/Info.plist"
-cp "$root/packaging/icon/dromon.icns" "$app/Contents/Resources/dromon.icns"
+cp "$root/assets/brand/macos/Dromon.icns" "$app/Contents/Resources/Dromon.icns"
 cp "$root/LICENSE" "$app/Contents/Resources/licenses/LICENSE.txt"
 cp "$root/crates/dromon-app/assets/fonts/Inter-LICENSE.txt" "$root/crates/dromon-app/assets/fonts/GeistMono-OFL.txt" "$app/Contents/Resources/licenses/"
 

@@ -57,6 +57,12 @@ const COMMANDS: &[(&str, Run, &str, &str)] = &[
     ("perf", Run::Script("perf.sh"), "[--gate …|all]", "the performance gates, as one table"),
     ("accents", Run::Script("accents.sh"), "", "render the accent candidates side by side in target/accents"),
     (
+        "brand",
+        Run::Script("brand.sh"),
+        "[--out DIR] [BUILD_LOGO ARGS]",
+        "rebuild the brand kit in assets/brand (icons, marks, lockups) from its build_logo.py",
+    ),
+    (
         "package-linux",
         Run::Script("package-linux.sh"),
         "[--arch …] [--verify]",

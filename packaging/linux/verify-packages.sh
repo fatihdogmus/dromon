@@ -7,6 +7,9 @@
 #   Dromon-<version>-linux-<arch>.pkg.tar.zst  pacman -U in archlinux:latest (x64; Arch has no
 #                                             arm64 image, so arm64 gets static checks only)
 #
+# Each install must also put the app icon in /usr/share/icons/hicolor/ at every size (the
+# scalable SVG and each PNG), and the deb its desktop file and copyright.
+#
 # With --key, also checks each package's detached signature (.deb.asc, .pkg.tar.zst.sig) and
 # SHA256SUMS.asc when present, against that key alone (a temporary GNUPGHOME).
 # Runs containers for the host's architecture: verify arm64 on an arm64 machine.
@@ -38,10 +41,15 @@ summary() {
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then echo "- $*" >> "$GITHUB_STEP_SUMMARY"; fi
 }
 
+# The app icon at every size of the brand kit's hicolor tree (stage.sh), checked inside each
+# container: `test -f` for each, so a missing size fails the install check.
+icons="scalable/apps/dromon.svg"
+for size in 16 24 32 48 64 128 256 512; do icons+=" ${size}x${size}/apps/dromon.png"; done
+
 # Docker Hub's official images through Google's mirror: Docker Hub rate-limits anonymous pulls.
 hub=${DROMON_IMAGE_MIRROR-mirror.gcr.io/library/}
 for image in debian:12 ubuntu:24.04; do
-  reported=$(docker run --rm -v "$dir:/pkg:ro" -e DEB="$deb" "$hub$image" bash -euo pipefail -c '
+  reported=$(docker run --rm -v "$dir:/pkg:ro" -e DEB="$deb" -e ICONS="$icons" "$hub$image" bash -euo pipefail -c '
     export DEBIAN_FRONTEND=noninteractive
     # A mirror mid-sync serves index files of the wrong size for a moment ("Mirror sync in
     # progress?"): try again rather than fail the check.
@@ -54,7 +62,9 @@ for image in debian:12 ubuntu:24.04; do
     apt-get install -y -qq --no-install-recommends -o Acquire::Retries=3 "/pkg/$DEB" > /dev/null
     command -v ssh > /dev/null || { echo "openssh-client was not installed" >&2; exit 1; }
     test -f /usr/share/applications/dromon.desktop
-    test -f /usr/share/icons/hicolor/256x256/apps/dromon.png
+    for icon in $ICONS; do
+      test -f "/usr/share/icons/hicolor/$icon" || { echo "no icon /usr/share/icons/hicolor/$icon" >&2; exit 1; }
+    done
     test -f /usr/share/doc/dromon/copyright
     dromon --version
   ') || die "$deb failed to install or run in $image"
@@ -71,7 +81,7 @@ if [ "$arch" = x64 ]; then
     key_mount=(-v "$(cd "$(dirname "$key")" && pwd)/$(basename "$key"):/release-key.asc:ro")
     fingerprint=$(gpg --batch --with-colons --list-keys | awk -F: '$1 == "fpr" { print $10; exit }')
   fi
-  reported=$(docker run --rm -v "$dir:/pkg:ro" "${key_mount[@]}" -e PKG="$pkg" -e FINGERPRINT="$fingerprint" "${hub}archlinux:latest" bash -euo pipefail -c '
+  reported=$(docker run --rm -v "$dir:/pkg:ro" "${key_mount[@]}" -e PKG="$pkg" -e FINGERPRINT="$fingerprint" -e ICONS="$icons" "${hub}archlinux:latest" bash -euo pipefail -c '
     for try in 1 2 3 4; do
       pacman -Syu --noconfirm --noprogressbar > /dev/null && break
       [ "$try" -lt 4 ] || exit 1
@@ -85,6 +95,9 @@ if [ "$arch" = x64 ]; then
     fi
     pacman -U --noconfirm --noprogressbar "/pkg/$PKG" > /dev/null
     command -v ssh > /dev/null || { echo "openssh was not installed" >&2; exit 1; }
+    for icon in $ICONS; do
+      test -f "/usr/share/icons/hicolor/$icon" || { echo "no icon /usr/share/icons/hicolor/$icon" >&2; exit 1; }
+    done
     test -f /usr/share/licenses/dromon/copyright
     dromon --version
   ') || die "$pkg failed to install or run in archlinux:latest"

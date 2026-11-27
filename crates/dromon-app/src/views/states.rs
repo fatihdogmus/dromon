@@ -4,14 +4,15 @@
 use dromon_core::ConnStatus;
 use rune::{El, LoopSpec, Transition, Tx, col, el, icon, row, text};
 
+use super::brand::{self, Mark};
 use super::widgets::{Keyboard, chord, dot};
 use super::{Paint, run};
 use crate::icons::{self, IconPair};
 use crate::state::{Action, App, ConnView};
 use crate::theme::{motion, radius, size, space, type_};
 
-/// A centred headline, sub-text and optional extras.
-fn centred(key: &'static str, p: Paint, headline: &str, sub: Option<El>) -> El {
+/// A centred headline under an optional picture, with sub-text and optional extras.
+fn centred(key: &'static str, p: Paint, top: Option<El>, headline: &str, sub: Option<El>) -> El {
     col()
         .key(key)
         .w_full()
@@ -21,6 +22,7 @@ fn centred(key: &'static str, p: Paint, headline: &str, sub: Option<El>) -> El {
         .pb(size::TOOLBAR)
         .transition(Transition::opacity())
         .transition_motion(motion::MOVE, motion::MOVE)
+        .children(top)
         .child(text(headline.to_owned()).font(type_::DISPLAY).color(p.t.text))
         .children(sub)
 }
@@ -50,8 +52,8 @@ fn button(p: Paint, key: &'static str, glyph: &'static IconPair, label: &str, ac
         .child(text(label).font(type_::BODY_STRONG).color(t.text))
 }
 
-/// "Pick a host to start", and the host opened last time (§12: offered, never connected by
-/// itself) when the sidebar still has it.
+/// The brand's mark over "Pick a host to start", and the host opened last time (§12: offered,
+/// never connected by itself) when the sidebar still has it.
 pub fn welcome(s: &App, p: Paint) -> El {
     let last = s.last_host().and_then(|h| s.hosts.get(&h).map(|spec| (h.clone(), spec.display_name().to_owned())));
     let sub = col()
@@ -62,16 +64,18 @@ pub fn welcome(s: &App, p: Paint) -> El {
             button(p, "welcome-last-host", &icons::SERVER, &format!("Connect to {name}"), Action::SelectHost(h))
         }))
         .child(button(p, "welcome-quick-connect", &icons::PLUS, "Quick connect", Action::QuickConnect));
-    centred("welcome", p, "Pick a host to start", Some(sub))
+    let mark = brand::mark("welcome-mark", Mark::Full, p);
+    centred("welcome", p, Some(mark), "Pick a host to start", Some(sub))
 }
 
 pub fn empty(p: Paint) -> El {
-    centred("empty", p, "Empty folder", Some(text("Drop files here to upload").font(type_::BODY).color(p.t.text_2)))
+    let sub = text("Drop files here to upload").font(type_::BODY).color(p.t.text_2);
+    centred("empty", p, None, "Empty folder", Some(sub))
 }
 
 pub fn no_matches(p: Paint, query: &str) -> El {
     let sub = text("Nothing in this folder matches").font(type_::BODY).color(p.t.text_2);
-    centred("no-matches", p, &format!("No matches for “{query}”"), Some(sub))
+    centred("no-matches", p, None, &format!("No matches for “{query}”"), Some(sub))
 }
 
 pub fn message(p: Paint, headline: &str, detail: &str, go_up: bool) -> El {
@@ -80,7 +84,7 @@ pub fn message(p: Paint, headline: &str, detail: &str, go_up: bool) -> El {
         .gap(space::S2)
         .child(text(detail.to_owned()).font(type_::MONO).color(p.t.text_2))
         .children(go_up.then(|| button(p, "state-go-up", &icons::ARROW_UP, "Go up", Action::GoUp)));
-    centred("message", p, headline, Some(sub))
+    centred("message", p, None, headline, Some(sub))
 }
 
 pub fn denied(p: Paint, c: &ConnView) -> El {
@@ -123,7 +127,7 @@ pub fn failed(s: &App, c: &ConnView, msg: &str, p: Paint) -> El {
         .max_w(520.0)
         .child(text(msg.to_owned()).key("state-reason").font(type_::BODY).color(p.t.text_2).wrap())
         .child(actions);
-    centred("failed", p, &format!("Couldn't connect to {host}"), Some(sub))
+    centred("failed", p, None, &format!("Couldn't connect to {host}"), Some(sub))
 }
 
 /// The user disconnected: offer to connect again.
@@ -134,7 +138,7 @@ pub fn disconnected(s: &App, c: &ConnView, p: Paint) -> El {
         .gap(space::S2)
         .child(text("Passwords for it were forgotten.").font(type_::BODY).color(p.t.text_2))
         .child(button(p, "state-connect", &icons::SERVER, "Connect", Action::SelectHost(c.host.clone())));
-    centred("disconnected", p, &format!("Disconnected from {host}"), Some(sub))
+    centred("disconnected", p, None, &format!("Disconnected from {host}"), Some(sub))
 }
 
 /// Twelve rows of placeholder bars, `row_h` tall as the list's, pulsing gently in opacity (no
