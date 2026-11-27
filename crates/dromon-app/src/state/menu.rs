@@ -1,5 +1,6 @@
 //! Context menus (§5 M3): a row's, and the list's empty area's (both offer New folder: a full
-//! folder may leave no empty area to right-click). One model for both ways of
+//! folder may leave no empty area to right-click), and a search result's (`search.rs`: what
+//! works on a result away from its folder). One model for both ways of
 //! showing them: a native menu where Rune has one (macOS, Windows), a drawn one elsewhere
 //! (`views/menu.rs`). Items that would change the server are disabled while the host isn't
 //! connected; Paste also needs a clip.
@@ -20,6 +21,9 @@ pub enum MenuKind {
     Row(String),
     /// Right-clicked on the list where there's no row.
     Empty,
+    /// Right-clicked on a search result, by its key (`search::hit_key`; selected first if it
+    /// wasn't): Download, Copy path, Properties.
+    Hit(String),
     /// Right-clicked on a host in the sidebar (`hostbook.rs`).
     Host(HostId),
 }
@@ -124,6 +128,12 @@ impl App {
                     }),
                 ]
             }
+            MenuKind::Hit(_) => vec![
+                item("download", "Download", live, Some("mod+d")),
+                item("copy-path", "Copy path", true, Some("mod+alt+c")),
+                MenuEntry::Separator,
+                item("properties", "Properties", self.hit_properties().is_some(), Some(properties_chord())),
+            ],
             MenuKind::Host(id) => self.host_menu(id),
         }
     }
@@ -148,7 +158,7 @@ impl App {
             (_, "new-folder") => Action::File(FileAction::NewFolder),
             (_, "refresh") => Action::File(FileAction::Refresh),
             (_, "hidden") => Action::ToggleHidden,
-            (MenuKind::Row(_), "properties") => Action::File(FileAction::Properties),
+            (MenuKind::Row(_) | MenuKind::Hit(_), "properties") => Action::File(FileAction::Properties),
             _ => return None,
         })
     }

@@ -59,8 +59,8 @@ pub fn open(s: &mut App, kind: MenuKind, at: PointerPress, tx: &mut Tx) {
 }
 
 /// The keyboard asked for `kind`'s menu (Shift+F10, the Menu key): it opens below its row's
-/// bottom-left corner, as a keyboard menu does; a row that isn't on screen, and the empty
-/// area, use the list's top-left.
+/// bottom-left corner (a folder row's, or a search result's: both are `rows/<key>`), as a
+/// keyboard menu does; a row that isn't on screen, and the empty area, use the list's top-left.
 pub fn open_at_row(kind: MenuKind, tx: &mut Tx) {
     let at_list = |kind: MenuKind, tx: &mut Tx| {
         tx.read_layout(super::LIST, move |s: &mut App, rect, tx: &mut Tx| {
@@ -68,7 +68,7 @@ pub fn open_at_row(kind: MenuKind, tx: &mut Tx) {
             open(s, kind, PointerPress { x, y }, tx);
         });
     };
-    let MenuKind::Row(name) = &kind else { return at_list(kind, tx) };
+    let (MenuKind::Row(name) | MenuKind::Hit(name)) = &kind else { return at_list(kind, tx) };
     tx.read_layout(format!("{}/{name}", super::ROWS), move |s: &mut App, rect, tx: &mut Tx| match rect {
         Some([x, y, _, h]) => open(s, kind, PointerPress { x, y: y + h }, tx),
         None => at_list(kind, tx),

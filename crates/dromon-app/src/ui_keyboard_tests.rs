@@ -176,12 +176,13 @@ fn tab_walks_the_window_in_reading_order() {
         "status-conn",
     ];
     assert_eq!(order, expected);
-    // Back and forward join the toolbar once there's history; the filter field and its clear
-    // button replace the Filter button.
+    // Back and forward join the toolbar once there's history; the filter's scope switch (one
+    // stop, on its chosen segment), the field and its clear button replace the Filter button.
     let order = walk("filter", scenes::filter, None);
     let at = order.iter().position(|k| k == "tb-filter-input").expect("the field");
     assert_eq!(order[(at + 1) % order.len()], "tb-filter-clear", "{order:?}");
-    assert_eq!(order[(at + order.len() - 1) % order.len()], "crumb-2", "{order:?}");
+    assert_eq!(order[(at + order.len() - 1) % order.len()], "tb-scope-folder", "{order:?}");
+    assert_eq!(order[(at + order.len() - 2) % order.len()], "crumb-2", "{order:?}");
     let order = walk("welcome", scenes::welcome, None);
     assert_eq!(
         order,

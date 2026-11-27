@@ -201,6 +201,16 @@ than like `du`:
 In the demo, `/var/www/site/releases` totals 303 KB (303,365 bytes), 3 files, 4 folders, and
 `/var/lib` has one folder that can't be read (`mysql`).
 
+### Search in subfolders
+
+A search (⌘⇧F) walks the tree the same way, at once: everything it finds in one batch, then the
+end, with nothing else to write down. Names match as in the app (a substring ignoring case, or
+a glob of the whole name with `*` or `?`); symlinks match by name and are never walked into;
+with hidden files off, dot entries are neither matched nor walked into. Unreadable folders are
+noted ("1 folder couldn't be read") and `"connection-lost"` stops the search and drops the
+connection, as for a folder size. In the demo, `*.json` from `/var/www/site` finds three files
+in two folders.
+
 ### Entries
 
 `{"name": "index.html", "kind": "file", "size": 14812, "mtime": "2026-11-24T18:00:00Z", "mode": "0644"}`

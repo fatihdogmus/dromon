@@ -12,8 +12,8 @@ use rune::TextEdit;
 use crate::fixture;
 use crate::state::log::LogBuffer;
 use crate::state::{
-    Action, App, DropTarget, Effect, FileAction, HostAction, MenuKind, PaletteAction, RowTarget, ServiceEvent, Silent,
-    Tab,
+    Action, App, DropTarget, Effect, FileAction, HostAction, MenuKind, PaletteAction, RowTarget, SearchAction,
+    ServiceEvent, Silent, Tab,
 };
 use crate::theme::Appearance;
 
@@ -96,6 +96,26 @@ pub fn filter(s: &mut App) {
 pub fn light(s: &mut App) {
     listing(s);
     s.ui.appearance = Appearance::Light;
+}
+
+/// ⌘⇧F and `*.js*` typed on prod's site: the results with their folders (the folder searched,
+/// a release below it), one selected, and the line saying what was found where.
+pub fn search_results(s: &mut App) {
+    listing(s);
+    act(s, Action::Search(SearchAction::Open));
+    let query = "*.js*";
+    s.ui.filter_edit = TextEdit::new(query);
+    s.ui.filter_edit.focused = true;
+    act(s, Action::Search(SearchAction::Typed { text: query.into(), now: 0.0 }));
+    act(s, Action::Search(SearchAction::Tick(crate::state::search::DEBOUNCE)));
+    if let Some(i) = s.ui.search.found.iter().position(|f| f.folder != "." && f.entry.name == "package.json") {
+        act(s, Action::Click { name: crate::state::search::hit_key(i), extend: false, toggle: false });
+    }
+}
+
+/// [`search_results`] in the light theme.
+pub fn search_results_light(s: &mut App) {
+    lit(s, search_results);
 }
 
 /// Connecting to prod, and ssh asks `kind` with `text`.
@@ -663,6 +683,8 @@ pub const SCENES: &[Scene] = &[
     ("permission-denied", permission_denied),
     ("reconnecting", reconnecting),
     ("filter", filter),
+    ("search-results", search_results),
+    ("search-results-light", search_results_light),
     ("light", light),
     ("auth-password", auth_password),
     ("auth-password-error", auth_password_error),

@@ -1,7 +1,8 @@
 //! What a screen reader is told without focus moving (§6.9): a transfer that finished or
 //! failed, a delete that's done or stopped, a connection lost and back, a note such as "the
-//! folder on screen was removed". The view's poll asks [`Announcer::news`] each frame and says
-//! it through the window's live region (`Tx::announce`, polite).
+//! folder on screen was removed", what a search in subfolders found once it ends. The view's
+//! poll asks [`Announcer::news`] each frame and says it through the window's live region
+//! (`Tx::announce`, polite).
 //!
 //! It compares what it last saw with the state now, so it says each change once, whichever
 //! event brought it, and nothing for what was there when it first looked (a window's start, a
@@ -13,7 +14,7 @@ use dromon_core::{ConnStatus, HostId};
 use dromon_transfer::{JobId, JobKind, JobView, TaskState};
 
 use super::App;
-use super::service::FileOpKind;
+use super::service::{FileOpKind, SearchId};
 use super::toast::{ToastId, Tone};
 
 #[cfg(test)]
@@ -49,6 +50,8 @@ pub struct Announcer {
     ops: BTreeSet<u64>,
     /// Failed deletes' and notes' toasts already said.
     toasts: BTreeSet<ToastKey>,
+    /// The last search said to have ended.
+    search: Option<SearchId>,
 }
 
 /// [`ToastId`], ordered.
@@ -145,6 +148,13 @@ impl Announcer {
             if self.toasts.insert(t.id.into()) && primed {
                 said.push(t.text);
             }
+        }
+        // A search in subfolders that ended: how many it found, where.
+        if let Some((id, text)) = super::search::finished(&s.ui.search)
+            && self.search.replace(id) != Some(id)
+            && primed
+        {
+            said.push(text);
         }
 
         (!said.is_empty()).then(|| said.join(". "))

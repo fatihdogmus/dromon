@@ -19,8 +19,7 @@ use dromon_core::{Entry, EntryKind, Error, HostId, RemotePath};
 use dromon_transfer::unique_name;
 
 use super::{Fixture, TreeError, default_mode, default_size};
-use crate::service::sizes;
-use crate::state::SizeTotal;
+use crate::service::sizes::{self, Visit};
 
 /// How deep a moved tree or a tidy goes before it stops looking.
 const MAX_DEPTH: usize = 64;
@@ -356,21 +355,23 @@ impl Tree {
         Ok(total)
     }
 
-    /// The Properties sheet's Calculate on the folder `dir`, as the service's walk counts it
-    /// (`service/sizes.rs`): files, links and other non-folders by their size, links never
-    /// followed, folders that can't be listed counted as unreadable; a lost connection stops it
-    /// with what it had counted.
-    pub fn folder_size(&self, host: &HostId, dir: &RemotePath) -> Result<SizeTotal, (SizeTotal, Error)> {
-        let mut total = SizeTotal::default();
+    /// Walks the folder `dir` as the service's walk does (`service/sizes.rs`), for a folder
+    /// size or a search: every folder `visit` queues, one at a time, folders that can't be
+    /// listed noted as unreadable; a lost connection stops it.
+    pub fn walk(&self, host: &HostId, dir: &RemotePath, visit: &mut impl Visit) -> Result<(), Error> {
         let mut todo = vec![dir.clone()];
         while let Some(d) = todo.pop() {
             match self.list(host, &d) {
-                Ok(entries) => sizes::count(&mut total, &d, entries, &mut todo),
-                Err(e) if sizes::skippable(&e) => total.unreadable += 1,
-                Err(e) => return Err((total, e)),
+                Ok(entries) => {
+                    if visit.listed(&d, entries, &mut todo).is_break() {
+                        break;
+                    }
+                }
+                Err(e) if sizes::skippable(&e) => visit.unreadable(),
+                Err(e) => return Err(e),
             }
         }
-        Ok(total)
+        Ok(())
     }
 
     /// Entries at and below the folder `dir`, not through links.

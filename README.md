@@ -134,7 +134,7 @@ Linux needs `libxkbcommon-dev` and `libwayland-dev`. Want to look around without
 
 **Signing in.** Host-key checks, passwords, key passphrases, keyboard-interactive 2FA and jump hosts, all in native sheets. Each host has a connection log with a *Verbose logging* switch for the day something goes wrong.
 
-**Files.** Browse, sort, filter, new folder, rename, delete, copy path. Copy, cut and paste work across hosts and windows, and you can drag rows onto a folder, a breadcrumb or another host. Right-click for everything else.
+**Files.** Browse, sort, filter, search by name through every subfolder, new folder, rename, delete, copy path. Copy, cut and paste work across hosts and windows, and you can drag rows onto a folder, a breadcrumb or another host. Right-click for everything else.
 
 **Transfers.** Downloads and uploads of files and whole folders, with resume, Chrome-style `name (1)` renaming or a Replace / Keep both / Skip choice on clashes. Progress in the toolbar, a badge in the Dock or taskbar, and a notification when a long job finishes while you're elsewhere.
 
@@ -147,7 +147,7 @@ Linux needs `libxkbcommon-dev` and `libwayland-dev`. Want to look around without
 <table>
   <tr><td><kbd>⌘K</kbd></td><td>Command palette: hosts, folders, actions</td><td><kbd>⌘D</kbd> · <kbd>⌘U</kbd></td><td>Download the selection · upload files</td></tr>
   <tr><td><kbd>⌘L</kbd></td><td>Go to a path</td><td><kbd>⌘C</kbd> <kbd>⌘X</kbd> <kbd>⌘V</kbd></td><td>Copy, cut, paste, also between hosts</td></tr>
-  <tr><td><kbd>⌘F</kbd></td><td>Filter the folder</td><td><kbd>⌥⌘V</kbd></td><td>Move here</td></tr>
+  <tr><td><kbd>⌘F</kbd> · <kbd>⌘⇧F</kbd></td><td>Filter the folder · search its subfolders</td><td><kbd>⌥⌘V</kbd></td><td>Move here</td></tr>
   <tr><td><kbd>⌘↑</kbd> <kbd>⌘[</kbd> <kbd>⌘]</kbd></td><td>Up, back, forward</td><td><kbd>⌘⇧N</kbd> · <kbd>F2</kbd></td><td>New folder · rename</td></tr>
   <tr><td><kbd>⌘1</kbd>…<kbd>⌘9</kbd></td><td>Switch host</td><td><kbd>⌘⌫</kbd></td><td>Delete</td></tr>
   <tr><td><kbd>⌘⇧K</kbd></td><td>Quick connect</td><td><kbd>⌘⇧J</kbd></td><td>Show transfers</td></tr>
