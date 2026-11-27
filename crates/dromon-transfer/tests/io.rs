@@ -14,8 +14,8 @@ use dromon_core::{EntryKind, Error, RemotePath};
 use dromon_sftp::{Sftp, WriteMode};
 use dromon_testkit::{Fixture, Role, file_sha1, openssh};
 use dromon_transfer::io::{
-    CopyOptions, create_dirs, download, free_remote_name, local_side, remote_existing, remote_kind, remote_side,
-    remove_part, scan_local, scan_remote, upload,
+    CopyOptions, copy_remote, create_dirs, download, free_remote_name, local_side, remote_existing, remote_kind,
+    remote_side, remove_part, scan_local, scan_remote, upload,
 };
 use dromon_transfer::{DirPlan, FilePlan, Scan, Side, is_part_file};
 use tokio::process::{Child, Command};
@@ -571,6 +571,38 @@ async fn upload_replace_and_keep_both() {
     assert_eq!(read_remote(s, &other).await, b"theirs");
     assert_eq!(read_remote(s, &got).await, b"new contents");
     assert!(remote_parts(s, &dir).await.is_empty());
+    rm_rf(s, &dir).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_folder_without_write_permission_is_named_not_the_part_file() {
+    let Some(c) = connect("a_folder_without_write_permission_is_named_not_the_part_file").await else { return };
+    let s = &c.sftp;
+    let dir = scratch(&c, "read-only").await;
+    // The user can list it and read from it, but not create files in it.
+    c.fixture.exec(&["chmod", "555", dir.as_str()]).unwrap();
+    let denied = Error::Io(format!("You don't have permission to write in {dir}"));
+    let tmp = tempfile::tempdir().unwrap();
+    let src = tmp.path().join("key.pem");
+    std::fs::write(&src, b"twelve bytes").unwrap();
+    let plan = the_plan(scan_local(&src, &dir.join("key.pem"), false, |_| {}).await.unwrap());
+    assert_eq!(upload(s, &plan, CopyOptions::default(), |_| {}).await, Err(denied.clone()));
+
+    // A copy on the server: with `copy-data` where the server has it, and streamed.
+    let copy = FilePlan::Copy {
+        src: p(&format!("{}/file-001.txt", c.mixed())),
+        dst: dir.join("file-001.txt"),
+        size: 100,
+        mtime: Some(1_577_934_245),
+        overwrite: false,
+    };
+    for server_copy in [true, false] {
+        let opts = CopyOptions { server_copy, ..CopyOptions::default() };
+        let got = copy_remote(s, &copy, opts, |_| {}).await.map(|c| c.dst);
+        assert_eq!(got, Err(denied.clone()), "server copy: {server_copy}");
+    }
+    c.fixture.exec(&["chmod", "755", dir.as_str()]).unwrap();
+    assert!(s.list(&dir).await.unwrap().is_empty(), "nothing was written");
     rm_rf(s, &dir).await;
 }
 

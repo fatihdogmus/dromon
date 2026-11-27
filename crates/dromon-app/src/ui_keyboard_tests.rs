@@ -495,7 +495,9 @@ fn the_drawn_menu_moves_by_arrows_and_return_picks() {
     assert_eq!(first, "ctx-open", "↓ highlights the first item");
     press(&mut rt, Key::Down, Mods::default());
     press(&mut rt, Key::Down, Mods::default());
-    assert_eq!(focused_key(&rt), "ctx-copy");
+    assert_eq!(focused_key(&rt), "ctx-terminal");
+    press(&mut rt, Key::Down, Mods::default());
+    assert_eq!(focused_key(&rt), "ctx-copy", "the separator is skipped");
     assert!(shows_focus(&rt, true), "the item is highlighted");
     press(&mut rt, Key::Enter, Mods::default());
     assert!(rt.state.files.menu.is_none(), "Return picks and closes");

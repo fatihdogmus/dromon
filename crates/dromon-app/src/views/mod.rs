@@ -37,10 +37,36 @@ pub use preview::{
     LINES as PREVIEW_LINES, PANEL as PREVIEW,
 };
 /// The hookup to the taskbar and notifications.
-pub use transfers::{OsLink, connect_os, connect_window};
+pub use transfers::{OsLink, connect_window};
 
-use crate::state::{Action, App, Effect, FileAction};
+use crate::service::RuneSink;
+use crate::state::{Action, App, Effect, FileAction, WindowId};
 use crate::theme::{self, Access, Tokens};
+
+/// The main windows, for what other threads find out for one of them (the terminal launcher's
+/// answers, [`answer`]); set once per run by [`connect_os`].
+static WINDOWS: std::sync::OnceLock<RuneSink> = std::sync::OnceLock::new();
+
+/// Hooks the app up to the OS once per run, before its first window opens: notifications and
+/// the taskbar (`transfers::connect_os`), and the way back to a window for what the terminal
+/// launcher hears from the OS on its thread. `None` in a headless run.
+pub fn connect_os(windows: RuneSink) -> Option<OsLink> {
+    let _ = WINDOWS.set(windows.clone());
+    transfers::connect_os(windows)
+}
+
+/// Runs what `action` makes, on the UI thread, in `window` (if it's still open).
+fn answer(window: WindowId, action: impl FnOnce() -> Action + Send + 'static) {
+    let Some(windows) = WINDOWS.get() else { return };
+    if let Some((_, handle)) = windows.handles().into_iter().find(|(w, _)| *w == window) {
+        handle.update(move |s, tx| run(s, action(), tx));
+    }
+}
+
+/// Whether effects may start programs: never in tests or headless runs (`--snap`, `--script`).
+fn launches() -> bool {
+    !cfg!(test) && rune::tooling::headless_run().is_none()
+}
 
 /// What every part needs to paint itself.
 #[derive(Clone, Copy)]
@@ -153,8 +179,20 @@ pub fn effect(fx: Effect, tx: &mut Tx) {
         Effect::Blur => tx.blur(),
         // Never from tests or headless runs (`--snap`, `--script`): no file manager there.
         Effect::ShowInFolder(path) => {
-            if !cfg!(test) && rune::tooling::headless_run().is_none() {
+            if launches() {
                 crate::reveal::show_in_folder(path);
+            }
+        }
+        Effect::OpenTerminal { window, terminal, host, folder } => {
+            if launches() {
+                crate::terminal::open(terminal, host, folder.to_string(), move |why| {
+                    answer(window, move || Action::TerminalFailed(why));
+                });
+            }
+        }
+        Effect::DetectTerminals { window } => {
+            if launches() {
+                crate::terminal::detect(move |found| answer(window, move || Action::TerminalsFound(found)));
             }
         }
         Effect::CloseWindow => tx.close_window(),

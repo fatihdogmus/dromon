@@ -6,6 +6,8 @@
 //! - Transfers: the download folder in mono with Choose… (the platform's folder picker) and
 //!   Reset (back to the OS Downloads folder), and Transfers at once, a 1–8 stepper.
 //! - Browsing: Show hidden files by default, a switch.
+//! - General: the Terminal "Open in Terminal" uses, one choice per line: System default and the
+//!   terminal apps found on this machine (looked for when the section shows).
 //!
 //! The list is a tablist: one Tab stop, ↑ ↓ move between the sections and the section follows,
 //! Tab goes on to the controls, the section's tabpanel. Every control's change goes to the
@@ -19,7 +21,8 @@ use rune::{Color, El, FileDialogOptions, Orientation, ScrollSpec, Tx, col, el, r
 use super::widgets::{Keyboard, icon_button};
 use super::{Paint, run};
 use crate::icons;
-use crate::state::settings::AT_ONCE;
+use crate::state::menu::TERMINAL_CHORD;
+use crate::state::settings::{AT_ONCE, Terminal};
 use crate::state::{Action, App, Density, SettingsChange, SettingsSection, SettingsView};
 use crate::theme::{Appearance, motion, radius, size, space, type_};
 
@@ -115,6 +118,7 @@ fn panel(s: &App, section: SettingsSection, p: Paint) -> El {
         SettingsSection::Appearance => appearance(&v, p),
         SettingsSection::Transfers => transfers(&v, page.home.as_deref(), page.error.as_deref(), p),
         SettingsSection::Browsing => browsing(&v, p),
+        SettingsSection::General => general(&v, &page.terminal_choices(v.settings.terminal), p),
     };
     col()
         .key(PANEL)
@@ -218,6 +222,32 @@ fn browsing(v: &SettingsView, p: Paint) -> El {
     )
 }
 
+fn general(v: &SettingsView, terminals: &[Terminal], p: Paint) -> El {
+    let terminal_sub = format!("Where Open in Terminal ({}) opens ssh", super::widgets::chord(TERMINAL_CHORD));
+    section(
+        p,
+        "General",
+        vec![setting(p, "Terminal", Some(sub(p, &terminal_sub)), terminal_list(p, terminals, v.settings.terminal))],
+    )
+}
+
+/// The terminal choices, one per line: a radio group ↑ ↓ move in, as the segmented controls'.
+fn terminal_list(p: Paint, terminals: &[Terminal], current: Terminal) -> El {
+    let options =
+        terminals.iter().map(|&t| segment(p, t, t.label(), t.key(), t == current, 168.0, SettingsChange::Terminal));
+    col()
+        .key("terminal")
+        .role("radiogroup")
+        .label("Terminal")
+        .orientation(Orientation::Vertical)
+        .focus_group()
+        .padding(2.0)
+        .gap(2.0)
+        .radius(radius::ROW + 1.0)
+        .fill(p.t.field)
+        .children(options)
+}
+
 /// "Choose…": the platform's folder picker, starting in the folder in use. It runs off the UI
 /// thread (Rune's); its answer comes back to this window's state.
 fn choose_folder(s: &mut App, tx: &mut Tx) {
@@ -268,29 +298,7 @@ fn segmented<T: Copy + PartialEq + 'static>(
     to: fn(T) -> SettingsChange,
 ) -> El {
     let t = p.t;
-    let segments = options.iter().map(|&(value, name, key)| {
-        let on = value == current;
-        let e = row()
-            .key(key)
-            .role("radio")
-            .label(name)
-            .checked(on)
-            .focusable(true)
-            .keyboard_focus_only()
-            .focus_selected(on)
-            .w(width)
-            .h(24.0)
-            .radius(radius::ROW - 1.0)
-            .center()
-            .motion(motion::SNAP)
-            .on_press_tx(move |s: &mut App, tx: &mut Tx| change(s, to(value), tx))
-            .child(text(name).font(if on { type_::BODY_STRONG } else { type_::BODY }).color(if on {
-                t.text
-            } else {
-                t.text_2
-            }));
-        if on { e.fill(t.press).border(p.hair, t.border_subtle) } else { e.hover(t.hover).press(t.press) }
-    });
+    let segments = options.iter().map(|&(value, name, key)| segment(p, value, name, key, value == current, width, to));
     row()
         .key(key)
         .role("radiogroup")
@@ -302,6 +310,39 @@ fn segmented<T: Copy + PartialEq + 'static>(
         .radius(radius::ROW + 1.0)
         .fill(t.field)
         .children(segments)
+}
+
+/// One choice of a radio group, `width` wide; `on` is the chosen one. Space picks it.
+fn segment<T: Copy + 'static>(
+    p: Paint,
+    value: T,
+    name: &'static str,
+    key: &'static str,
+    on: bool,
+    width: f32,
+    to: fn(T) -> SettingsChange,
+) -> El {
+    let t = p.t;
+    let e = row()
+        .key(key)
+        .role("radio")
+        .label(name)
+        .checked(on)
+        .focusable(true)
+        .keyboard_focus_only()
+        .focus_selected(on)
+        .w(width)
+        .h(24.0)
+        .radius(radius::ROW - 1.0)
+        .center()
+        .motion(motion::SNAP)
+        .on_press_tx(move |s: &mut App, tx: &mut Tx| change(s, to(value), tx))
+        .child(text(name).font(if on { type_::BODY_STRONG } else { type_::BODY }).color(if on {
+            t.text
+        } else {
+            t.text_2
+        }));
+    if on { e.fill(t.press).border(p.hair, t.border_subtle) } else { e.hover(t.hover).press(t.press) }
 }
 
 /// A bordered button with a body-size label, as the sheets' secondary ones.

@@ -280,6 +280,13 @@ pub enum Action {
     NewWindow,
     /// ⌘W, the File menu: close this window (the last one asks first while transfers run).
     CloseWindow,
+    /// "Open in Terminal" (the menus, the palette, ⌘⇧T): ssh in the user's terminal app, in the
+    /// row `Some(name)` when it's a folder, else in the folder on screen (`menu.rs`).
+    OpenTerminal(Option<String>),
+    /// The terminal app couldn't be opened, and why (from the launcher's thread): a toast.
+    TerminalFailed(String),
+    /// The terminal apps found on this machine (from the thread that looked), for Settings.
+    TerminalsFound(Vec<settings::Terminal>),
 }
 
 /// What an action asks the view layer to do afterwards.
@@ -309,6 +316,12 @@ pub enum Effect {
     FocusPreview,
     /// The preview panel closed: the keyboard, if it was in it, goes back to the list.
     FocusList,
+    /// Open `terminal` running ssh to `host` in `folder`, off the UI thread (`crate::terminal`);
+    /// a failure comes back to `window` as [`Action::TerminalFailed`].
+    OpenTerminal { window: WindowId, terminal: settings::Terminal, host: dromon_core::HostSpec, folder: RemotePath },
+    /// Look for the terminal apps on this machine off the UI thread; they come back to `window`
+    /// as [`Action::TerminalsFound`].
+    DetectTerminals { window: WindowId },
 }
 
 impl App {
@@ -479,6 +492,7 @@ impl App {
                 // Every window sees every snapshot; the badge and notifications come from the
                 // leading one alone (`state/windows.rs`).
                 self.transfers.watch.lead(self.leads());
+                self.log_failures(&jobs);
                 // A folder on screen that a job just finished changing is listed again (until
                 // polling, §4.5, the only way to see what a paste, move or upload made).
                 for (host, path) in self.transfers.set(jobs) {
@@ -607,11 +621,16 @@ impl App {
             Action::Palette(a) => self.palette_action(a, &mut fx),
             Action::OpenSettings => self.open_settings(),
             Action::LeaveSettings => self.leave_settings(),
-            Action::SettingsSection(section) => self.show_section(section),
+            Action::SettingsSection(section) => self.show_section(section, &mut fx),
             Action::Setting(change) => self.change_setting(change),
             Action::Preview(a) => self.preview_action(a, &mut fx),
             Action::NewWindow => self.new_window(),
             Action::CloseWindow => self.close_window(&mut fx),
+            Action::OpenTerminal(row) => self.open_terminal(row, &mut fx),
+            Action::TerminalFailed(why) => {
+                self.files.toasts.push(format!("Couldn't open a terminal: {why}"));
+            }
+            Action::TerminalsFound(found) => self.ui.settings_page.terminals = found,
         }
         fx
     }
@@ -701,6 +720,7 @@ impl App {
                 None => return Vec::new(),
             },
             Shortcut::ShowTransfers => Action::ToggleTransfers,
+            Shortcut::OpenTerminal => Action::OpenTerminal(self.cursor_row()),
         };
         self.act(action)
     }

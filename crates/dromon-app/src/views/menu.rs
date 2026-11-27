@@ -14,7 +14,8 @@ use crate::state::{Action, App, FileAction};
 use crate::theme::{motion, radius, size, space, type_};
 
 const ANCHOR: &str = "ctx-point";
-const MIN_WIDTH: f32 = 220.0;
+/// Wide enough for the longest item and hint: "Open in Terminal" with "Ctrl+Shift+T".
+const MIN_WIDTH: f32 = 232.0;
 
 /// Whether menus are the platform's own: macOS and Windows windows. Tests and headless runs
 /// draw them, so what they show can be checked and snapped.

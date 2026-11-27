@@ -15,6 +15,7 @@
 
 use std::path::PathBuf;
 
+use super::settings::Terminal;
 use super::{Action, App, Effect, PaletteAction, Shortcut};
 
 /// The Settings page's sections, in the order its list shows them.
@@ -27,17 +28,20 @@ pub enum SettingsSection {
     Transfers,
     /// Hidden files by default.
     Browsing,
+    /// The terminal app.
+    General,
 }
 
 impl SettingsSection {
-    pub const ALL: [SettingsSection; 3] =
-        [SettingsSection::Appearance, SettingsSection::Transfers, SettingsSection::Browsing];
+    pub const ALL: [SettingsSection; 4] =
+        [SettingsSection::Appearance, SettingsSection::Transfers, SettingsSection::Browsing, SettingsSection::General];
 
     pub fn title(self) -> &'static str {
         match self {
             SettingsSection::Appearance => "Appearance",
             SettingsSection::Transfers => "Transfers",
             SettingsSection::Browsing => "Browsing",
+            SettingsSection::General => "General",
         }
     }
 
@@ -47,6 +51,7 @@ impl SettingsSection {
             SettingsSection::Appearance => "settings-tab-appearance",
             SettingsSection::Transfers => "settings-tab-transfers",
             SettingsSection::Browsing => "settings-tab-browsing",
+            SettingsSection::General => "settings-tab-general",
         }
     }
 }
@@ -102,6 +107,24 @@ pub struct SettingsPage {
     /// The folder picker couldn't open (Linux without the desktop portal); the next change or
     /// opening the page again clears it.
     pub error: Option<String>,
+    /// The terminal apps found on this machine, looked for each time General is shown
+    /// ([`Effect::DetectTerminals`]); none until the answer comes (scenes, tests and headless
+    /// runs never look).
+    pub terminals: Vec<Terminal>,
+}
+
+impl SettingsPage {
+    /// The Terminal choices General offers: System default, the ones found, and the one chosen
+    /// even when it wasn't found (so the choice always shows).
+    pub fn terminal_choices(&self, chosen: Terminal) -> Vec<Terminal> {
+        let mut out = vec![Terminal::System];
+        for t in self.terminals.iter().copied().chain([chosen]) {
+            if !out.contains(&t) {
+                out.push(t);
+            }
+        }
+        out
+    }
 }
 
 impl App {
@@ -127,9 +150,14 @@ impl App {
         self.ui.page = step(self.ui.page, PageEvent::Leave);
     }
 
-    /// A section picked in the page's list.
-    pub(super) fn show_section(&mut self, section: SettingsSection) {
-        self.ui.page = step(self.ui.page, PageEvent::Section(section));
+    /// A section picked in the page's list. Coming to General looks for the terminal apps
+    /// installed now, off the UI thread.
+    pub(super) fn show_section(&mut self, section: SettingsSection, fx: &mut Vec<Effect>) {
+        let before = self.ui.page;
+        self.ui.page = step(before, PageEvent::Section(section));
+        if self.ui.page == Page::Settings(SettingsSection::General) && before != self.ui.page {
+            fx.push(Effect::DetectTerminals { window: self.window });
+        }
     }
 
     /// A shortcut while the Settings page is on screen: Escape leaves it, the palette, quick
