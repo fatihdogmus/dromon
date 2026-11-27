@@ -1,9 +1,10 @@
 //! Context menus (§5 M3): a row's, and the list's empty area's (both offer New folder: a full
 //! folder may leave no empty area to right-click), and a search result's (`search.rs`: what
-//! works on a result away from its folder). One model for both ways of
-//! showing them: a native menu where Rune has one (macOS, Windows), a drawn one elsewhere
-//! (`views/menu.rs`). Items that would change the server are disabled while the host isn't
-//! connected; Paste also needs a clip.
+//! works on a result away from its folder); and the toolbar's add menu, under its accent plus
+//! (Upload files…, Upload folder…, New folder: what goes into the folder on screen). One model
+//! for both ways of showing them: a native menu where Rune has one (macOS, Windows), a drawn
+//! one elsewhere (`views/menu.rs`). Items that would change the server are disabled while the
+//! host isn't connected; Paste also needs a clip.
 //!
 //! "Open in Terminal" is in both (and in the palette, and ⌘⇧T): the user's terminal app, signed
 //! in over its own ssh, in a folder row's folder, else in the folder on screen. The state only
@@ -33,6 +34,8 @@ pub enum MenuKind {
     Hit(String),
     /// Right-clicked on a host in the sidebar (`hostbook.rs`).
     Host(HostId),
+    /// The toolbar's add button (`tb-upload`): what goes into the folder on screen.
+    Add,
 }
 
 /// One choice.
@@ -145,6 +148,11 @@ impl App {
                 item("properties", "Properties", self.hit_properties().is_some(), Some(properties_chord())),
             ],
             MenuKind::Host(id) => self.host_menu(id),
+            MenuKind::Add => vec![
+                item("upload-files", "Upload files…", live, Some("mod+u")),
+                item("upload-folder", "Upload folder…", live, None),
+                item("new-folder", "New folder", live, Some("mod+shift+n")),
+            ],
         }
     }
 
@@ -159,6 +167,8 @@ impl App {
         Some(match (kind, id) {
             (MenuKind::Row(name), "open") => Action::Open(name.clone()),
             (_, "download") => Action::Download,
+            (_, "upload-files") => Action::PickUpload,
+            (_, "upload-folder") => Action::PickUploadFolder,
             (_, "copy") => Action::File(FileAction::Copy),
             (_, "cut") => Action::File(FileAction::Cut),
             (_, "paste") => Action::File(FileAction::RequestPaste { as_move: false }),

@@ -227,6 +227,15 @@ fn toolbar_pairs(a: &mut Audit, t: &Tokens) {
     a.add(Tertiary, "filter: ⌘F hint (text-3)", t.text_3, &field);
     a.states(Graphic, "filter: clear (text-3)", t.text_3, &field, hv, pr);
     a.add(Tertiary, "toolbar: ⌘K hint (text-3)", t.text_3, &[t.surface]);
+    // The add button: the bold plus on the accent fill, with the toolbar's washes over it.
+    a.states(Graphic, "add button: plus (on-accent on accent)", t.on_accent, &[t.accent], hv, pr);
+    // Disabled: the accent faded as the busy primary button (WCAG exempts it).
+    a.add(
+        Info,
+        "add button: disabled plus (on-accent on accent at 60%)",
+        t.on_accent,
+        &[t.surface, t.accent.alpha(0.6)],
+    );
     a.states(Graphic, "transfers button: glyph (text-2)", t.text_2, &[t.surface], hv, pr);
     a.add(Graphic, "transfers button: glyph, popover open (text-2)", t.text_2, &[t.surface, pr]);
     a.states(Graphic, "transfers button: idle glyph (text-3 at 60%)", t.text_3.alpha(0.6), &[t.surface], hv, pr);

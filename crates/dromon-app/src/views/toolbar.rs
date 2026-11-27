@@ -1,4 +1,5 @@
-//! The toolbar (§6.2), one piece with the title bar: back/forward, the path as breadcrumbs,
+//! The toolbar (§6.2), one piece with the title bar: back/forward, the add button (an accent
+//! plus whose menu uploads files or a folder, or makes a new folder), the path as breadcrumbs,
 //! the ⌘F filter with its scope (this folder, or a search in subfolders), the transfers button
 //! and the ⌘K hint. It drags the window wherever nothing takes the press, and leaves room for
 //! Windows' caption buttons (`ChromeInsets::trailing`).
@@ -7,13 +8,16 @@ use dromon_core::{ConnStatus, RemotePath};
 use rune::{El, HasPopup, Key, KeyEvent, KeyPlatform, LoopSpec, Tx, el, icon, row, text, text_input};
 
 use super::widgets::{Keyboard, chord, icon_button, kbd};
-use super::{Paint, run, transfers};
+use super::{Paint, menu, run, transfers};
 use crate::icons;
 use crate::state::keys::{self, FileKey};
 use crate::state::{
-    Action, App, ConnView, FileAction, Filter, PaletteAction, RowTarget, Scope, SearchAction, Shortcut,
+    Action, App, ConnView, FileAction, Filter, MenuKind, PaletteAction, RowTarget, Scope, SearchAction, Shortcut,
 };
 use crate::theme::{motion, radius, size, space, type_};
+
+/// The add button's key: `tb-upload`, as scripts, flows and bug reports name it.
+const ADD: &str = "tb-upload";
 
 pub fn view(s: &App, p: Paint) -> El {
     let t = p.t;
@@ -31,10 +35,6 @@ pub fn view(s: &App, p: Paint) -> El {
     let back = icon_button(p, "tb-back", "Back", &icons::CHEVRON_LEFT, can_back.then_some(go_back as Handler));
     let forward =
         icon_button(p, "tb-forward", "Forward", &icons::CHEVRON_RIGHT, can_forward.then_some(go_forward as Handler));
-    fn pick_upload(s: &mut App, tx: &mut Tx) {
-        run(s, Action::PickUpload, tx)
-    }
-    let upload = icon_button(p, "tb-upload", "Upload", &icons::UPLOAD, live.then_some(pick_upload as Handler));
     let mut bar = row()
         .key("toolbar")
         .role("toolbar")
@@ -49,11 +49,44 @@ pub fn view(s: &App, p: Paint) -> El {
         .window_drag()
         .child(back)
         .child(forward)
+        .child(add_button(s, p, live).ml(space::S1))
         .child(path_bar(s, p).ml(space::S2));
     if let Some(c) = c {
         bar = bar.children(c.filter.is_on().then(|| scope_switch(s, p))).child(filter(s, c, p));
     }
-    bar.child(upload).child(transfers::button(s, p)).child(palette_button(p))
+    bar.child(transfers::button(s, p)).child(palette_button(p))
+}
+
+/// The add button: the toolbar's one filled control, an accent square with a bold plus, so it
+/// reads as the folder's primary action. It opens the add menu (`MenuKind::Add`) under itself;
+/// its name and tooltip say where things go ("Add to site"). While the host isn't connected it
+/// fades as a busy primary button does (the accent at 60%), and takes nothing.
+fn add_button(s: &App, p: Paint, live: bool) -> El {
+    let t = p.t;
+    let label = s.upload_folder().map_or_else(|| "Add".to_owned(), |folder| format!("Add to {folder}"));
+    let open = s.files.menu.as_ref().is_some_and(|m| m.kind == MenuKind::Add);
+    let b = el()
+        .key(ADD)
+        .role("button")
+        .label(label.clone())
+        .help(label)
+        .has_popup(HasPopup::Menu)
+        .size(28.0, 28.0)
+        .radius(radius::ROW)
+        .center()
+        .child(icon(icons::PLUS_BOLD.at(p.scale), size::ICON).color(t.on_accent));
+    if !live {
+        return b.fill(t.accent.alpha(0.6)).disabled(true);
+    }
+    // The hover and press washes go over the accent, as over any toolbar button.
+    b.fill(t.accent)
+        .hover(t.hover)
+        .press(t.press)
+        .press_scale(0.97)
+        .press_motion(rune::Anim::INSTANT, motion::SNAP)
+        .expanded(open)
+        .on_press_tx(|_: &mut App, tx: &mut Tx| menu::open_under(MenuKind::Add, ADD, tx))
+        .tab_press()
 }
 
 /// The ⌘K hint: a button that opens the command palette.
