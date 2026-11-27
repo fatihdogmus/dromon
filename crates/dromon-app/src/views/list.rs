@@ -37,6 +37,10 @@ fn grid(rows: usize) -> El {
 }
 
 pub fn view(s: &App, c: &ConnView, p: Paint) -> El {
+    // A search in subfolders shows its results in the folder's place (`search.rs`).
+    if let Some(r) = s.results() {
+        return super::search::view(s, r, p);
+    }
     match &c.listing {
         Listing::Loading => grid(0).busy(true).child(header(c, p)).child(states::skeleton(p, s.settings.density.row())),
         Listing::Failed(ListError::PermissionDenied) => states::denied(p, c),
@@ -303,7 +307,7 @@ fn file_row(s: &App, c: &ConnView, i: usize, p: Paint) -> El {
 }
 
 /// A row's size cell; a file's says its exact size in bytes besides.
-fn size_cell(e: &Entry, color: Color) -> El {
+pub(super) fn size_cell(e: &Entry, color: Color) -> El {
     let size_text = fmt::entry_size(e);
     let cell = text(size_text.clone())
         .font(type_::META)
@@ -317,7 +321,7 @@ fn size_cell(e: &Entry, color: Color) -> El {
 }
 
 /// A row's date cell, relative to `now`; the whole date besides.
-fn modified_cell(e: &Entry, now: i64, color: Color) -> El {
+pub(super) fn modified_cell(e: &Entry, now: i64, color: Color) -> El {
     let modified_text = fmt::modified(e.mtime, now);
     let cell = text(modified_text.clone())
         .font(type_::META)
@@ -335,7 +339,7 @@ fn modified_cell(e: &Entry, now: i64, color: Color) -> El {
 }
 
 /// What the row's icon says of it, in words: a folder, a link (files say nothing more).
-fn kind_words(e: &Entry) -> Option<&'static str> {
+pub(super) fn kind_words(e: &Entry) -> Option<&'static str> {
     match (e.kind.is_dir_like(), e.kind.is_symlink()) {
         (true, false) => Some("Folder"),
         (true, true) => Some("Folder, symbolic link"),

@@ -38,12 +38,13 @@ use super::fileops::{FileOps, Finished};
 use super::lifecycle::{Effect, Event, Lifecycle, Phase, step};
 use super::live::{self, Heard, Updates};
 use super::poll::Outcome;
+use super::search::SearchCmd;
 use super::sizes::{SizeCmd, Walks};
 use super::transfers::EngineMsg;
 use super::wake::{ProbeGate, Why};
 use super::windows::{Route, Watch, status_of};
 use super::{Config, Sink};
-use crate::state::{FileOp, OpId, ServiceEvent, WindowId};
+use crate::state::{FileOp, OpId, SearchId, ServiceEvent, SizeId, WindowId};
 
 /// Entries per listing page (§4.4).
 pub const PAGE: usize = 512;
@@ -73,6 +74,8 @@ pub enum ConnCmd {
     Verbose(bool),
     /// A folder size walk for the window, or stopping one (`sizes.rs`).
     Size(WindowId, SizeCmd),
+    /// A search in subfolders for the window, or stopping one (`search.rs`).
+    Search(WindowId, SearchCmd),
     /// Watch folders live or not from now on (`Command::LiveUpdates`).
     Live(bool),
 }
@@ -117,6 +120,7 @@ pub fn start<S: Sink>(spec: HostSpec, shared: Shared, sink: S) -> ConnHandle {
         route: Route::default(),
         ops: FileOps::default(),
         walks: Walks::default(),
+        searches: Walks::default(),
         epoch: 0,
         live,
     };
@@ -175,7 +179,9 @@ struct Task<S: Sink> {
     /// New folder, rename and delete, running on the session (`fileops.rs`).
     ops: FileOps,
     /// Folder size walks for the Properties sheet (`sizes.rs`).
-    walks: Walks,
+    walks: Walks<SizeId>,
+    /// Searches in subfolders (`search.rs`), walked the same way.
+    searches: Walks<SearchId>,
     /// Counts SFTP sessions that came up: an operation's lost connection only ends the
     /// session it ran on.
     epoch: u64,
@@ -355,6 +361,7 @@ impl<S: Sink> Task<S> {
             ConnCmd::Focus => self.probe(Why::Focus),
             ConnCmd::Verbose(on) => self.set_verbose(on).await,
             ConnCmd::Size(window, cmd) => self.walks.command(window, cmd, self.sftp(), &self.host, &self.sink),
+            ConnCmd::Search(window, cmd) => self.searches.command(window, cmd, self.sftp(), &self.host, &self.sink),
             // The loop's `live_sync` starts or stops the watch.
             ConnCmd::Live(on) => self.live.on = on,
         }

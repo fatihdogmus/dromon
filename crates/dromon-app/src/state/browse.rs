@@ -1,11 +1,12 @@
 //! The folder view's actions of [`App::act`]: opening rows, moving between folders and through
 //! the history, the selection and type-to-select, sort, hidden files and the filter. Picking a
-//! host is `mod.rs`'s; transfers, file operations and the palette have their own modules.
+//! host is `mod.rs`'s; transfers, file operations, the palette and search in subfolders (the
+//! filter's other scope, `search.rs`) have their own modules.
 
 use dromon_core::RemotePath;
 use rune::TextEdit;
 
-use super::{Action, App, Command, Effect, Filter, Nav, Selection, selection};
+use super::{Action, App, Command, Effect, Filter, Nav, Scope, Selection, selection};
 
 impl App {
     /// The folder view's actions of [`App::act`].
@@ -60,12 +61,17 @@ impl App {
                         c.toggle_hidden();
                     }
                 }
+                self.search_again();
             }
+            // ⌘F is "This folder"'s; a search in subfolders ends (⌘⇧F is `search.rs`'s).
             Action::OpenFilter => {
-                let text = self.ui.filter_edit.text.clone();
+                let text = self.folder_query();
                 if let Some(c) = self.conn_mut() {
                     c.set_filter(Filter::On(text));
                     self.ui.filter_edit.focused = true;
+                }
+                if self.ui.search.scope == Scope::Subfolders {
+                    self.set_scope(Scope::Folder, fx);
                 }
             }
             Action::CloseFilter => {
@@ -78,6 +84,8 @@ impl App {
                 }
                 fx.push(Effect::Blur);
             }
+            // In Subfolders the field's typing is the search's (`SearchAction::Typed`).
+            Action::FilterChanged(_) if self.ui.search.scope == Scope::Subfolders => {}
             Action::FilterChanged(text) => {
                 if let Some(c) = self.conn_mut() {
                     c.set_filter(Filter::On(text));

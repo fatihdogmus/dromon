@@ -83,7 +83,9 @@ pub fn view(s: &App, p: Paint) -> El {
     // The folder updates live: a mark before the connection, saying so on hover.
     let live =
         c.is_live().then(|| text("Live").key("status-live").font(type_::META).color(t.accent).help(LIVE).help_above());
-    bar.child(text(summary(c)).key("status-summary").font(type_::META).color(t.text_2).grow(1.0).truncate())
+    // A search's results count themselves in place of the folder (`search.rs`).
+    let summary = s.results().map_or_else(|| summary(c), super::search::summary);
+    bar.child(text(summary).key("status-summary").font(type_::META).color(t.text_2).grow(1.0).truncate())
         .children(live)
         .child(conn)
 }

@@ -196,6 +196,7 @@ clock, so every transition is a unit test.
 | Transfer task | `dromon_transfer::TaskState` | `dromon_transfer::step` |
 | Inline name field | `state::edit::Edit` | `edit::step` → `EditEffect` |
 | ⌘K palette | `state::palette::Phase` | `palette::step` |
+| Search in subfolders | `state::search::Phase` | `search::step` → `search::Out` |
 | Done flourish | `state::transfers::Flourish` | stepped by `views::transfers::poll` |
 
 ### Agent checklist

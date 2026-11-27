@@ -21,7 +21,7 @@ use rune::TextEdit;
 use super::fuzzy;
 use super::keys::{Shortcut, host_chord};
 use super::menu::{TERMINAL_CHORD, delete_chord};
-use super::{Action, App, Effect, FileAction, Listing, TransferCommand, hosts};
+use super::{Action, App, Effect, FileAction, Listing, SearchAction, TransferCommand, hosts};
 
 #[cfg(test)]
 #[path = "palette_tests.rs"]
@@ -356,6 +356,9 @@ impl App {
             None,
             Action::Transfer(TransferCommand::ClearFinished),
         );
+        // Past an empty query's cap: typing finds it ("search", "sub…").
+        let search = Action::Search(SearchAction::Open);
+        add(opened && listed, "search", "Search in subfolders…", Some("mod+shift+f"), search);
         for cmd in &mut out {
             if matches!(cmd.id, "log" | "disconnect") {
                 cmd.detail = host.clone();
