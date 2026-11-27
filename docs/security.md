@@ -25,6 +25,7 @@ This guide uses typed sections with real fields, not title-only labels.
 - [Decision: Host Keys Are ssh's Call](#decision-host-keys-are-sshs-call)
 - [Standard: Tracing and Logs](#standard-tracing-and-logs)
 - [Reference: The Release Signing Boundary](#reference-the-release-signing-boundary)
+- [Decision: Updates Install Only What the Release Key Signed](#decision-updates-install-only-what-the-release-key-signed)
 
 ---
 
@@ -251,4 +252,56 @@ reviewed like code that holds the keys. Details, credentials and the policy:
 ### Agent note
 
 Never add a build step, a dependency install or an unpinned action to a job that runs in the
-`release` environment.
+`release` environment. The one install there, `sign-linux`'s Ubuntu `minisign` package, comes from
+Ubuntu's signed archive through `.github/actions/apt-install` and saves no cache
+([releasing.md](releasing.md#the-security-boundary)).
+
+## Decision: Updates Install Only What the Release Key Signed
+
+**Status:** Accepted
+**Scope:** `dromon-app/src/service/update*.rs`, `state/update.rs`, `packaging/update/release-key.pub`, `.github/release/sign-minisign.sh`
+
+### Context
+
+The updater downloads a program and runs it, or puts it in place of the running app. Whoever can
+change what it installs owns every machine that runs Dromon, so it is part of the signing
+boundary.
+
+### Decision
+
+An update installs only when `SHA256SUMS.minisig` is a pre-hashed minisign signature of the
+release's `SHA256SUMS` by the key built into the app (`packaging/update/release-key.pub`, through
+`include_str!`), with the trusted comment `dromon <version>`, and the downloaded file's SHA-256 is
+the one `SHA256SUMS` lists for its name, exactly once. Anything else refuses it with a sentence
+the user reads, and changes nothing.
+
+### Rules and examples
+
+- HTTPS only: the agent refuses `http` and redirects to it; only tests' local endpoints allow it.
+- A check is one unauthenticated GET of `releases/latest` with the user agent `Dromon`: no
+  version, no identifiers, no cookies, no telemetry. Drafts and pre-releases are ignored and a
+  version never goes down.
+- Nothing from GitHub's answer but the tag is used, and only once it parses as a version: file
+  URLs and the release page are built from it, never taken from the response.
+- The signature is checked before the large download; a file that fails is deleted.
+- A build whose key file holds no usable key still checks and tells, but installs nothing, and
+  Settings says why.
+- Installers run programs by absolute path with argument vectors, never a shell (`hdiutil`,
+  `codesign`, `ditto`, `msiexec` from System32). On macOS the new app must also pass `codesign
+  --verify --deep --strict` against a requirement naming the bundle id, a Developer ID
+  certificate and the running app's team; an app without a Developer ID (development builds)
+  never replaces itself.
+- Tests sign with a test-only key (`service/update_testdata/`), never the release key; each check
+  has a test that fails without it.
+
+### Consequences
+
+A compromised GitHub account, release asset or network can make an update fail, never install
+something else; only the minisign secret can. Rotating or losing that key costs one release
+installed by hand ([releasing.md](releasing.md#2b-updates-the-minisign-key)).
+
+### Agent checklist
+
+- Does a new download or URL go through the same agent, HTTPS only, built from the version?
+- Is anything installed before both checks pass, or does a failure leave something changed?
+- Does a change to the signing step still verify against the committed public key?

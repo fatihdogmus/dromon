@@ -7,7 +7,9 @@
 //!   Reset (back to the OS Downloads folder), and Transfers at once, a 1–8 stepper.
 //! - Browsing: Show hidden files by default, a switch.
 //! - General: the Terminal "Open in Terminal" uses, one choice per line: System default and the
-//!   terminal apps found on this machine (looked for when the section shows).
+//!   terminal apps found on this machine (looked for when the section shows). Check for updates
+//!   automatically, a switch; Check now, with what the last check found and, for a newer
+//!   version, Update (or Copy command) and Release notes.
 //!
 //! The list is a tablist: one Tab stop, ↑ ↓ move between the sections and the section follows,
 //! Tab goes on to the controls, the section's tabpanel. Every control's change goes to the
@@ -23,6 +25,7 @@ use super::{Paint, run};
 use crate::icons;
 use crate::state::menu::TERMINAL_CHORD;
 use crate::state::settings::{AT_ONCE, Terminal};
+use crate::state::update::{UpdateAction, Version};
 use crate::state::{Action, App, Density, SettingsChange, SettingsSection, SettingsView};
 use crate::theme::{Appearance, motion, radius, size, space, type_};
 
@@ -118,7 +121,7 @@ fn panel(s: &App, section: SettingsSection, p: Paint) -> El {
         SettingsSection::Appearance => appearance(&v, p),
         SettingsSection::Transfers => transfers(&v, page.home.as_deref(), page.error.as_deref(), p),
         SettingsSection::Browsing => browsing(&v, p),
-        SettingsSection::General => general(&v, &page.terminal_choices(v.settings.terminal), p),
+        SettingsSection::General => general(s, &v, &page.terminal_choices(v.settings.terminal), p),
     };
     col()
         .key(PANEL)
@@ -215,19 +218,50 @@ fn transfers(v: &SettingsView, home: Option<&Path>, error: Option<&str>, p: Pain
 fn browsing(v: &SettingsView, p: Paint) -> El {
     let hidden_sub =
         format!("For servers opened from now on; {} switches them", super::widgets::chord("mod+shift+period"));
-    section(
-        p,
-        "Browsing",
-        vec![setting(p, "Show hidden files by default", Some(sub(p, &hidden_sub)), switch(p, v.settings.show_hidden))],
-    )
+    let hidden =
+        switch(p, "hidden-toggle", "Show hidden files by default", v.settings.show_hidden, SettingsChange::ShowHidden);
+    section(p, "Browsing", vec![setting(p, "Show hidden files by default", Some(sub(p, &hidden_sub)), hidden)])
 }
 
-fn general(v: &SettingsView, terminals: &[Terminal], p: Paint) -> El {
+/// The terminal "Open in Terminal" uses; then updates: checking by itself, and Check now with
+/// what the last check found, the button that takes a newer version (Update, Copy command) and
+/// its release notes (`state/update.rs`).
+fn general(s: &App, v: &SettingsView, terminals: &[Terminal], p: Paint) -> El {
+    let t = p.t;
     let terminal_sub = format!("Where Open in Terminal ({}) opens ssh", super::widgets::chord(TERMINAL_CHORD));
+    let terminal = terminal_list(p, terminals, v.settings.terminal);
+    let u = &s.update;
+    let auto = switch(
+        p,
+        "updates-toggle",
+        "Check for updates automatically",
+        v.settings.check_updates,
+        SettingsChange::CheckUpdates,
+    );
+    let status = text(u.status(&Version::running())).key("update-status").font(type_::META).color(t.text_2).wrap();
+    let buttons = row()
+        .gap(space::S2)
+        .children(u.buttons().into_iter().map(|b| {
+            button(p, b.key("settings-update"), b.label(), b.label(), move |s: &mut App, tx: &mut Tx| {
+                run(s, Action::Update(b.action()), tx)
+            })
+        }))
+        .child(button(p, "update-check", "Check now", "Check for updates now", |s: &mut App, tx: &mut Tx| {
+            run(s, Action::Update(UpdateAction::CheckNow), tx)
+        }));
     section(
         p,
         "General",
-        vec![setting(p, "Terminal", Some(sub(p, &terminal_sub)), terminal_list(p, terminals, v.settings.terminal))],
+        vec![
+            setting(p, "Terminal", Some(sub(p, &terminal_sub)), terminal),
+            setting(
+                p,
+                "Check for updates automatically",
+                Some(sub(p, "At launch and once a day: one request to GitHub, nothing about you")),
+                auto,
+            ),
+            setting(p, "Updates", Some(status), buttons),
+        ],
     )
 }
 
@@ -346,7 +380,13 @@ fn segment<T: Copy + 'static>(
 }
 
 /// A bordered button with a body-size label, as the sheets' secondary ones.
-fn button(p: Paint, key: &'static str, label: &'static str, describe: &'static str, f: fn(&mut App, &mut Tx)) -> El {
+fn button(
+    p: Paint,
+    key: impl Into<String>,
+    label: &'static str,
+    describe: &'static str,
+    f: impl Fn(&mut App, &mut Tx) + 'static,
+) -> El {
     let t = p.t;
     row()
         .key(key)
@@ -409,8 +449,9 @@ fn stepper(p: Paint, n: usize) -> El {
         .child(step("transfers-more", "More transfers at once", "+", more))
 }
 
-/// An on/off switch: accent track and the knob on the right when on.
-fn switch(p: Paint, on: bool) -> El {
+/// An on/off switch: accent track and the knob on the right when on; `to` is the change a
+/// press makes.
+fn switch(p: Paint, key: &'static str, label: &'static str, on: bool, to: fn(bool) -> SettingsChange) -> El {
     let t = p.t;
     let knob = el()
         .size(14.0, 14.0)
@@ -418,9 +459,9 @@ fn switch(p: Paint, on: bool) -> El {
         .fill(if on { t.on_accent } else { t.text_2 })
         .offset(if on { 14.0 } else { 0.0 }, 0.0);
     row()
-        .key("hidden-toggle")
+        .key(key)
         .role("switch")
-        .label("Show hidden files by default")
+        .label(label)
         .checked(on)
         .focusable(true)
         .keyboard_focus_only()
@@ -432,6 +473,6 @@ fn switch(p: Paint, on: bool) -> El {
         .fill(if on { t.accent } else { t.field })
         .border(p.hair, if on { t.accent } else { t.border_strong })
         .motion(motion::SNAP)
-        .on_press_tx(move |s: &mut App, tx: &mut Tx| change(s, SettingsChange::ShowHidden(!on), tx))
+        .on_press_tx(move |s: &mut App, tx: &mut Tx| change(s, to(!on), tx))
         .child(knob)
 }
