@@ -186,8 +186,9 @@ building again ([docs/testing.md](docs/testing.md#standard-build-once)).
   requests are squash merged; their title is the release-notes line, written for users. Fill in
   `.github/pull_request_template.md` and add one label: `feature`, `bug`, `performance` or
   `skip-changelog` ([docs/ci.md](docs/ci.md#standard-pull-requests)).
-- DO NOT COMMIT OR PUSH unless explicitly asked. Commit messages are in English; the title says
-  what changed, in a short sentence; the body, if any, says why.
+- DO NOT COMMIT unless explicitly asked. Pushing a branch other than `main` (a pull request's)
+  needs no asking; it only updates the pull request and its CI. Commit messages are in English;
+  the title says what changed, in a short sentence; the body, if any, says why.
 - Use `git mv` to move or rename files, so history follows them.
 - Change files with the editor tools, not shell redirection, `sed -i` or heredocs, so every change
   is a reviewable diff.
