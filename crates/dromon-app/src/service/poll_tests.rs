@@ -177,3 +177,35 @@ fn a_listing_for_the_ui_keeps_entries_only_below_the_limit() {
     c.copy(&many(1));
     assert_eq!((c.count(), c.entries.len()), (20_001, 0));
 }
+
+#[test]
+fn a_folder_watched_live_polls_four_times_less_often() {
+    let t0 = Instant::now();
+    let mut poller = listed(t0);
+    poller.live(true, t0 + S(1));
+    assert_eq!(poller.due(), Some(t0 + S(9)), "8 s from the change");
+    let out = poller.polled(&p("/w"), Ok(got(&[e("a", 1), e("b", 2)])), MS(30), t0 + S(9));
+    assert_eq!(out, Outcome::Quiet);
+    assert_eq!(poller.due(), Some(t0 + S(17)), "after a poll too");
+    poller.window(Visibility::VisibleUnfocused, t0 + S(10));
+    assert_eq!(poller.due(), Some(t0 + S(26)), "unfocused: 4 s × 4");
+    poller.live(true, t0 + S(11));
+    assert_eq!(poller.due(), Some(t0 + S(26)), "no change, no reschedule");
+    // The watch ended: back to the normal interval.
+    poller.live(false, t0 + S(12));
+    assert_eq!(poller.due(), Some(t0 + S(16)));
+}
+
+#[test]
+fn only_folders_that_are_polled_may_be_watched_live() {
+    let t0 = Instant::now();
+    let mut poller = Poller::default();
+    poller.listing(&p("/w"));
+    assert!(poller.watchable(), "while it lists");
+    poller.listed(&p("/w"), got(&many(20_001)), MS(10), t0);
+    assert!(!poller.watchable(), "too big");
+    let mut poller = listed(t0);
+    assert!(poller.watchable());
+    poller.list_failed(&p("/w"), &Error::PermissionDenied(p("/w")));
+    assert!(!poller.watchable(), "its listing failed");
+}

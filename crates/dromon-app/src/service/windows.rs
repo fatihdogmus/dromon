@@ -3,7 +3,9 @@
 //!
 //! - [`Watch`]: the folder each window has on screen on this host. Every one of them is
 //!   polled (each with its own [`Poller`]) while a window showing it is visible, at the focused
-//!   interval while one of those is focused; a window's own focus polls its folder at once.
+//!   interval while one of those is focused; a window's own focus polls its folder at once. One
+//!   of them, the focused (else a visible) window's, is the one live updates watch
+//!   ([`Watch::live_folder`]), polled less often while they do.
 //! - [`Route`]: which window a prompt goes to: the one that answered this host's last prompt
 //!   (so a wrong password asks again in place), else the focused one, else the one that
 //!   started the connection, else every window. Answering in one closes it in all; a window that
@@ -41,6 +43,8 @@ pub struct Watch {
     vis: BTreeMap<WindowId, Visibility>,
     /// One poller per folder some window shows.
     polls: BTreeMap<RemotePath, Poller>,
+    /// The folder watched live (`live.rs`), polled less often.
+    live: Option<RemotePath>,
 }
 
 impl Watch {
@@ -60,11 +64,35 @@ impl Watch {
         self.polls.retain(|p, _| paths.contains(p));
         for path in paths {
             let vis = self.seen_as(&path);
+            let live = self.live.as_ref() == Some(&path);
             let poller = self.polls.entry(path).or_default();
+            poller.live(live, now);
             if poller.visibility() != vis {
                 poller.window(vis, now);
             }
         }
+    }
+
+    /// `path` is watched live from `now` (`None`: no folder is): its polls stretch, and those
+    /// of a folder that was go back to normal.
+    pub fn set_live(&mut self, path: Option<RemotePath>, now: Instant) {
+        self.live = path;
+        for (p, poller) in &mut self.polls {
+            poller.live(self.live.as_ref() == Some(p), now);
+        }
+    }
+
+    /// The folder to watch live: the focused window's on this host, else a visible one's. None
+    /// while no window shows one here, or when that folder isn't polled (too big, or its
+    /// listing failed).
+    pub fn live_folder(&self) -> Option<RemotePath> {
+        let (_, path) = self
+            .shown
+            .iter()
+            .map(|(w, p)| (self.vis.get(w).copied().unwrap_or(Visibility::Hidden), p))
+            .filter(|(v, _)| *v != Visibility::Hidden)
+            .max_by_key(|(v, _)| rank(*v))?;
+        self.polls.get(path).filter(|p| p.watchable()).map(|_| path.clone())
     }
 
     /// `window` has `path` on screen now (it asked for its listing).

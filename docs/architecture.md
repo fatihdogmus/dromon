@@ -191,6 +191,7 @@ clock, so every transition is a unit test.
 | Machine | Phases | Step |
 | --- | --- | --- |
 | Connection lifecycle | `service::lifecycle::Phase` | `lifecycle::step` → `lifecycle::Effect` |
+| Live updates' watch | `service::live::Phase` | `live::step` → `live::Effect` |
 | Transfer task | `dromon_transfer::TaskState` | `dromon_transfer::step` |
 | Inline name field | `state::edit::Edit` | `edit::step` → `EditEffect` |
 | ⌘K palette | `state::palette::Phase` | `palette::step` |

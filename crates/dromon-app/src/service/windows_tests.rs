@@ -52,6 +52,35 @@ fn two_windows_in_two_folders_are_both_polled_while_shown() {
 }
 
 #[test]
+fn the_focused_window_folder_is_the_one_watched_live_and_polled_less_often() {
+    let t0 = Instant::now();
+    let mut w = Watch::default();
+    w.show(A, p("/a"), t0);
+    w.show(B, p("/b"), t0);
+    assert_eq!(w.live_folder(), None, "no window says it shows");
+    w.window(A, Visibility::VisibleUnfocused, t0);
+    w.window(B, Visibility::Hidden, t0);
+    assert_eq!(w.live_folder(), Some(p("/a")), "a visible one's, while it still lists");
+    w.window(B, Visibility::Focused, t0);
+    assert_eq!(w.live_folder(), Some(p("/b")), "the focused one's first");
+    listed(&mut w, &p("/a"), t0);
+    listed(&mut w, &p("/b"), t0);
+    w.set_live(Some(p("/b")), t0);
+    assert_eq!(w.polls[&p("/b")].due(), Some(t0 + Duration::from_secs(8)), "2 s × 4");
+    assert_eq!(w.polls[&p("/a")].due(), Some(t0 + Duration::from_secs(4)), "not watched: as before");
+    // A folder whose listing failed isn't watched.
+    w.list_failed(&p("/b"), &Error::NotFound(p("/b")));
+    assert_eq!(w.live_folder(), None);
+    // The watch ended: normal polls again.
+    w.set_live(None, t0);
+    listed(&mut w, &p("/b"), t0);
+    assert_eq!(w.polls[&p("/b")].due(), Some(t0 + Duration::from_secs(2)));
+    w.window(A, Visibility::Hidden, t0);
+    w.window(B, Visibility::Hidden, t0);
+    assert_eq!(w.live_folder(), None, "nothing on screen");
+}
+
+#[test]
 fn a_hidden_window_folder_waits_while_a_visible_one_is_polled() {
     let t0 = Instant::now();
     let mut w = Watch::default();

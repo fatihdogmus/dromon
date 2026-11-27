@@ -574,7 +574,6 @@ Rules:
 ## 11. Later (post-v1 backlog)
 
 - Release: signing and notarization (macOS), MSI/winget (Windows), Flatpak/AppImage (Linux), auto-update
-- **Live mode**: `inotifywait -m` over a second ssh session on Linux servers with inotify-tools, for instant updates
 - Pinned folders per host
 - Drag-out to Finder/Explorer with file promises (needs Rune support or a platform shim)
 - Quick Look–style previews
@@ -602,7 +601,7 @@ Rules:
 | Upload | Drop or paste from the OS file manager; Replace / Keep both / Skip |
 | Folders | Recursive both ways |
 | Operations | New folder, rename, delete (confirm), copy path, copy/cut/paste incl. cross-host, drag to move |
-| Freshness | Adaptive polling of the visible folder; animated diffs; live mode later |
+| Freshness | Adaptive polling of the visible folder; animated diffs; live updates (`inotifywait` over a second ssh session) where the server has it, polls stretched behind them |
 | Sorting | Clickable columns, folders first, natural order, remembered globally |
 | Hidden files | Shown by default, dimmed; ⌘⇧. toggles |
 | Transfers UI | Toolbar ring → popover with Downloads / Uploads tabs; session history; 3 at once |

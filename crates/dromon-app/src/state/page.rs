@@ -27,17 +27,20 @@ pub enum SettingsSection {
     Transfers,
     /// Hidden files by default.
     Browsing,
+    /// Live updates.
+    General,
 }
 
 impl SettingsSection {
-    pub const ALL: [SettingsSection; 3] =
-        [SettingsSection::Appearance, SettingsSection::Transfers, SettingsSection::Browsing];
+    pub const ALL: [SettingsSection; 4] =
+        [SettingsSection::Appearance, SettingsSection::Transfers, SettingsSection::Browsing, SettingsSection::General];
 
     pub fn title(self) -> &'static str {
         match self {
             SettingsSection::Appearance => "Appearance",
             SettingsSection::Transfers => "Transfers",
             SettingsSection::Browsing => "Browsing",
+            SettingsSection::General => "General",
         }
     }
 
@@ -47,6 +50,7 @@ impl SettingsSection {
             SettingsSection::Appearance => "settings-tab-appearance",
             SettingsSection::Transfers => "settings-tab-transfers",
             SettingsSection::Browsing => "settings-tab-browsing",
+            SettingsSection::General => "settings-tab-general",
         }
     }
 }

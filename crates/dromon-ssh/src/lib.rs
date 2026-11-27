@@ -31,6 +31,8 @@ pub use command::BASE_ARGS;
 pub use command::CommandError;
 pub use command::FALLBACK_DISPLAY;
 pub use command::SshCommand;
+pub use command::WATCH_MISSING;
+pub use command::WATCH_READY;
 pub use command::ssh_program;
 pub use config::ConfigFs;
 pub use config::ConfigSources;

@@ -118,6 +118,12 @@ Understanding how ssh's questions reach the UI.
 - Prompts are classified (`classify_prompt`) into `PromptKind`; `AuthAttempt` decides per attempt
   whether a remembered secret answers silently or the user is asked (see the table in
   `dromon-ssh/src/auth.rs`).
+- The live updates' second session (`service/live.rs`) signs in again (`ControlMaster=no`, and
+  Windows' OpenSSH has no connection sharing). Each run of it binds an askpass endpoint and an
+  `AuthAttempt` of its own, so no prompt of another ssh is ever taken for its. A remembered
+  password or passphrase answers, exactly as on a reconnect; anything that would need the user
+  (a code, a host-key question, a notice) is cancelled and the watch gives up for the session.
+  Its prompts never reach the UI.
 
 ### Agent note
 
@@ -150,6 +156,11 @@ behind it.
 - SSH-config hosts pass only their alias; the user's config decides the rest.
 - The base options are fixed in `BASE_ARGS` (`BatchMode=no`, keep-alives, `ConnectTimeout`,
   `ControlMaster=no`). Change them only with the plan's §4.3 and a test.
+- The live updates' second session (`SshCommand::watch`) is the one command line with a remote
+  command, and the only shell text Dromon sends a server: a fixed script with the folder as its
+  one value, POSIX single-quoted (`'` → `'\''`; a NUL is refused), after `--`. The same host
+  options, base options and askpass as the SFTP session's; `command_tests.rs` checks the quoting
+  against a real shell.
 - Nothing from an issue body or a fixture is ever run as shell (`scripts/repro.sh` passes blocks
   as files and refuses arguments outside its list).
 
@@ -210,6 +221,8 @@ Make runs observable without exposing what users or servers sent.
   the host, ids and counts, never paths, names, prompt texts, errors or answers. A new
   `ServiceEvent` variant gets a trace line and a test that its contents don't appear.
 - The connection log holds ssh's stderr and the service's own notes, never answers.
+- The live watch's output names events only (`--format %e`), never files, and its trace line
+  (`Live host=… state=…`) never names the folder.
 - Notifications show no more than the transfers popover does.
 
 ### Agent checklist

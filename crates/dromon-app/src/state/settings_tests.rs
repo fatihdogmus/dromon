@@ -97,6 +97,7 @@ fn settings_round_trip_through_the_prefs_file_format() {
         download_folder: Some(folder("dl")),
         transfers_at_once: 6,
         show_hidden: false,
+        live_updates: false,
     };
     let saved = Saved { settings: Some(settings), ..Saved::default() };
     let json = serde_json::to_value(&saved).unwrap();
@@ -235,7 +236,44 @@ fn the_page_moves_by_its_step() {
     assert_eq!(page::step(on(Browsing), PageEvent::Leave), Page::Files);
     assert_eq!(page::step(Page::Files, PageEvent::Leave), Page::Files);
     assert_eq!(Page::default(), Page::Files);
-    assert_eq!(SettingsSection::ALL.map(SettingsSection::title), ["Appearance", "Transfers", "Browsing"]);
+    assert_eq!(SettingsSection::ALL.map(SettingsSection::title), ["Appearance", "Transfers", "Browsing", "General"]);
+    assert_eq!(SettingsSection::General.key(), "settings-tab-general");
+}
+
+#[test]
+fn live_updates_are_on_by_default_and_a_change_reaches_the_service_once() {
+    assert!(Settings::default().live_updates);
+    let mut s = fixture::app(fixture::demo());
+    let sent = Recorder::default();
+    s.backend = Box::new(sent.clone());
+    set(&mut s, SettingsChange::LiveUpdates(false));
+    set(&mut s, SettingsChange::LiveUpdates(false));
+    set(&mut s, SettingsChange::Theme(Appearance::Dark));
+    set(&mut s, SettingsChange::LiveUpdates(true));
+    assert_eq!(sent.sent(), [Command::LiveUpdates { on: false }, Command::LiveUpdates { on: true }]);
+}
+
+#[test]
+fn live_updates_turned_off_are_remembered_and_sent_at_launch() {
+    let (mut s, store) = app_with(Saved::default());
+    set(&mut s, SettingsChange::LiveUpdates(false));
+    let saved = store.last();
+    assert_eq!(saved.settings.as_ref().map(|s| s.live_updates), Some(false));
+    let json = serde_json::to_value(&saved).unwrap();
+    assert_eq!(json["settings"]["live_updates"], false);
+    // A section from before the setting existed: on.
+    let old: Saved = serde_json::from_str(r#"{"settings": {"density": "compact"}}"#).unwrap();
+    assert!(old.settings.unwrap().live_updates);
+
+    let mut s = fixture::app(fixture::demo());
+    let sent = Recorder::default();
+    s.backend = Box::new(sent.clone());
+    s.remember(saved, Box::new(Recorded::default()));
+    assert_eq!(sent.sent(), [Command::LiveUpdates { on: false }]);
+    let mut s = fixture::app(fixture::demo());
+    s.backend = Box::new(sent.clone());
+    s.remember(Saved::default(), Box::new(Recorded::default()));
+    assert_eq!(sent.sent().len(), 1, "on, the default, isn't sent");
 }
 
 /// Pick a palette row by its key, the query typed first (an empty query may not list it).

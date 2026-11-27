@@ -274,7 +274,7 @@ fn the_settings_page_is_a_tablist_beside_the_sidebar() {
         .map(|n| (n.role.clone(), n.name.clone(), n.has_state("selected")))
         .collect();
     let tab = |name: &str, on| ("tab".to_owned(), name.to_owned(), on);
-    assert_eq!(tabs, [tab("Appearance", false), tab("Transfers", true), tab("Browsing", false)]);
+    assert_eq!(tabs, [tab("Appearance", false), tab("Transfers", true), tab("Browsing", false), tab("General", false)]);
     let chosen = node(&nodes, "settings-tab-transfers");
     assert!(chosen.acts("click") && chosen.acts("focus"), "{chosen:?}");
     assert!(

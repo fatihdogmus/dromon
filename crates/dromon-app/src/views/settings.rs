@@ -6,6 +6,7 @@
 //! - Transfers: the download folder in mono with Choose… (the platform's folder picker) and
 //!   Reset (back to the OS Downloads folder), and Transfers at once, a 1–8 stepper.
 //! - Browsing: Show hidden files by default, a switch.
+//! - General: Live updates when the server supports them, a switch.
 //!
 //! The list is a tablist: one Tab stop, ↑ ↓ move between the sections and the section follows,
 //! Tab goes on to the controls, the section's tabpanel. Every control's change goes to the
@@ -115,6 +116,7 @@ fn panel(s: &App, section: SettingsSection, p: Paint) -> El {
         SettingsSection::Appearance => appearance(&v, p),
         SettingsSection::Transfers => transfers(&v, page.home.as_deref(), page.error.as_deref(), p),
         SettingsSection::Browsing => browsing(&v, p),
+        SettingsSection::General => general(&v, p),
     };
     col()
         .key(PANEL)
@@ -211,11 +213,16 @@ fn transfers(v: &SettingsView, home: Option<&Path>, error: Option<&str>, p: Pain
 fn browsing(v: &SettingsView, p: Paint) -> El {
     let hidden_sub =
         format!("For servers opened from now on; {} switches them", super::widgets::chord("mod+shift+period"));
-    section(
-        p,
-        "Browsing",
-        vec![setting(p, "Show hidden files by default", Some(sub(p, &hidden_sub)), switch(p, v.settings.show_hidden))],
-    )
+    let label = "Show hidden files by default";
+    let hidden = switch(p, "hidden-toggle", label, v.settings.show_hidden, SettingsChange::ShowHidden);
+    section(p, "Browsing", vec![setting(p, label, Some(sub(p, &hidden_sub)), hidden)])
+}
+
+fn general(v: &SettingsView, p: Paint) -> El {
+    let label = "Live updates when the server supports them";
+    let live = switch(p, "live-toggle", label, v.settings.live_updates, SettingsChange::LiveUpdates);
+    let live_sub = sub(p, "On Linux servers with inotifywait, changes show at once");
+    section(p, "General", vec![setting(p, label, Some(live_sub), live)])
 }
 
 /// "Choose…": the platform's folder picker, starting in the folder in use. It runs off the UI
@@ -368,8 +375,8 @@ fn stepper(p: Paint, n: usize) -> El {
         .child(step("transfers-more", "More transfers at once", "+", more))
 }
 
-/// An on/off switch: accent track and the knob on the right when on.
-fn switch(p: Paint, on: bool) -> El {
+/// An on/off switch: accent track and the knob on the right when on; a press asks for `to(!on)`.
+fn switch(p: Paint, key: &'static str, label: &'static str, on: bool, to: fn(bool) -> SettingsChange) -> El {
     let t = p.t;
     let knob = el()
         .size(14.0, 14.0)
@@ -377,9 +384,9 @@ fn switch(p: Paint, on: bool) -> El {
         .fill(if on { t.on_accent } else { t.text_2 })
         .offset(if on { 14.0 } else { 0.0 }, 0.0);
     row()
-        .key("hidden-toggle")
+        .key(key)
         .role("switch")
-        .label("Show hidden files by default")
+        .label(label)
         .checked(on)
         .focusable(true)
         .keyboard_focus_only()
@@ -391,6 +398,6 @@ fn switch(p: Paint, on: bool) -> El {
         .fill(if on { t.accent } else { t.field })
         .border(p.hair, if on { t.accent } else { t.border_strong })
         .motion(motion::SNAP)
-        .on_press_tx(move |s: &mut App, tx: &mut Tx| change(s, SettingsChange::ShowHidden(!on), tx))
+        .on_press_tx(move |s: &mut App, tx: &mut Tx| change(s, to(!on), tx))
         .child(knob)
 }

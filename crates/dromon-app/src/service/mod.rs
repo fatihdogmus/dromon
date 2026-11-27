@@ -17,7 +17,8 @@
 //! The manager ([`run`]) routes commands and askpass requests to one task per host
 //! (`conn.rs`), whose lifecycle is the pure machine in `lifecycle.rs` and whose prompts go
 //! through `auth.rs`; its file operations (new folder, rename, delete) run in `fileops.rs`
-//! on its SFTP session, and the Properties sheet's folder size walks in `sizes.rs`. The password store lives here only: cleared per host on Disconnect, and
+//! on its SFTP session, and the Properties sheet's folder size walks in `sizes.rs`; live
+//! updates of its folder on screen, through a second ssh session, in `live.rs`. The password store lives here only: cleared per host on Disconnect, and
 //! all of it when the UI goes away. `hostfiles.rs` owns the files: discovery and its watcher,
 //! the saved hosts' `hosts.conf`, and "Add to SSH config".
 //!
@@ -32,6 +33,8 @@ mod hostfiles;
 pub(crate) mod hosts;
 /// Also drives the fixture backend's connections, so both change status alike.
 pub(crate) mod lifecycle;
+/// Live updates of the folder on screen through a second ssh session (§11).
+mod live;
 /// Adaptive polling of the folder on screen (§4.5); the fixture backend's polls use it too.
 pub(crate) mod poll;
 /// Folder size walks for the Properties sheet; the fixture backend counts with it too.
@@ -46,6 +49,8 @@ pub(crate) mod windows;
 #[cfg(all(test, unix))]
 mod checks_tests;
 #[cfg(all(test, unix))]
+mod live_e2e_tests;
+#[cfg(all(test, unix))]
 mod tests;
 #[cfg(all(test, unix))]
 mod windows_e2e_tests;
@@ -54,6 +59,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::ffi::OsString;
 use std::future::pending;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -262,7 +268,8 @@ async fn serve<S: Sink>(mut commands: Commands, sink: S, cfg: Config, mut wakes:
     let (mut book, mut book_updates) = hostfiles::Book::start(&cfg);
     let store = Arc::new(Mutex::new(PasswordStore::new()));
     let engine = transfers::start(sink.clone());
-    let shared = Shared { cfg: Arc::new(cfg), askpass, store: store.clone(), ids: PromptIds::default(), engine };
+    let live = Arc::new(AtomicBool::new(true));
+    let shared = Shared { cfg: Arc::new(cfg), askpass, store: store.clone(), ids: PromptIds::default(), engine, live };
     let mut conns: HashMap<HostId, ConnHandle> = HashMap::new();
     // How each window shows, as it last said; nothing polls for a window until it says.
     let mut windows: BTreeMap<WindowId, Visibility> = BTreeMap::new();
@@ -386,6 +393,13 @@ fn dispatch<S: Sink>(
         Command::CancelFolderSize { id, host } => {
             if let Some(c) = conns.get(&host) {
                 let _ = c.cmds.send(ConnCmd::Size(from, SizeCmd::Cancel(id)));
+            }
+        }
+        Command::LiveUpdates { on } => {
+            // Tasks that start later read it from here.
+            shared.live.store(on, Ordering::Relaxed);
+            for c in conns.values() {
+                let _ = c.cmds.send(ConnCmd::Live(on));
             }
         }
         // The manager's loop takes these first.

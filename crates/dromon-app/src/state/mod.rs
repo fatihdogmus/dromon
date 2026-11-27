@@ -58,8 +58,8 @@ pub use selection::{Selection, TypeSelect};
 #[cfg(test)]
 pub use service::Recorder;
 pub use service::{
-    Backend, Command, FileOp, FileOpKind, HostBookCommand, HostBookEvent, OpId, ServiceEvent, Silent, SizeId,
-    SizeTotal, TransferCommand, WindowId,
+    Backend, Command, FileOp, FileOpKind, HostBookCommand, HostBookEvent, Live, LiveUnavailable, OpId, ServiceEvent,
+    Silent, SizeId, SizeTotal, TransferCommand, WindowId,
 };
 pub use settings::{Density, Settings, SettingsChange, SettingsView};
 pub use sheets::{Sheet, Sheets};
@@ -475,6 +475,11 @@ impl App {
             ev @ (ServiceEvent::FolderSizeProgress { .. }
             | ServiceEvent::FolderSizeDone { .. }
             | ServiceEvent::FolderSizeFailed { .. }) => self.size_event(ev),
+            ServiceEvent::Live { host, live } => {
+                if let Some(c) = self.conns.get_mut(&host) {
+                    c.live = live;
+                }
+            }
         }
     }
 

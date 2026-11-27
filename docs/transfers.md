@@ -70,7 +70,8 @@ more sessions.
 
 ### Agent checklist
 
-- Does new work reuse the host's session rather than open another?
+- Does new work reuse the host's session rather than open another? (The live updates' watch is
+  the one exception: a plain ssh command, no SFTP, that signs in only from memory.)
 - Does every new request end with a reply, an error or the timeout?
 
 ## Standard: Extensions Are Detected, Never Assumed
@@ -99,7 +100,7 @@ Work on every server in the matrix: OpenSSH 8.4 to 10, busybox, Windows OpenSSH.
 
 ## Reference: Listings, Diffs and Polling
 
-**Scope:** `dromon-sftp` (`list_paged`, `diff.rs`, `poll.rs`), `dromon-app/src/service/poll.rs`
+**Scope:** `dromon-sftp` (`list_paged`, `diff.rs`, `poll.rs`), `dromon-app/src/service/{poll.rs, live.rs, conn_live.rs}`
 
 ### Use for
 
@@ -118,6 +119,21 @@ Changing how folders load and refresh.
 - The app polls only folders on screen in a visible window (`service/poll.rs`, `service/windows.rs`),
   one listing per host at a time; a navigation replaces a poll; a poll that finds nothing new
   sends nothing.
+- Live updates (`service/live.rs`, wired in `service/conn_live.rs`): on servers with
+  `inotifywait`, a second ssh session per host watches one folder, the focused (else a visible)
+  window's on that host (`Watch::live_folder`), not its subfolders. Each change it reports
+  starts the same poll a schedule would, `live::DEBOUNCE` (150 ms) after the first change it
+  hasn't covered, so diffs, animations and the one-listing rule are unchanged. While a folder is
+  watched its own polls stretch `LIVE_STRETCH` (×4) as a safety net for what inotify misses (NFS,
+  a full event queue).
+- The watch is a pure machine (`live::Phase`, `live::step`): it moves with the folder on screen,
+  stops while no window shows the host, the session is down or the setting ("Live updates when
+  the server supports them", `Command::LiveUpdates`) is off. No `inotifywait`, a sign-in only the
+  user could answer, or a watch that never starts make the host `Unavailable` until its session
+  comes up again; a watch that ends later leaves its folder to normal polls until another folder
+  is shown. The windows hear `ServiceEvent::Live`; the status bar shows "Live", or says why not on
+  the connection's tooltip.
+- The fixture backend has no live updates: `Command::LiveUpdates` changes nothing there.
 
 ### Agent note
 

@@ -753,6 +753,8 @@ impl Core {
             Command::Poll { host } => self.poll(&host, &mut out),
             Command::FolderSize { id, host, path } => self.folder_size(id, host, path, &mut out),
             Command::CancelFolderSize { .. } => {}
+            // Fixture servers have no live updates: their hosts stay polled (`Live::Off`).
+            Command::LiveUpdates { .. } => {}
             Command::Verbose { host, on } => self.verbose(host, on, &mut out),
             Command::ShowPrompts { host } => self.show_prompts(&host, &mut out),
             Command::HostBook(cmd) => self.book.command(cmd, &mut out),

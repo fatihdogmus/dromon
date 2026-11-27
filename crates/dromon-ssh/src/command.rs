@@ -1,4 +1,6 @@
-//! The exact `ssh` command line for an SFTP session (plan §4.3 "Process launch").
+//! The exact `ssh` command lines (plan §4.3 "Process launch"): the SFTP session's, and the live
+//! updates' watch of one folder ([`SshCommand::watch`]), whose remote command is the only shell
+//! text Dromon sends a server, with the folder POSIX-quoted (`sh_quote`).
 
 use std::ffi::{OsStr, OsString};
 use std::fmt;
@@ -28,6 +30,14 @@ pub const BASE_ARGS: &[&str] = &[
 
 /// `DISPLAY` value set when none is present, so pre-8.4 clients' `prefer` logic still uses askpass.
 pub const FALLBACK_DISPLAY: &str = "dromon:0";
+
+/// The first line a watch prints when the server has `inotifywait` and the watch starts.
+pub const WATCH_READY: &str = "dromon-watch-ready";
+/// The only line a watch prints when the server has no `inotifywait`.
+pub const WATCH_MISSING: &str = "dromon-watch-missing";
+/// What `inotifywait` reports: everything that changes a folder's listing, one line per event
+/// (its event names only, never a file name).
+const INOTIFYWAIT: &str = "inotifywait -m -q -e create,delete,move,modify,attrib,close_write --format %e";
 
 /// A value we refuse to put on ssh's command line.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -160,20 +170,32 @@ impl SshCommand {
         env: Vec<(OsString, OsString)>,
         verbose: bool,
     ) -> Result<Self, CommandError> {
-        check_arg("The host alias", &host.alias)?;
-        let mut args: Vec<OsString> = BASE_ARGS.iter().map(OsString::from).collect();
-        if matches!(host.source, HostSource::Saved | HostSource::Recent) {
-            for (keyword, value, percent) in host_options(host) {
-                if let Some(value) = value {
-                    args.push("-o".into());
-                    args.push(config_option(keyword, &value, percent)?.into());
-                }
-            }
-        }
-        if verbose {
-            args.push("-v".into());
-        }
+        let mut args = host_args(host, verbose)?;
         args.extend(["-s".into(), OsString::from(&host.alias), "sftp".into()]);
+        Ok(SshCommand { program, args, env, env_remove: Vec::new() })
+    }
+
+    /// `ssh <base options> [host options] <alias> -- <watch>`: the live updates' second session
+    /// (no `-s sftp`; `-T` is a base option, and so is `ControlMaster=no`), with the same
+    /// per-host options and askpass as [`SshCommand::sftp`]. Its remote command (`watch_script`)
+    /// prints [`WATCH_MISSING`] and ends when the server has no `inotifywait`; else
+    /// [`WATCH_READY`], then one line per change in `folder` (not in its subfolders) until it's
+    /// stopped. `folder` must not be empty or contain NUL; anything else is quoted, line breaks
+    /// included.
+    pub fn watch(host: &HostSpec, askpass: &AskpassEnv, folder: &str) -> Result<Self, CommandError> {
+        Self::watch_with(ssh_program(), host, askpass.vars(), folder)
+    }
+
+    fn watch_with(
+        program: PathBuf,
+        host: &HostSpec,
+        env: Vec<(OsString, OsString)>,
+        folder: &str,
+    ) -> Result<Self, CommandError> {
+        let script = watch_script(folder)?;
+        let mut args = host_args(host, false)?;
+        // `--`: ssh reads options after the destination too; nothing after it is one.
+        args.extend([OsString::from(&host.alias), "--".into(), script.into()]);
         Ok(SshCommand { program, args, env, env_remove: Vec::new() })
     }
 
@@ -194,6 +216,59 @@ impl SshCommand {
         self.env_remove.push(name.into());
         self
     }
+}
+
+/// [`BASE_ARGS`], a saved or recent host's explicit options, then `-v` if `verbose`: what every
+/// command line for `host` starts with, before its alias.
+fn host_args(host: &HostSpec, verbose: bool) -> Result<Vec<OsString>, CommandError> {
+    check_arg("The host alias", &host.alias)?;
+    let mut args: Vec<OsString> = BASE_ARGS.iter().map(OsString::from).collect();
+    if matches!(host.source, HostSource::Saved | HostSource::Recent) {
+        for (keyword, value, percent) in host_options(host) {
+            if let Some(value) = value {
+                args.push("-o".into());
+                args.push(config_option(keyword, &value, percent)?.into());
+            }
+        }
+    }
+    if verbose {
+        args.push("-v".into());
+    }
+    Ok(args)
+}
+
+/// The remote command of [`SshCommand::watch`], for the server's POSIX login shell: checks for
+/// `inotifywait` (`command -v`), says which way it went, and runs it on `folder` alone.
+///
+/// Without a terminal nothing signals the remote side when ssh goes away, and `inotifywait` would
+/// live on (holding an inotify instance) until the folder next changed. So a reader in the
+/// background stops it once the command's input ends (ssh gone, or the app closing it), and the
+/// shell waits for `inotifywait` and then ends that reader: when `inotifywait` ends (its folder
+/// deleted, say) nothing holds the session any more, so its output ends and the app hears the
+/// watch is over. (sshd may give the session one socket for input and output, so a process still
+/// reading the input would keep the output open too.) The reader takes the input as fd 3: an
+/// asynchronous list's own input is `/dev/null`.
+fn watch_script(folder: &str) -> Result<String, CommandError> {
+    if folder.is_empty() {
+        return Err(CommandError::Empty("The folder"));
+    }
+    // No process argument can hold a NUL; line breaks are fine inside the quotes.
+    if folder.contains('\0') {
+        return Err(CommandError::Unquotable("The folder"));
+    }
+    Ok(format!(
+        "command -v inotifywait >/dev/null 2>&1 || {{ echo {WATCH_MISSING}; exit 0; }}; \
+         echo {WATCH_READY}; {INOTIFYWAIT} -- {} & w=$!; exec 3<&0; \
+         {{ read _ <&3; kill $w; }} >/dev/null 2>&1 & r=$!; wait $w; kill $r 2>/dev/null",
+        sh_quote(folder)
+    ))
+}
+
+/// `value` as one word of a POSIX shell command: in single quotes, each `'` written `'\''`.
+/// Nothing inside single quotes is special (`$`, backticks, `\`, line breaks), so the shell reads
+/// back exactly `value`.
+fn sh_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', r"'\''"))
 }
 
 /// The settings a saved or recent host passes explicitly, in order, each with how its `%` is

@@ -80,6 +80,53 @@ pub enum Command {
     /// Stop the walk `id` (its sheet closed). Nothing answers; a walk that already ended, or an
     /// unknown id, is ignored.
     CancelFolderSize { id: SizeId, host: HostId },
+    /// Settings' "Live updates when the server supports them" (on by default): whether hosts
+    /// watch their folder on screen live (`service/live.rs`), for every host from now on.
+    /// Answered with `Live` events as hosts start or stop.
+    LiveUpdates { on: bool },
+}
+
+/// Whether a host's folder on screen updates live (`service/live.rs`): the server tells the app
+/// of each change in it as it happens, and polls only back that up.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Live {
+    /// Polled, as always (nothing to watch, or the watch isn't up yet or ended).
+    #[default]
+    Off,
+    /// This folder is watched live.
+    On(RemotePath),
+    /// The server can't do it for this connection: polled.
+    Unavailable(LiveUnavailable),
+}
+
+/// Why a host's connection has no live updates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LiveUnavailable {
+    /// The server has no `inotifywait` (or isn't Linux).
+    NoInotify,
+    /// Signing in a second time needs an answer Dromon doesn't remember (a code, a host key).
+    SignIn,
+    /// The second session ended before its watch started.
+    Failed,
+}
+
+impl LiveUnavailable {
+    /// Why, as the connection's tooltip and log say it.
+    pub fn reason(self) -> &'static str {
+        match self {
+            LiveUnavailable::NoInotify => "inotifywait isn't installed on this server",
+            LiveUnavailable::SignIn => "it needs a sign-in Dromon can't answer by itself",
+            LiveUnavailable::Failed => "the server didn't start watching the folder",
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            LiveUnavailable::NoInotify => "NoInotify",
+            LiveUnavailable::SignIn => "SignIn",
+            LiveUnavailable::Failed => "Failed",
+        }
+    }
 }
 
 /// Identifies one folder size walk, chosen by the UI (unique per session: each window numbers
@@ -305,6 +352,12 @@ pub enum ServiceEvent {
         total: SizeTotal,
         error: Error,
     },
+    /// Whether `host`'s folder on screen updates live now (`Command::LiveUpdates`), to every
+    /// window when it changes, and to a window that opens a host already connected.
+    Live {
+        host: HostId,
+        live: Live,
+    },
 }
 
 /// Set to `1` to have [`super::App::apply`] write one [`trace_line`] per event to stderr.
@@ -355,6 +408,11 @@ pub fn trace_line(ev: &ServiceEvent) -> String {
         ServiceEvent::FolderSizeProgress { id, host, .. } => format!("FolderSizeProgress host={host} id={}", id.0),
         ServiceEvent::FolderSizeDone { id, host, .. } => format!("FolderSizeDone host={host} id={}", id.0),
         ServiceEvent::FolderSizeFailed { id, host, .. } => format!("FolderSizeFailed host={host} id={}", id.0),
+        ServiceEvent::Live { host, live } => match live {
+            Live::Off => format!("Live host={host} state=Off"),
+            Live::On(_) => format!("Live host={host} state=On"),
+            Live::Unavailable(why) => format!("Live host={host} state=Unavailable why={}", why.name()),
+        },
     }
 }
 
@@ -523,6 +581,22 @@ mod tests {
             entries: vec![entry],
         };
         assert_eq!(trace_line(&ev), "Refreshed host=prod entries=1");
+    }
+
+    #[test]
+    fn live_trace_lines_name_the_state_and_never_the_folder() {
+        let host = HostId("prod".into());
+        let live = |live| ServiceEvent::Live { host: host.clone(), live };
+        let lines = [
+            live(Live::On(RemotePath::new("/secret/folder"))),
+            live(Live::Off),
+            live(Live::Unavailable(LiveUnavailable::SignIn)),
+        ]
+        .map(|ev| trace_line(&ev));
+        assert_eq!(
+            lines,
+            ["Live host=prod state=On", "Live host=prod state=Off", "Live host=prod state=Unavailable why=SignIn"]
+        );
     }
 
     fn p(s: &str) -> RemotePath {

@@ -1,5 +1,5 @@
 //! Settings (§6.8, §8): theme, list density, the download folder, transfers at once per host,
-//! and whether hidden files show by default.
+//! whether hidden files show by default, and live updates.
 //!
 //! The values live in each main window's state ([`App::settings`]), the same in all of them.
 //! Each main window shows them on its Settings page (`page.rs`, `views/settings.rs`), which
@@ -60,6 +60,8 @@ pub struct Settings {
     pub transfers_at_once: usize,
     /// Show dotfiles in hosts opened from now on (⌘⇧. still switches them for the session).
     pub show_hidden: bool,
+    /// Watch the folder on screen live where the server can (`service/live.rs`); off: polls only.
+    pub live_updates: bool,
 }
 
 impl Default for Settings {
@@ -70,6 +72,7 @@ impl Default for Settings {
             download_folder: None,
             transfers_at_once: AT_ONCE_DEFAULT,
             show_hidden: true,
+            live_updates: true,
         }
     }
 }
@@ -93,6 +96,7 @@ impl Settings {
             SettingsChange::DownloadFolder(folder) => s.download_folder = folder,
             SettingsChange::TransfersAtOnce(n) => s.transfers_at_once = n,
             SettingsChange::ShowHidden(show) => s.show_hidden = show,
+            SettingsChange::LiveUpdates(on) => s.live_updates = on,
         }
         s.clamped()
     }
@@ -107,6 +111,7 @@ pub enum SettingsChange {
     DownloadFolder(Option<PathBuf>),
     TransfersAtOnce(usize),
     ShowHidden(bool),
+    LiveUpdates(bool),
 }
 
 /// What the Settings page shows: the settings, and the folder "default" stands for.
@@ -188,9 +193,9 @@ impl App {
 
     /// Makes `new` the settings and carries out what changed: the theme repaints the windows,
     /// density the list (its views read [`Density::row`]), the download folder is read by the
-    /// next download, the engine hears the new limit (`engine`: from this window), and the
-    /// hidden-files default is the one hosts opened from now on start with (the ones open keep
-    /// theirs).
+    /// next download, the engine hears the new limit and the service whether to watch folders
+    /// live (`engine`: from this window), and the hidden-files default is the one hosts opened
+    /// from now on start with (the ones open keep theirs).
     fn apply_settings(&mut self, new: Settings, engine: bool) {
         let old = std::mem::replace(&mut self.settings, new);
         let s = &self.settings;
@@ -203,6 +208,10 @@ impl App {
         if engine && old.transfers_at_once != s.transfers_at_once {
             let n = s.transfers_at_once;
             self.send(Command::Transfer(TransferCommand::PerHost(n)));
+        }
+        let on = self.settings.live_updates;
+        if engine && old.live_updates != on {
+            self.send(Command::LiveUpdates { on });
         }
     }
 }
