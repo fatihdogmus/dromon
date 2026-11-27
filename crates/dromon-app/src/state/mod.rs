@@ -33,6 +33,7 @@ pub mod settings;
 pub mod sheets;
 pub mod toast;
 pub mod transfers;
+pub mod update;
 pub mod windows;
 
 #[cfg(test)]
@@ -167,6 +168,8 @@ pub struct App {
     inbox: VecDeque<ServiceEvent>,
     /// The window's state as the service polls by, and refresh animation (`refresh.rs`).
     pub poll: refresh::PollUi,
+    /// A newer version, and installing it (`update.rs`).
+    pub update: update::Update,
 }
 
 /// What the user did, in the app's terms.
@@ -281,6 +284,8 @@ pub enum Action {
     NewWindow,
     /// ⌘W, the File menu: close this window (the last one asks first while transfers run).
     CloseWindow,
+    /// The update toast's, the Settings page's and the update sheet's buttons (`update.rs`).
+    Update(update::UpdateAction),
     /// "Open in Terminal" (the menus, the palette, ⌘⇧T): ssh in the user's terminal app, in the
     /// row `Some(name)` when it's a folder, else in the folder on screen (`menu.rs`).
     OpenTerminal(Option<String>),
@@ -313,6 +318,11 @@ pub enum Effect {
     /// Open the native multi-file picker, titled for `folder` (the folder on screen); the files
     /// picked upload into it (`Action::Upload` with no folder).
     PickUpload { folder: String },
+    /// Open this https link in the browser (a release's page).
+    OpenUrl(String),
+    /// Quit the app (every window), starting it again once it has exited when `relaunch`: an
+    /// update is in place (`update.rs`).
+    Quit { relaunch: bool },
     /// Open `terminal` running ssh to `host` in `folder`, off the UI thread (`crate::terminal`);
     /// a failure comes back to `window` as [`Action::TerminalFailed`].
     OpenTerminal { window: WindowId, terminal: settings::Terminal, host: dromon_core::HostSpec, folder: RemotePath },
@@ -343,6 +353,7 @@ impl App {
             downloads: PathBuf::from("Downloads"),
             inbox: VecDeque::new(),
             poll: refresh::PollUi::default(),
+            update: update::Update::default(),
         }
     }
 
@@ -502,10 +513,9 @@ impl App {
             ev @ (ServiceEvent::SearchFound { .. }
             | ServiceEvent::SearchDone { .. }
             | ServiceEvent::SearchFailed { .. }) => self.search_event(ev),
+            ServiceEvent::Update(ev) => self.update_event(ev),
             ServiceEvent::Live { host, live } => {
-                if let Some(c) = self.conns.get_mut(&host) {
-                    c.live = live;
-                }
+                self.conns.entry(host).and_modify(|c| c.live = live);
             }
         }
     }
@@ -575,6 +585,10 @@ impl App {
                 if std::mem::take(&mut self.ui.confirm_quit) {
                     return fx;
                 }
+                if self.update.confirming() {
+                    self.update_action(update::UpdateAction::Cancel, &mut fx);
+                    return fx;
+                }
                 if let Some((id, answer)) = self.ui.sheets.cancel() {
                     self.send(Command::AnswerPrompt { id, answer });
                 }
@@ -627,6 +641,7 @@ impl App {
             Action::Setting(change) => self.change_setting(change),
             Action::NewWindow => self.new_window(),
             Action::CloseWindow => self.close_window(&mut fx),
+            Action::Update(a) => self.update_action(a, &mut fx),
             Action::OpenTerminal(row) => self.open_terminal(row, &mut fx),
             Action::TerminalFailed(why) => {
                 self.files.toasts.push(format!("Couldn't open a terminal: {why}"));
@@ -658,7 +673,7 @@ impl App {
             Shortcut::CloseWindow => return self.act(Action::CloseWindow),
             _ => {}
         }
-        if self.conflict_on_screen().is_some() || self.ui.confirm_quit {
+        if self.conflict_on_screen().is_some() || self.ui.confirm_quit || self.update.confirming() {
             return Vec::new();
         }
         // The quick-connect popover is modal too: Escape closes it, nothing reaches the list.

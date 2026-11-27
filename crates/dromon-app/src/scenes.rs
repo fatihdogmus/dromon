@@ -19,6 +19,8 @@ use crate::theme::Appearance;
 
 #[path = "scenes_settings.rs"]
 mod settings;
+#[path = "scenes_update.rs"]
+mod update;
 
 /// The demo's big folder: 10,000 photos.
 pub const BIG_FOLDER: &str = "/srv/media/photos";
@@ -744,4 +746,7 @@ pub const SCENES: &[Scene] = &[
     ("settings", settings::settings),
     ("settings-light", settings::settings_light),
     ("settings-transfers", settings::settings_transfers),
+    ("settings-general", update::settings_general),
+    ("update-toast", update::update_toast),
+    ("update-confirm", update::update_confirm),
 ];

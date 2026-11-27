@@ -10,7 +10,9 @@
 //! window first (`keys_first`), so on every platform `on_key` takes them. Closing the last main
 //! window quits the app, on macOS too. The app menu's "Settings…" (⌘,, macOS) acts in the key
 //! window, as Rune's menu bar holds the key window's items: it shows that window's Settings page
-//! (`state/page.rs`). On Windows and Linux Rune has no app menu, and Ctrl+, reaches `on_key`.
+//! (`state/page.rs`). Its "Check for Updates…" shows that page's General section and checks now.
+//! On Windows and Linux Rune has no app menu, and Ctrl+, reaches `on_key`; Settings' Check now
+//! is the way there.
 //!
 //! The taskbar, the Dock badge and notifications are hooked up once for the app
 //! ([`Fleet::connect_os`]); every main window's native window joins that link, and only the
@@ -27,7 +29,8 @@ use rune::{
 
 use crate::service::RuneSink;
 use crate::state::frames::{self, Area, CASCADE, Frame};
-use crate::state::{Action, App, News, Peers, WindowId};
+use crate::state::update::UpdateAction;
+use crate::state::{Action, App, News, Peers, SettingsSection, WindowId};
 use crate::theme::Appearance;
 use crate::views::OsLink;
 use crate::{theme, views};
@@ -198,6 +201,7 @@ fn main_window(fleet: &Fleet, id: WindowId, app: RuneApp<App>) -> RuneApp<App> {
         .menu_item(menu_item("New Window", "new-window", "mod+n", |s, tx| views::run(s, Action::NewWindow, tx)))
         .menu_item(menu_item("Close Window", "close-window", "mod+w", |s, tx| views::run(s, Action::CloseWindow, tx)))
         .menu_item(settings_item())
+        .menu_item(updates_item())
 }
 
 fn menu_item(title: &str, id: &str, chord: &str, action: fn(&mut App, &mut Tx)) -> MenuItem<App> {
@@ -219,6 +223,18 @@ fn settings_item() -> MenuItem<App> {
 
 fn open_settings(s: &mut App, tx: &mut Tx) {
     views::run(s, Action::OpenSettings, tx);
+}
+
+/// The app menu's "Check for Updates…": the Settings page's General section in the window it
+/// acts in, checking now; the page shows what the check found (`state/update.rs`).
+fn updates_item() -> MenuItem<App> {
+    MenuItem::new("Check for Updates…", check_for_updates).id("check-updates")
+}
+
+fn check_for_updates(s: &mut App, tx: &mut Tx) {
+    views::run(s, Action::OpenSettings, tx);
+    views::run(s, Action::SettingsSection(SettingsSection::General), tx);
+    views::run(s, Action::Update(UpdateAction::CheckNow), tx);
 }
 
 /// The fleet as a window state's peers, and its backend waking the windows (a fixture's); the

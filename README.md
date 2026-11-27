@@ -74,6 +74,8 @@ gpg --verify SHA256SUMS.asc SHA256SUMS
 sha256sum --check --ignore-missing SHA256SUMS
 ```
 
+`SHA256SUMS.minisig` is the checksums' [minisign](https://jedisct1.github.io/minisign/) signature by the key Dromon's updater trusts, [`packaging/update/release-key.pub`](packaging/update/release-key.pub) (key ID `489CB3C37A12EC48`): `minisign -V -p packaging/update/release-key.pub -m SHA256SUMS -x SHA256SUMS.minisig`.
+
 </details>
 
 <a name="source"></a>
@@ -139,6 +141,10 @@ Linux needs `libxkbcommon-dev` and `libwayland-dev`. Want to look around without
 **Transfers.** Downloads and uploads of files and whole folders, with resume, Chrome-style `name (1)` renaming or a Replace / Keep both / Skip choice on clashes. Progress in the toolbar, a badge in the Dock or taskbar, and a notification when a long job finishes while you're elsewhere.
 
 **Made to fit in.** Several windows, light and dark themes, compact or comfortable rows, your own download folder and number of parallel transfers. Respects reduce motion and increased contrast, and every control works with the keyboard and screen readers.
+
+**Updates.** Dromon tells you when a new version is out. On macOS (the DMG) and Windows it installs it for you after your transfers are done, checking that the download is the release the project signed first; a Homebrew, `.deb` or Arch install gets the command to run instead. Settings › General has *Check for updates automatically* and *Check now*.
+
+**Privacy.** Dromon talks only to the SSH servers you choose, through your own `ssh`, and to GitHub to check for updates: one anonymous request at launch and once a day (turn it off in Settings › General), nothing about you or your servers, no telemetry.
 
 <a name="shortcuts"></a>
 

@@ -8,7 +8,8 @@ name: Release
 #   macOS    Dromon-<v>-macos-universal.dmg      Apple silicon + Intel; Developer ID, notarized
 #   Linux    Dromon-<v>-linux-x64.deb            + .asc (GPG)
 #            Dromon-<v>-linux-x64.pkg.tar.zst    + .sig (GPG)
-#   all      SHA256SUMS + SHA256SUMS.asc, Sigstore build-provenance attestations
+#   all      SHA256SUMS + SHA256SUMS.asc (GPG) + SHA256SUMS.minisig (minisign: the app's
+#            updater), Sigstore build-provenance attestations
 #
 # Targets for now: Windows x64 (Windows on Arm runs it emulated), macOS (one universal app:
 # Apple silicon and Intel), Linux x86_64. The packaging scripts take an --arch / -Arch to add
@@ -125,6 +126,7 @@ jobs:
       apple-team-id: ${{ steps.check.outputs.apple-team-id }}
       gpg: ${{ steps.check.outputs.gpg }}
       gpg-fingerprint: ${{ steps.check.outputs.gpg-fingerprint }}
+      minisign: ${{ steps.check.outputs.minisign }}
     steps:
       - &checkout-release
         name: Check out the release scripts
@@ -162,6 +164,7 @@ jobs:
           APPLE_NOTARY_ISSUER_ID: ${{ vars.APPLE_NOTARY_ISSUER_ID }}
           HAS_RELEASE_GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY != '' }}
           RELEASE_GPG_FINGERPRINT: ${{ vars.RELEASE_GPG_FINGERPRINT }}
+          HAS_MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY != '' }}
 
   # ---- Build: repository code; no environment, secrets or id-token ------------------------
 
@@ -634,6 +637,7 @@ jobs:
           MACOS_SIGNED: ${{ needs.sign-macos.result == 'success' }}
           GPG_SIGNED: ${{ needs.credentials.outputs.gpg }}
           GPG_FINGERPRINT: ${{ needs.credentials.outputs.gpg-fingerprint }}
+          MINISIGN_SIGNED: ${{ needs.credentials.outputs.minisign }}
         run: |
           bash .github/release/assemble.sh "$RUNNER_TEMP/release" "$VERSION" "$RUNNER_TEMP"/{linux,arch,macos,windows}
           mkdir -p "$RUNNER_TEMP/notes"
@@ -650,26 +654,54 @@ jobs:
           name: release-notes
           path: ${{ runner.temp }}/notes
 
+  # Detached signatures only: GPG (packages, SHA256SUMS) and minisign (SHA256SUMS, for the app's
+  # updater). A release needs both (credentials.sh); a dry run signs with what exists.
   sign-linux:
     needs: [plan, credentials, assemble]
-    if: ${{ !cancelled() && needs.assemble.result == 'success' && needs.credentials.outputs.gpg == 'true' }}
+    if: >-
+      ${{ !cancelled() && needs.assemble.result == 'success'
+      && (needs.credentials.outputs.gpg == 'true' || needs.credentials.outputs.minisign == 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: release
     outputs:
       digest: ${{ steps.upload.outputs.digest }}
     steps:
-      - *checkout-release
+      - name: Check out the release scripts (the apt action, and the app's update key as data)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          sparse-checkout: |
+            /.github/release/
+            /.github/actions/apt-install/
+            /packaging/update/release-key.pub
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - uses: ./.github/release/download
         with:
           pattern: release-files
           digests: release-files=${{ needs.assemble.outputs.digest }}
       - name: GPG-sign the packages and SHA256SUMS
+        if: needs.credentials.outputs.gpg == 'true'
         run: bash .github/release/sign-linux.sh "$RUNNER_TEMP/in/release-files" "$RUNNER_TEMP/signatures"
         env:
           RELEASE_GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
           RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
           RELEASE_GPG_FINGERPRINT: ${{ vars.RELEASE_GPG_FINGERPRINT }}
+      # Ubuntu's minisign from its signed archive: apt checks every file against the signed
+      # package lists, a cache hit included, and this job saves no cache.
+      - name: Install minisign
+        if: needs.credentials.outputs.minisign == 'true'
+        uses: ./.github/actions/apt-install
+        with:
+          packages: minisign
+          save: "false"
+      - name: Minisign-sign SHA256SUMS (the app's update check)
+        if: needs.credentials.outputs.minisign == 'true'
+        run: bash .github/release/sign-minisign.sh "$RUNNER_TEMP/in/release-files" "$RUNNER_TEMP/signatures" "$VERSION" packaging/update/release-key.pub
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+          VERSION: ${{ needs.plan.outputs.version }}
       - id: upload
         uses: ./.github/release/upload
         with:

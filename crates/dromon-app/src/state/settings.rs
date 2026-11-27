@@ -1,6 +1,6 @@
 //! Settings (§6.8, §8): theme, list density, the download folder, transfers at once per host,
-//! whether hidden files show by default, the terminal app "Open in Terminal" uses, and live
-//! updates.
+//! whether hidden files show by default, the terminal app "Open in Terminal" uses, whether
+//! Dromon checks for updates by itself, and live updates.
 //!
 //! The values live in each main window's state ([`App::settings`]), the same in all of them.
 //! Each main window shows them on its Settings page (`page.rs`, `views/settings.rs`), which
@@ -133,6 +133,8 @@ pub struct Settings {
     pub show_hidden: bool,
     /// Where "Open in Terminal" opens ssh.
     pub terminal: Terminal,
+    /// Check GitHub for a newer Dromon at launch and once a day (`update.rs`).
+    pub check_updates: bool,
     /// Watch the folder on screen live where the server can (`service/live.rs`); off: polls only.
     pub live_updates: bool,
 }
@@ -146,6 +148,7 @@ impl Default for Settings {
             transfers_at_once: AT_ONCE_DEFAULT,
             show_hidden: true,
             terminal: Terminal::System,
+            check_updates: true,
             live_updates: true,
         }
     }
@@ -171,6 +174,7 @@ impl Settings {
             SettingsChange::TransfersAtOnce(n) => s.transfers_at_once = n,
             SettingsChange::ShowHidden(show) => s.show_hidden = show,
             SettingsChange::Terminal(terminal) => s.terminal = terminal,
+            SettingsChange::CheckUpdates(on) => s.check_updates = on,
             SettingsChange::LiveUpdates(on) => s.live_updates = on,
         }
         s.clamped()
@@ -187,6 +191,7 @@ pub enum SettingsChange {
     TransfersAtOnce(usize),
     ShowHidden(bool),
     Terminal(Terminal),
+    CheckUpdates(bool),
     LiveUpdates(bool),
 }
 
@@ -228,7 +233,9 @@ impl App {
 
     /// The settings remembered last time (`remember`). Prefs from before Settings existed have
     /// no section: the defaults, with ⌘⇧.'s last state (which used to be remembered) as the
-    /// hidden-files default.
+    /// hidden-files default. The service hears whether to check for updates by itself: the
+    /// launch check comes from here, so only a run that remembers its settings (the app, never
+    /// a headless run or a test on `NoStore` without `remember`) checks.
     pub(super) fn restore_settings(&mut self) {
         let saved = self.saved().settings.clone();
         let settings = match saved {
@@ -236,6 +243,7 @@ impl App {
             None => Settings { show_hidden: self.saved().show_hidden.unwrap_or(true), ..Settings::default() },
         };
         self.apply_settings(settings, true);
+        self.auto_updates(self.settings.check_updates);
     }
 
     /// A control on the Settings page: applied at once, remembered, and told to the other main
@@ -245,6 +253,10 @@ impl App {
         let new = self.settings.with(change);
         if new != self.settings {
             let theme = self.settings.theme;
+            // The service's updater is one for every window: told once, from here.
+            if new.check_updates != self.settings.check_updates {
+                self.auto_updates(new.check_updates);
+            }
             self.apply_settings(new, true);
             let settings = self.settings.clone();
             self.save(|s| {

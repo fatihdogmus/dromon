@@ -11,7 +11,8 @@
 //! There's no clock: a lost connection says when it would retry, then stays reconnecting.
 //! Nothing sleeps either, so no wake or probe happens (`service/wake.rs`). Verbose logging
 //! (`Command::Verbose`) reconnects a live host at once with `-v`, as the service does.
-//! Answers are compared with the fixture's and wiped; nothing logs them.
+//! Answers are compared with the fixture's and wiped; nothing logs them. Update checks touch no
+//! network: the running version is always the newest.
 //!
 //! Saved and recent hosts are `fixture/hostbook.rs`'s, in memory.
 //!
@@ -48,6 +49,7 @@ use crate::service::lifecycle::{self, Event, Lifecycle, Phase};
 use crate::service::poll::{Collector, Outcome};
 use crate::service::sizes::Sizes;
 use crate::service::windows::Watch;
+use crate::state::service::{UpdateCommand, UpdateEvent};
 use crate::state::{Command, FileOp, OpId, ServiceEvent, SizeId, SizeTotal, TransferCommand, WindowId};
 
 /// Entries per listing page, as the service pages them (§4.4).
@@ -772,6 +774,11 @@ impl Core {
             Command::Verbose { host, on } => self.verbose(host, on, &mut out),
             Command::ShowPrompts { host } => self.show_prompts(&host, &mut out),
             Command::HostBook(cmd) => self.book.command(cmd, &mut out),
+            // No network: a check finds nothing newer, so there's never anything to install.
+            Command::Update(UpdateCommand::Check) => {
+                out.extend([UpdateEvent::Checking, UpdateEvent::UpToDate].map(ServiceEvent::Update));
+            }
+            Command::Update(UpdateCommand::Auto(_) | UpdateCommand::Install) => {}
             Command::WindowClosed => {
                 self.windows.remove(&self.from);
                 let now = Instant::now();

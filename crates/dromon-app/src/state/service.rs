@@ -19,6 +19,7 @@ use dromon_core::{ConnStatus, Entry, Error, HostId, HostSpec, Prompt, PromptAnsw
 use dromon_transfer::{ConflictChoice, JobId, JobRequest, JobView, TaskState};
 
 pub use super::hostbook::{HostBookCommand, HostBookEvent};
+pub use super::update::{UpdateCommand, UpdateEvent};
 
 /// One main window of the app, for the session: the first is [`WindowId::FIRST`], each ⌘N
 /// takes the next number.
@@ -80,6 +81,9 @@ pub enum Command {
     /// Stop the walk `id` (its sheet closed). Nothing answers; a walk that already ended, or an
     /// unknown id, is ignored.
     CancelFolderSize { id: SizeId, host: HostId },
+    /// Checking for and installing a newer Dromon (`state/update.rs`); answered with `Update`
+    /// events.
+    Update(UpdateCommand),
     /// Settings' "Live updates when the server supports them" (on by default): whether hosts
     /// watch their folder on screen live (`service/live.rs`), for every host from now on.
     /// Answered with `Live` events as hosts start or stop.
@@ -387,6 +391,8 @@ pub enum ServiceEvent {
         total: SizeTotal,
         error: Error,
     },
+    /// The updater's news (`state/update.rs`).
+    Update(UpdateEvent),
     /// Whether `host`'s folder on screen updates live now (`Command::LiveUpdates`), to every
     /// window when it changes, and to a window that opens a host already connected.
     Live {
@@ -466,6 +472,7 @@ pub fn trace_line(ev: &ServiceEvent) -> String {
         ServiceEvent::FolderSizeProgress { id, host, .. } => format!("FolderSizeProgress host={host} id={}", id.0),
         ServiceEvent::FolderSizeDone { id, host, .. } => format!("FolderSizeDone host={host} id={}", id.0),
         ServiceEvent::FolderSizeFailed { id, host, .. } => format!("FolderSizeFailed host={host} id={}", id.0),
+        ServiceEvent::Update(ev) => format!("Update {}", ev.name()),
         ServiceEvent::Live { host, live } => match live {
             Live::Off => format!("Live host={host} state=Off"),
             Live::On(_) => format!("Live host={host} state=On"),
@@ -700,6 +707,39 @@ mod tests {
             lines,
             ["Live host=prod state=On", "Live host=prod state=Off", "Live host=prod state=Unavailable why=SignIn"]
         );
+    }
+
+    #[test]
+    fn update_trace_lines_name_the_event_and_never_its_versions_or_errors() {
+        use crate::state::update::{Manual, Method, Offer, Version};
+        let offer = Offer {
+            version: Version::parse("7.7.7").unwrap(),
+            page: "https://example.invalid/secret".into(),
+            method: Method::Page(Manual::Unknown),
+        };
+        let events = [
+            UpdateEvent::Checking,
+            UpdateEvent::UpToDate,
+            UpdateEvent::Available(offer),
+            UpdateEvent::CheckFailed("secret".into()),
+            UpdateEvent::Installing,
+            UpdateEvent::InstallFailed("secret".into()),
+            UpdateEvent::Installed { relaunch: true },
+        ];
+        let lines: Vec<String> = events.into_iter().map(|e| trace_line(&ServiceEvent::Update(e))).collect();
+        assert_eq!(
+            lines,
+            [
+                "Update Checking",
+                "Update UpToDate",
+                "Update Available",
+                "Update CheckFailed",
+                "Update Installing",
+                "Update InstallFailed",
+                "Update Installed",
+            ]
+        );
+        assert!(lines.iter().all(|l| !l.contains("secret") && !l.contains("7.7.7")));
     }
 
     fn p(s: &str) -> RemotePath {
