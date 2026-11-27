@@ -10,15 +10,19 @@
 //! an operation that changed it. One listing runs at a time: one a window waits for finishes
 //! before the next starts (a poll gives way at once).
 //!
-//! The checks after a wake or a window's focus, and verbose logging, are `conn_checks.rs`.
+//! The checks after a wake or a window's focus, and verbose logging, are `conn_checks.rs`; live
+//! updates of the folder on screen, through a second ssh session (`live.rs`), `conn_live.rs`.
 
 #[path = "conn_checks.rs"]
 mod checks;
+#[path = "conn_live.rs"]
+mod live_updates;
 #[path = "conn_session.rs"]
 mod session;
 
 use std::collections::VecDeque;
 use std::future::pending;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -32,6 +36,7 @@ use self::session::{ListRun, Session, SessionEvent, session_next};
 use super::auth::{self, PromptIds, Routed};
 use super::fileops::{FileOps, Finished};
 use super::lifecycle::{Effect, Event, Lifecycle, Phase, step};
+use super::live::{self, Heard, Updates};
 use super::poll::Outcome;
 use super::preview::{PreviewCmd, Reads};
 use super::search::SearchCmd;
@@ -40,7 +45,7 @@ use super::transfers::EngineMsg;
 use super::wake::{ProbeGate, Why};
 use super::windows::{Route, Watch, status_of};
 use super::{Config, Sink};
-use crate::state::{FileOp, OpId, SearchId, ServiceEvent, SizeId, WindowId};
+use crate::state::{FileOp, FileOpEvent, OpId, SearchId, ServiceEvent, SizeId, WindowId};
 
 /// Entries per listing page (§4.4).
 pub const PAGE: usize = 512;
@@ -49,35 +54,38 @@ const DRAIN: Duration = Duration::from_millis(300);
 
 /// What the manager sends a connection; the window is the one the command came from.
 pub enum ConnCmd {
-    Connect(WindowId, HostSpec),
-    List(WindowId, RemotePath),
     Answer(WindowId, PromptId, PromptAnswer),
-    /// The window's Sign in: the host's open prompts, shown there.
-    ShowPrompts(WindowId),
-    Disconnect,
-    FileOp(OpId, FileOp),
-    /// How the window shows now (`windows.rs`).
-    Window(WindowId, Visibility),
-    /// Poll the window's folder on screen now, if it's polled at all (it gained focus).
-    PollNow(WindowId),
     /// The window closed.
     Closed(WindowId),
-    /// The computer woke from sleep (`wake.rs`).
-    Wake,
+    Connect(WindowId, HostSpec),
+    Disconnect,
+    FileOp(OpId, FileOp),
     /// A window gained focus: check the session, at most every 30 s.
     Focus,
-    /// Run ssh with `-v` or without from now on (`Command::Verbose`).
-    Verbose(bool),
-    /// A folder size walk for the window, or stopping one (`sizes.rs`).
-    Size(WindowId, SizeCmd),
-    /// A search in subfolders for the window, or stopping one (`search.rs`).
-    Search(WindowId, SearchCmd),
+    List(WindowId, RemotePath),
+    /// Watch folders live or not from now on (`Command::LiveUpdates`).
+    Live(bool),
+    /// Poll the window's folder on screen now, if it's polled at all (it gained focus).
+    PollNow(WindowId),
     /// A quick preview read for the window, or stopping one (`preview.rs`).
     Preview(WindowId, PreviewCmd),
+    /// A search in subfolders for the window, or stopping one (`search.rs`).
+    Search(WindowId, SearchCmd),
+    /// The window's Sign in: the host's open prompts, shown there.
+    ShowPrompts(WindowId),
+    /// A folder size walk for the window, or stopping one (`sizes.rs`).
+    Size(WindowId, SizeCmd),
+    /// Run ssh with `-v` or without from now on (`Command::Verbose`).
+    Verbose(bool),
+    /// The computer woke from sleep (`wake.rs`).
+    Wake,
+    /// How the window shows now (`windows.rs`).
+    Window(WindowId, Visibility),
 }
 
 /// What the connection tasks share: configuration, the askpass endpoint, the password store,
-/// prompt ids, and the transfer engine (told when a session comes and goes).
+/// prompt ids, the transfer engine (told when a session comes and goes), and whether folders
+/// are watched live (the setting, for tasks that start later).
 #[derive(Clone)]
 pub struct Shared {
     pub cfg: Arc<Config>,
@@ -85,6 +93,7 @@ pub struct Shared {
     pub store: Arc<Mutex<PasswordStore>>,
     pub ids: PromptIds,
     pub engine: mpsc::UnboundedSender<EngineMsg>,
+    pub live: Arc<AtomicBool>,
 }
 
 /// The manager's end of a connection task.
@@ -97,6 +106,7 @@ pub struct ConnHandle {
 pub fn start<S: Sink>(spec: HostSpec, shared: Shared, sink: S) -> ConnHandle {
     let (cmds, cmd_rx) = mpsc::unbounded_channel();
     let (asks, ask_rx) = mpsc::unbounded_channel();
+    let live = Updates::new(shared.live.load(Ordering::Relaxed));
     let task = Task {
         host: spec.id.clone(),
         spec,
@@ -116,6 +126,7 @@ pub fn start<S: Sink>(spec: HostSpec, shared: Shared, sink: S) -> ConnHandle {
         searches: Walks::default(),
         reads: Reads::default(),
         epoch: 0,
+        live,
     };
     tokio::spawn(task.run(cmd_rx, ask_rx));
     ConnHandle { cmds, asks }
@@ -146,6 +157,7 @@ enum Input {
     OpEnded(Finished),
     PollDue,
     Probed(checks::Probed),
+    Live(Heard),
 }
 
 struct Task<S: Sink> {
@@ -179,6 +191,8 @@ struct Task<S: Sink> {
     /// Counts SFTP sessions that came up: an operation's lost connection only ends the
     /// session it ran on.
     epoch: u64,
+    /// Live updates of the folder on screen (`conn_live.rs`).
+    live: Updates,
 }
 
 impl<S: Sink> Task<S> {
@@ -200,6 +214,7 @@ impl<S: Sink> Task<S> {
                 ended = self.ops.next() => Input::OpEnded(ended),
                 _ = sleep_opt(poll_at) => Input::PollDue,
                 probed = checks::next(&mut self.probe) => Input::Probed(probed),
+                heard = live::next(&mut self.live.watcher) => Input::Live(heard),
             };
             match input {
                 Input::Cmd(cmd) => self.on_command(cmd).await,
@@ -211,12 +226,18 @@ impl<S: Sink> Task<S> {
                 }
                 Input::OpEnded(ended) => self.on_op_ended(ended).await,
                 Input::PollDue => {
-                    if let Some(path) = self.watch.next_due() {
+                    // The watched folder's changes first, then the poll due.
+                    let now = Instant::now();
+                    let polls = self.watch.due().is_some_and(|d| d <= now);
+                    let due = self.live_poll_due(now).or_else(|| polls.then(|| self.watch.next_due()).flatten());
+                    if let Some(path) = due {
                         self.start_poll(path);
                     }
                 }
                 Input::Probed(probed) => self.on_probed(probed).await,
+                Input::Live(heard) => self.on_live(heard).await,
             }
+            self.live_sync().await;
         }
         // The app is quitting: the session drops, killing ssh.
     }
@@ -264,7 +285,10 @@ impl<S: Sink> Task<S> {
     fn file_op(&mut self, id: OpId, op: FileOp) {
         match self.sftp() {
             Some(sftp) => self.ops.start(id, op, &sftp, self.epoch, &self.host, &self.sink),
-            None => self.emit(ServiceEvent::FileOpFailed { id, host: self.host.clone(), error: Error::ConnectionLost }),
+            None => {
+                let ev = FileOpEvent::Failed { id, host: self.host.clone(), error: Error::ConnectionLost };
+                self.emit(ServiceEvent::FileOp(ev));
+            }
         }
     }
 
@@ -276,10 +300,10 @@ impl<S: Sink> Task<S> {
         let host = self.host.clone();
         let ok = result.is_ok();
         let lost = matches!(result, Err(Error::ConnectionLost));
-        match result {
-            Ok(()) => self.emit(ServiceEvent::FileOpDone { id, host: host.clone() }),
-            Err(error) => self.emit(ServiceEvent::FileOpFailed { id, host: host.clone(), error }),
-        }
+        self.emit(ServiceEvent::FileOp(match result {
+            Ok(()) => FileOpEvent::Done { id, host: host.clone() },
+            Err(error) => FileOpEvent::Failed { id, host: host.clone(), error },
+        }));
         let drop_session = lost && epoch == self.epoch && self.sftp().is_some();
         if drop_session {
             self.drive(Event::Lost, None).await;
@@ -348,6 +372,8 @@ impl<S: Sink> Task<S> {
             ConnCmd::Size(window, cmd) => self.walks.command(window, cmd, self.sftp(), &self.host, &self.sink),
             ConnCmd::Search(window, cmd) => self.searches.command(window, cmd, self.sftp(), &self.host, &self.sink),
             ConnCmd::Preview(window, cmd) => self.reads.command(window, cmd, self.sftp(), &self.host, &self.sink),
+            // The loop's `live_sync` starts or stops the watch.
+            ConnCmd::Live(on) => self.live.on = on,
         }
     }
 
@@ -366,6 +392,8 @@ impl<S: Sink> Task<S> {
             Phase::Ready if self.sftp().is_some() => {
                 let start = self.session.as_ref().map_or_else(RemotePath::root, |s| s.home.clone());
                 self.sink.emit_to(window, ServiceEvent::Opened { host: self.host.clone(), start });
+                let live = self.live.shown.clone();
+                self.sink.emit_to(window, ServiceEvent::Live { host: self.host.clone(), live });
             }
             _ => {
                 self.route.joining.insert(window);
@@ -394,13 +422,13 @@ impl<S: Sink> Task<S> {
         }
     }
 
-    /// When the next poll should start: never while the session is down or a listing is
-    /// under way or waiting (exactly one per host).
+    /// When the next poll should start (one due, or the watched folder's changes'): never while
+    /// the session is down or a listing is under way or waiting (exactly one per host).
     fn poll_at(&self) -> Option<Instant> {
         let s = self.session.as_ref()?;
         let idle =
             s.sftp.is_some() && s.listing.is_none() && self.waiting.is_empty() && self.life.phase == Phase::Ready;
-        if idle { self.watch.due() } else { None }
+        if idle { self.watch.due().into_iter().chain(self.live.relist.due()).min() } else { None }
     }
 
     /// Starts a poll of `path`, unless something is being listed already.
@@ -610,6 +638,7 @@ impl<S: Sink> Task<S> {
                         self.route.joining.clear();
                         self.emit(ServiceEvent::Opened { host: self.host.clone(), start });
                         self.session_up();
+                        self.live_step(live::Event::Reset).await;
                     }
                     Effect::Reopened => {
                         // The windows' folders again; windows that asked meanwhile open now.
@@ -625,6 +654,7 @@ impl<S: Sink> Task<S> {
                             );
                         }
                         self.session_up();
+                        self.live_step(live::Event::Reset).await;
                     }
                     Effect::Retry { attempt, after } => {
                         self.retry = Some((attempt, Instant::now() + after));

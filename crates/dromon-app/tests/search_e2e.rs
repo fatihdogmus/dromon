@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use dromon_app::service::{self, Config, Sink};
 use dromon_app::state::search::CAP;
-use dromon_app::state::{Backend, Command, Found, SearchId, ServiceEvent};
+use dromon_app::state::{Backend, Command, Found, SearchCommand, SearchEvent, SearchId, ServiceEvent};
 use dromon_core::{ConnStatus, Error, HostId, RemotePath};
 use dromon_testkit::{Fixture, NULL_DEVICE, Role, copy_private_key};
 
@@ -116,16 +116,16 @@ impl Harness {
     /// Searches `root` for `query`, to the end.
     fn search(&mut self, id: u64, root: &RemotePath, query: &str, show_hidden: bool) -> Searched {
         let id = SearchId(id);
-        let cmd = Command::Search { id, host: host(), root: root.clone(), query: query.into(), show_hidden };
-        self.backend.send(cmd);
+        let cmd = SearchCommand::Start { id, host: host(), root: root.clone(), query: query.into(), show_hidden };
+        self.backend.send(Command::Search(cmd));
         let (mut found, mut progress) = (Vec::new(), Vec::new());
         let end = self.wait_for("the search to end", |ev| match ev {
-            ServiceEvent::SearchFound { id: i, entries, folders, .. } if *i == id => {
+            ServiceEvent::Search(SearchEvent::Found { id: i, entries, folders, .. }) if *i == id => {
                 found.extend(entries.iter().cloned());
                 progress.push(*folders);
                 None
             }
-            ServiceEvent::SearchDone { id: i, .. } | ServiceEvent::SearchFailed { id: i, .. } if *i == id => {
+            ServiceEvent::Search(SearchEvent::Done { id: i, .. } | SearchEvent::Failed { id: i, .. }) if *i == id => {
                 Some(ev.clone())
             }
             _ => None,
@@ -165,7 +165,7 @@ fn write_ssh_config(fx: &Fixture, dir: &Path) -> PathBuf {
 }
 
 fn done(folders: u64, unreadable: u64, capped: bool, id: u64) -> ServiceEvent {
-    ServiceEvent::SearchDone { id: SearchId(id), host: host(), folders, unreadable, capped }
+    ServiceEvent::Search(SearchEvent::Done { id: SearchId(id), host: host(), folders, unreadable, capped })
 }
 
 #[test]
@@ -219,5 +219,6 @@ fn without_a_connection_a_search_fails_at_once() {
     let path = h.fx.path(Role::Key, "fixture/mixed");
     let s = h.search(1, &path, "x", false);
     assert!(s.found.is_empty());
-    assert_eq!(s.end, ServiceEvent::SearchFailed { id: SearchId(1), host: host(), error: Error::ConnectionLost });
+    let lost = SearchEvent::Failed { id: SearchId(1), host: host(), error: Error::ConnectionLost };
+    assert_eq!(s.end, ServiceEvent::Search(lost));
 }

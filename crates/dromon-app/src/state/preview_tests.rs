@@ -39,14 +39,19 @@ fn space(s: &mut App, now: f64) -> Vec<Effect> {
 
 /// The reads (and cancels) sent so far.
 fn reads(rec: &Recorder) -> Vec<Command> {
-    rec.sent().into_iter().filter(|c| matches!(c, Command::Preview { .. } | Command::CancelPreview { .. })).collect()
+    rec.sent().into_iter().filter(|c| matches!(c, Command::Preview(_))).collect()
 }
 
 fn read_id(c: &Command) -> PreviewId {
     match c {
-        Command::Preview { id, .. } | Command::CancelPreview { id, .. } => *id,
+        Command::Preview(PreviewCommand::Start { id, .. } | PreviewCommand::Cancel { id, .. }) => *id,
         _ => panic!("not a read: {c:?}"),
     }
+}
+
+/// The read `id` brought `b` of a file of `total` bytes.
+fn done(id: PreviewId, b: &[u8], total: u64) -> ServiceEvent {
+    ServiceEvent::Preview(PreviewEvent::Done { id, host: prod(), bytes: bytes(b), total })
 }
 
 fn on_panel(s: &App) -> Option<&str> {
@@ -292,25 +297,24 @@ fn moving_on_in_the_app_cancels_the_read_and_ignores_its_late_answer() {
     space(&mut s, 1.0);
     click(&mut s, "robots.txt");
     let sent = reads(&rec);
-    assert!(matches!(&sent[..], [Command::Preview { .. }, Command::CancelPreview { .. }, Command::Preview { .. }]));
+    let start = |c: &Command| matches!(c, Command::Preview(PreviewCommand::Start { .. }));
+    let cancel = |c: &Command| matches!(c, Command::Preview(PreviewCommand::Cancel { .. }));
+    assert!(sent.len() == 3 && start(&sent[0]) && cancel(&sent[1]) && start(&sent[2]), "{sent:?}");
     let (first, second) = (read_id(&sent[0]), read_id(&sent[2]));
     assert_eq!(read_id(&sent[1]), first);
     assert_ne!(first, second);
-    s.apply(ServiceEvent::Preview { id: first, host: prod(), bytes: bytes(b"<html>"), total: 6 });
+    s.apply(done(first, b"<html>", 6));
     assert!(matches!(&s.ui.preview.phase, Phase::Loading { target, .. } if target.entry.name == "robots.txt"));
-    s.apply(ServiceEvent::Preview { id: second, host: prod(), bytes: bytes(b"User-agent: *\n"), total: 68 });
+    s.apply(done(second, b"User-agent: *\n", 68));
     rest(&mut s);
     assert_eq!(shown_text(&s).text, "User-agent: *");
     // Closing while a read runs cancels it.
     click(&mut s, "package.json");
     space(&mut s, 2.0);
     let last = reads(&rec);
-    assert!(matches!(last.last(), Some(Command::CancelPreview { .. })), "{last:?}");
-    s.apply(ServiceEvent::PreviewFailed {
-        id: read_id(last.last().unwrap()),
-        host: prod(),
-        error: Error::ConnectionLost,
-    });
+    assert!(last.last().is_some_and(cancel), "{last:?}");
+    let id = read_id(last.last().unwrap());
+    s.apply(ServiceEvent::Preview(PreviewEvent::Failed { id, host: prod(), error: Error::ConnectionLost }));
     assert!(!s.ui.preview.is_open(), "a late answer opens nothing");
 }
 
@@ -332,7 +336,7 @@ fn the_panel_keeps_its_last_eight_previews_while_it_is_open() {
     ];
     let answer = |s: &mut App, rec: &Recorder| {
         let id = read_id(reads(rec).last().unwrap());
-        s.apply(ServiceEvent::Preview { id, host: prod(), bytes: bytes(b"text"), total: 4 });
+        s.apply(done(id, b"text", 4));
     };
     click(&mut s, names[0]);
     space(&mut s, 1.0);
@@ -367,7 +371,7 @@ fn a_changed_file_is_read_again() {
     click(&mut s, "robots.txt");
     space(&mut s, 1.0);
     let id = read_id(reads(&rec).last().unwrap());
-    s.apply(ServiceEvent::Preview { id, host: prod(), bytes: bytes(b"User-agent: *\n"), total: 68 });
+    s.apply(done(id, b"User-agent: *\n", 68));
     click(&mut s, "index.html");
     // robots.txt grew meanwhile (a refresh brought it): what the panel kept of it is stale.
     if let Some(c) = s.conn_mut()

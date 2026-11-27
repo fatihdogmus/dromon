@@ -12,6 +12,7 @@ to `main`.
 | `Dromon-<v>-linux-x64.deb` (+ `.deb.asc`) | Debian 12+, Ubuntu 22.04+, x86_64 | release GPG key |
 | `Dromon-<v>-linux-x64.pkg.tar.zst` (+ `.pkg.tar.zst.sig`) | Arch Linux, x86_64 | release GPG key |
 | `SHA256SUMS` (+ `SHA256SUMS.asc`), `dromon-release-key.asc` | every file | release GPG key |
+| `SHA256SUMS.minisig` | the app's updater (every file) | minisign update key ([2b](#2b-updates-the-minisign-key)) |
 | (every file) | | Sigstore build-provenance attestation |
 
 No signing credentials exist yet, and none is needed to start: without them every job still
@@ -80,7 +81,7 @@ there: `scripts/package-linux.sh --verify` (Debian, Ubuntu, Arch containers),
 |---|---|---|---|
 | `plan` | | — | mode (`release`/`check`), version, tag; for a release the version commit on `release/<version>` (`set-version.sh`), whose SHA every job builds |
 | `approve` | plan | `release-approval` | nothing: the run's one approval |
-| `credentials` | plan, approve | `release` | which credentials exist (`windows`, `macos`, `gpg`); enforces the [policy](#credentials-policy) |
+| `credentials` | plan, approve | `release` | which credentials exist (`windows`, `macos`, `gpg`, `minisign`); enforces the [policy](#credentials-policy) |
 | `build-linux` ×2 | plan | — | `.deb` (binary built on Ubuntu 22.04: glibc 2.35) |
 | `package-arch` | build-linux | — | both `.pkg.tar.zst`, made by makepkg from the `.deb`s |
 | `build-macos` | plan | — | `Dromon.app.zip` (universal: arm64 and x86_64 built on Apple silicon and joined with lipo; ad-hoc signed) and the unsigned DMG |
@@ -90,7 +91,7 @@ there: `scripts/package-linux.sh --verify` (Debian, Ubuntu, Arch containers),
 | `sign-windows-msi` | credentials, package-windows | `release` | signed MSIs (azure, sslcom; signpath signs exe-in-MSI and MSI here) |
 | `sign-macos` | credentials, build-macos | `release` | signed, notarized, stapled app in a signed, notarized, stapled DMG |
 | `assemble` | every build and signing job | — | `release-files` (the 7 files + `SHA256SUMS`), `release-notes` |
-| `sign-linux` | assemble | `release` | `.deb.asc`, `.pkg.tar.zst.sig`, `SHA256SUMS.asc`, the public key |
+| `sign-linux` | assemble | `release` | `.deb.asc`, `.pkg.tar.zst.sig`, `SHA256SUMS.asc`, the public key; `SHA256SUMS.minisig` |
 | `publish` | assemble, sign-linux | `release` | attestations; the tag and the published release (releases only) |
 | `land` | publish | — | `main` gets the version commit; `release/<version>` is deleted |
 | `homebrew` | publish | `homebrew` | the cask in the tap ([Homebrew](#homebrew)) |
@@ -105,14 +106,21 @@ as carefully as code that holds the keys (a CODEOWNERS rule for both is worth ad
 - **`credentials`, `sign-*` and `publish`** run in the `release` environment, which holds every
   signing secret and variable and admits only `main`, and only after `approve`, the one job you
   approve (environment `release-approval`). They check out only `/.github/release/` (sign-macos also reads
-  `packaging/macos/Info.plist`, as data), run only those scripts and SHA-pinned actions, and
-  never build, install project dependencies, or run anything from the artifacts.
+  `packaging/macos/Info.plist`, and sign-linux `packaging/update/release-key.pub`, as data), run
+  only those scripts and SHA-pinned actions, and never build, install project dependencies, or
+  run anything from the artifacts. The one install is sign-linux's `minisign`, Ubuntu's package
+  through `.github/actions/apt-install` (also checked out): apt checks every file against
+  Ubuntu's signed package lists, a cache hit included, and that job saves no cache.
 - **Artifacts are data with a digest.** Every artifact carries an `ARTIFACT-SHA256SUMS`; the job
   that made it reports that manifest's SHA-256 as a job output, and every job that downloads it
   checks the digest, every file, and that nothing was added (`.github/release/upload`,
   `.github/release/download`). An artifact replaced after its job finished is rejected.
 - **Signing jobs only add signatures.** `sign-linux` writes detached signatures beside files it
   never changes; the Windows and macOS jobs sign in place and verify again.
+- **The update signature must be one the app accepts.** `sign-minisign.sh` verifies
+  `SHA256SUMS.minisig` against the committed `packaging/update/release-key.pub` (the key the app
+  builds in), requires a pre-hashed signature and the trusted comment `dromon <version>`, and
+  fails the run otherwise: a release the updater would refuse never ships.
 - **Secrets stay out of logs**: the scripts run with `set +x`; GitHub masks secret values; the
   GPG passphrase reaches gpg on a file descriptor; the credentials job sees only whether a secret
   is set (`secrets.X != ''`), never its value; the keychain and `GNUPGHOME` are deleted afterwards.
@@ -124,6 +132,7 @@ as carefully as code that holds the keys (a CODEOWNERS rule for both is worth ad
 | Platform | Credentials missing | Partly set |
 |---|---|---|
 | Linux (GPG) | dry run: warning, no GPG signatures. **Release: fails** (the key is free). | fails |
+| Updates (minisign) | dry run: warning, no `SHA256SUMS.minisig`. **Release: fails** (the app installs no update without it). | — (one secret) |
 | Windows | the files ship **unsigned**, with a warning in the run summary and the release notes. A release fails when the repository variable `DROMON_REQUIRE_SIGNED_WINDOWS` is `true`. | fails (`WINDOWS_SIGNING` set, its values incomplete) |
 | macOS | the app ships **ad-hoc signed, not notarized**, with a warning. A release fails when `DROMON_REQUIRE_SIGNED_MACOS` is `true`. | fails |
 
@@ -266,6 +275,45 @@ Replacing it with a new key: generate one the same way (`gpg --quick-generate-ke
 ed25519 sign 2y` in a fresh `GNUPGHOME`), set the two secrets and the variable, replace the key
 block in `KEYS`, and update `validpgpkeys`.
 
+### 2b. Updates: the minisign key
+
+Dromon's updater (`crates/dromon-app/src/service/update*.rs`) installs a release only when its
+`SHA256SUMS` carries a valid minisign signature by the key built into the app,
+`packaging/update/release-key.pub` (key ID `489CB3C37A12EC48`), with the trusted comment
+`dromon <version>`, and the downloaded file's SHA-256 is the one listed there. minisign
+(Ed25519) rather than GPG because the app verifies it with a small dependency-free crate
+(`minisign-verify`); GPG keeps signing the packages and `SHA256SUMS.asc` for people.
+
+The secret key is stored unencrypted (`-W`): GitHub's secret store protects it, and signing runs
+without a prompt. The `release` environment holds it as `MINISIGN_SECRET_KEY`; `sign-linux`
+writes it to a 0600 file in a private temporary folder, signs, deletes it, and checks the new
+signature against the committed public key.
+
+Creating it (on a trusted machine, once):
+
+```sh
+minisign -G -W -p dromon-release.pub -s dromon-release.key
+gh secret set MINISIGN_SECRET_KEY --env release --repo fatihdogmus/dromon < dromon-release.key
+cp dromon-release.pub packaging/update/release-key.pub   # commit it: the app builds it in
+```
+
+Keep `dromon-release.key` offline (the maintainer's password manager, beside the GPG key's
+backup), then delete the local copy.
+
+**Rotating or losing it.** Installed copies trust only the key they were built with, and a
+release is signed by exactly one key, the one whose public half it carries (`sign-minisign.sh`
+refuses a secret that doesn't verify with the committed `release-key.pub`, so the two always
+change together). A new key therefore reaches users only through a release they install by hand:
+
+- **Rotating**: create a new key as above, commit its `release-key.pub` and set the secret in
+  the same change, and release. Copies built with the old key find that release, refuse to
+  install it ("its checksums aren't signed with Dromon's release key") and offer its release
+  page; say in the release notes that this one release is installed by hand. From it on,
+  updates install themselves again. Rotate only for a reason (a leak, a lost key).
+- **Lost secret**: the same, with a new key; nothing else can sign for the old one.
+- **Leaked secret**: rotate at once and say so in the notes: copies with the old key would accept
+  a release signed by whoever holds it, so they should be reinstalled by hand.
+
 ### 3a. Windows: SignPath Foundation (free)
 
 1. Make sure the conditions above hold: a public release exists (an unsigned one counts), the
@@ -401,6 +449,7 @@ All are in the `release` environment unless marked *repository*.
 | `RELEASE_GPG_PRIVATE_KEY` | secret | credentials (is it set?), sign-linux |
 | `RELEASE_GPG_PASSPHRASE` | secret | sign-linux |
 | `RELEASE_GPG_FINGERPRINT` | variable | credentials, sign-linux; the notes through `credentials` |
+| `MINISIGN_SECRET_KEY` | secret (unencrypted minisign key) | credentials (is it set?), sign-linux (`sign-minisign.sh`) |
 | `WINDOWS_SIGNING` (`azure`, `sslcom`, `signpath`; unset = unsigned) | variable | credentials → sign-windows-exe, sign-windows-msi, the notes |
 | `SIGNPATH_API_TOKEN` | secret | credentials (is it set?), sign-windows-msi |
 | `SIGNPATH_ORGANIZATION_ID`, `SIGNPATH_PROJECT_SLUG`, `SIGNPATH_SIGNING_POLICY_SLUG` | variables | credentials, sign-windows-msi |
@@ -479,6 +528,7 @@ The release notes carry these steps for each file. In short:
 |---|---|
 | Any file | `gh attestation verify <file> --repo fatihdogmus/dromon` |
 | Any file (GPG) | `gpg --import dromon-release-key.asc` (check its fingerprint against the README), then `gpg --verify SHA256SUMS.asc SHA256SUMS` and `sha256sum --check --ignore-missing SHA256SUMS` |
+| Any file (minisign, as the updater does) | `minisign -V -p packaging/update/release-key.pub -m SHA256SUMS -x SHA256SUMS.minisig` (trusted comment `dromon <v>`), then `sha256sum --check --ignore-missing SHA256SUMS` |
 | `.deb` | `gpg --verify Dromon-<v>-linux-x64.deb.asc Dromon-<v>-linux-x64.deb` |
 | `.pkg.tar.zst` | `pacman -U` checks the `.sig` beside the package against pacman's keyring; trust the key there once: `sudo pacman-key --add dromon-release-key.asc && sudo pacman-key --lsign-key 61AA20030B8170BE3527E4BA1E548E51E3AD8C38` |
 | `.msi` | `Get-AuthenticodeSignature .\Dromon-<v>-windows-x64.msi` → `Valid`. Unsigned: SmartScreen *More info → Run anyway* |

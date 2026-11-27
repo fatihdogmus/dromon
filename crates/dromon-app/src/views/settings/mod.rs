@@ -7,24 +7,31 @@
 //!   Reset (back to the OS Downloads folder), and Transfers at once, a 1–8 stepper.
 //! - Browsing: Show hidden files by default, a switch.
 //! - General: the Terminal "Open in Terminal" uses, one choice per line: System default and the
-//!   terminal apps found on this machine (looked for when the section shows).
+//!   terminal apps found on this machine (looked for when the section shows). Check for updates
+//!   automatically, a switch; Check now, with what the last check found and, for a newer
+//!   version, Update (or Copy command) and Release notes. Live updates when the server supports
+//!   them, a switch.
 //!
 //! The list is a tablist: one Tab stop, ↑ ↓ move between the sections and the section follows,
 //! Tab goes on to the controls, the section's tabpanel. Every control's change goes to the
 //! window's state as `Action::Setting`; the page shows the state's values back
 //! (`App::settings_view`), so a change made in another window shows here too.
+//!
+//! Each section is a file of its own (`appearance.rs`, `transfers.rs`, `browsing.rs`,
+//! `general.rs`); the rows and controls they share are here.
 
-use std::path::Path;
+mod appearance;
+mod browsing;
+mod general;
+mod transfers;
 
-use rune::{Color, El, FileDialogOptions, Orientation, ScrollSpec, Tx, col, el, row, text};
+use rune::{Color, El, Orientation, ScrollSpec, Tx, col, el, row, text};
 
 use super::widgets::{Keyboard, icon_button};
 use super::{Paint, run};
 use crate::icons;
-use crate::state::menu::TERMINAL_CHORD;
-use crate::state::settings::{AT_ONCE, Terminal};
-use crate::state::{Action, App, Density, SettingsChange, SettingsSection, SettingsView};
-use crate::theme::{Appearance, motion, radius, size, space, type_};
+use crate::state::{Action, App, SettingsChange, SettingsSection};
+use crate::theme::{motion, radius, size, space, type_};
 
 /// The page's key.
 pub const PAGE: &str = "settings";
@@ -115,10 +122,10 @@ fn panel(s: &App, section: SettingsSection, p: Paint) -> El {
     let v = s.settings_view();
     let page = &s.ui.settings_page;
     let body = match section {
-        SettingsSection::Appearance => appearance(&v, p),
-        SettingsSection::Transfers => transfers(&v, page.home.as_deref(), page.error.as_deref(), p),
-        SettingsSection::Browsing => browsing(&v, p),
-        SettingsSection::General => general(&v, &page.terminal_choices(v.settings.terminal), p),
+        SettingsSection::Appearance => appearance::appearance(&v, p),
+        SettingsSection::Transfers => transfers::transfers(&v, page.home.as_deref(), page.error.as_deref(), p),
+        SettingsSection::Browsing => browsing::browsing(&v, p),
+        SettingsSection::General => general::general(s, &v, &page.terminal_choices(v.settings.terminal), p),
     };
     col()
         .key(PANEL)
@@ -133,138 +140,12 @@ fn panel(s: &App, section: SettingsSection, p: Paint) -> El {
         .child(body.max_w(PANEL_WIDTH))
 }
 
-fn change(s: &mut App, change: SettingsChange, tx: &mut Tx) {
+pub(super) fn change(s: &mut App, change: SettingsChange, tx: &mut Tx) {
     run(s, Action::Setting(change), tx)
 }
 
-fn appearance(v: &SettingsView, p: Paint) -> El {
-    let s = &v.settings;
-    let theme_control = segmented(
-        p,
-        "theme",
-        "Theme",
-        72.0,
-        &[
-            (Appearance::System, "System", "theme-system"),
-            (Appearance::Dark, "Dark", "theme-dark"),
-            (Appearance::Light, "Light", "theme-light"),
-        ],
-        s.theme,
-        SettingsChange::Theme,
-    );
-    let density_control = segmented(
-        p,
-        "density",
-        "Density",
-        100.0,
-        &[
-            (Density::Comfortable, "Comfortable", "density-comfortable"),
-            (Density::Compact, "Compact", "density-compact"),
-        ],
-        s.density,
-        SettingsChange::Density,
-    );
-    section(
-        p,
-        "Appearance",
-        vec![
-            setting(p, "Theme", None, theme_control),
-            setting(p, "Density", Some(sub(p, "How tall the rows of the file list are")), density_control),
-        ],
-    )
-}
-
-fn transfers(v: &SettingsView, home: Option<&Path>, error: Option<&str>, p: Paint) -> El {
-    let t = p.t;
-    let s = &v.settings;
-    let custom = s.download_folder.is_some();
-    let folder_sub = match error {
-        Some(e) => text(e.to_owned()).key("folder-error").font(type_::META).color(t.danger).truncate(),
-        None => row()
-            .gap(6.0)
-            .min_w(0.0)
-            .center_y()
-            .child(
-                text(v.folder_label(home)).key("folder-path").font(type_::MONO).color(t.text_2).truncate().min_w(0.0),
-            )
-            .children((!custom).then(|| text("Default").key("folder-default").font(type_::META).color(t.text_3))),
-    };
-    let folder_buttons = row()
-        .gap(space::S2)
-        .children(custom.then(|| {
-            button(p, "folder-reset", "Reset", "Use the Downloads folder", |s: &mut App, tx: &mut Tx| {
-                change(s, SettingsChange::DownloadFolder(None), tx)
-            })
-        }))
-        .child(button(p, "folder-choose", "Choose…", "Choose the download folder", choose_folder));
-    section(
-        p,
-        "Transfers",
-        vec![
-            setting(p, "Download folder", Some(folder_sub), folder_buttons),
-            setting(
-                p,
-                "Transfers at once",
-                Some(sub(p, "Files copied at the same time per server")),
-                stepper(p, s.transfers_at_once),
-            ),
-        ],
-    )
-}
-
-fn browsing(v: &SettingsView, p: Paint) -> El {
-    let hidden_sub =
-        format!("For servers opened from now on; {} switches them", super::widgets::chord("mod+shift+period"));
-    section(
-        p,
-        "Browsing",
-        vec![setting(p, "Show hidden files by default", Some(sub(p, &hidden_sub)), switch(p, v.settings.show_hidden))],
-    )
-}
-
-fn general(v: &SettingsView, terminals: &[Terminal], p: Paint) -> El {
-    let terminal_sub = format!("Where Open in Terminal ({}) opens ssh", super::widgets::chord(TERMINAL_CHORD));
-    section(
-        p,
-        "General",
-        vec![setting(p, "Terminal", Some(sub(p, &terminal_sub)), terminal_list(p, terminals, v.settings.terminal))],
-    )
-}
-
-/// The terminal choices, one per line: a radio group ↑ ↓ move in, as the segmented controls'.
-fn terminal_list(p: Paint, terminals: &[Terminal], current: Terminal) -> El {
-    let options =
-        terminals.iter().map(|&t| segment(p, t, t.label(), t.key(), t == current, 168.0, SettingsChange::Terminal));
-    col()
-        .key("terminal")
-        .role("radiogroup")
-        .label("Terminal")
-        .orientation(Orientation::Vertical)
-        .focus_group()
-        .padding(2.0)
-        .gap(2.0)
-        .radius(radius::ROW + 1.0)
-        .fill(p.t.field)
-        .children(options)
-}
-
-/// "Choose…": the platform's folder picker, starting in the folder in use. It runs off the UI
-/// thread (Rune's); its answer comes back to this window's state.
-fn choose_folder(s: &mut App, tx: &mut Tx) {
-    let options = FileDialogOptions {
-        title: "Choose the download folder".into(),
-        directory: Some(s.settings_view().folder().to_path_buf()),
-        ..FileDialogOptions::default()
-    };
-    tx.open_folder(options, |s: &mut App, picked, tx| match picked {
-        Ok(Some(folder)) => change(s, SettingsChange::DownloadFolder(Some(folder)), tx),
-        Ok(None) => {}
-        Err(e) => s.ui.settings_page.error = Some(format!("The folder picker isn't available: {e}")),
-    });
-}
-
 /// A caption and its rows.
-fn section(p: Paint, title: &'static str, rows: Vec<El>) -> El {
+pub(super) fn section(p: Paint, title: &'static str, rows: Vec<El>) -> El {
     let caption = text(title.to_uppercase()).font(type_::CAPTION).color(p.t.text_3);
     col()
         .key(format!("section-{}", title.to_lowercase()))
@@ -277,18 +158,18 @@ fn section(p: Paint, title: &'static str, rows: Vec<El>) -> El {
 }
 
 /// A label (with a line under it, maybe) on the left, its control on the right.
-fn setting(p: Paint, label: &'static str, sub: Option<El>, control: El) -> El {
+pub(super) fn setting(p: Paint, label: &'static str, sub: Option<El>, control: El) -> El {
     let words = col().grow(1.0).min_w(0.0).gap(2.0).child(text(label).font(type_::BODY).color(p.t.text)).children(sub);
     row().w_full().min_h(32.0).gap(space::S4).center_y().child(words).child(control)
 }
 
-fn sub(p: Paint, line: &str) -> El {
+pub(super) fn sub(p: Paint, line: &str) -> El {
     text(line.to_owned()).font(type_::META).color(p.t.text_2).truncate()
 }
 
 /// A segmented control of `options` (value, label, key), `current` selected; each segment is
 /// `width` wide. Arrow keys move between the segments (a focus group); Space picks one.
-fn segmented<T: Copy + PartialEq + 'static>(
+pub(super) fn segmented<T: Copy + PartialEq + 'static>(
     p: Paint,
     key: &'static str,
     label: &'static str,
@@ -313,7 +194,7 @@ fn segmented<T: Copy + PartialEq + 'static>(
 }
 
 /// One choice of a radio group, `width` wide; `on` is the chosen one. Space picks it.
-fn segment<T: Copy + 'static>(
+pub(super) fn segment<T: Copy + 'static>(
     p: Paint,
     value: T,
     name: &'static str,
@@ -346,7 +227,13 @@ fn segment<T: Copy + 'static>(
 }
 
 /// A bordered button with a body-size label, as the sheets' secondary ones.
-fn button(p: Paint, key: &'static str, label: &'static str, describe: &'static str, f: fn(&mut App, &mut Tx)) -> El {
+pub(super) fn button(
+    p: Paint,
+    key: impl Into<String>,
+    label: &'static str,
+    describe: &'static str,
+    f: impl Fn(&mut App, &mut Tx) + 'static,
+) -> El {
     let t = p.t;
     row()
         .key(key)
@@ -367,50 +254,9 @@ fn button(p: Paint, key: &'static str, label: &'static str, describe: &'static s
         .child(text(label).font(type_::BODY).color(t.text))
 }
 
-/// − n +, within [`AT_ONCE`]; an end's button is disabled.
-fn stepper(p: Paint, n: usize) -> El {
-    let t = p.t;
-    let step = |key: &'static str, label: &'static str, glyph: &'static str, to: Option<usize>| {
-        let b = row().key(key).role("button").label(label).size(24.0, 24.0).radius(radius::ROW - 1.0).center().child(
-            text(glyph).font(type_::BODY_STRONG).color(if to.is_some() { t.text_2 } else { t.text_3.alpha(0.5) }),
-        );
-        match to {
-            Some(to) => b
-                .focusable(true)
-                .keyboard_focus_only()
-                .hover(t.hover)
-                .press(t.press)
-                .motion(motion::SNAP)
-                .on_press_tx(move |s: &mut App, tx: &mut Tx| change(s, SettingsChange::TransfersAtOnce(to), tx)),
-            None => b.disabled(true),
-        }
-    };
-    let fewer = (n > *AT_ONCE.start()).then(|| n - 1);
-    let more = (n < *AT_ONCE.end()).then(|| n + 1);
-    row()
-        .key("transfers-at-once")
-        .role("group")
-        .label(format!("Transfers at once: {n}"))
-        .h(28.0)
-        .padding(2.0)
-        .gap(2.0)
-        .radius(radius::ROW + 1.0)
-        .center_y()
-        .fill(t.field)
-        .child(step("transfers-fewer", "Fewer transfers at once", "−", fewer))
-        .child(
-            text(n.to_string())
-                .key("transfers-value")
-                .font(type_::BODY_STRONG.features("'tnum' 1"))
-                .color(t.text)
-                .w(24.0)
-                .align(rune::Align::Center),
-        )
-        .child(step("transfers-more", "More transfers at once", "+", more))
-}
-
-/// An on/off switch: accent track and the knob on the right when on.
-fn switch(p: Paint, on: bool) -> El {
+/// An on/off switch: accent track and the knob on the right when on; `to` is the change a
+/// press makes.
+pub(super) fn switch(p: Paint, key: &'static str, label: &'static str, on: bool, to: fn(bool) -> SettingsChange) -> El {
     let t = p.t;
     let knob = el()
         .size(14.0, 14.0)
@@ -418,9 +264,9 @@ fn switch(p: Paint, on: bool) -> El {
         .fill(if on { t.on_accent } else { t.text_2 })
         .offset(if on { 14.0 } else { 0.0 }, 0.0);
     row()
-        .key("hidden-toggle")
+        .key(key)
         .role("switch")
-        .label("Show hidden files by default")
+        .label(label)
         .checked(on)
         .focusable(true)
         .keyboard_focus_only()
@@ -432,6 +278,6 @@ fn switch(p: Paint, on: bool) -> El {
         .fill(if on { t.accent } else { t.field })
         .border(p.hair, if on { t.accent } else { t.border_strong })
         .motion(motion::SNAP)
-        .on_press_tx(move |s: &mut App, tx: &mut Tx| change(s, SettingsChange::ShowHidden(!on), tx))
+        .on_press_tx(move |s: &mut App, tx: &mut Tx| change(s, to(!on), tx))
         .child(knob)
 }

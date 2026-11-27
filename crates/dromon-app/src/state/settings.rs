@@ -1,8 +1,9 @@
 //! Settings (§6.8, §8): theme, list density, the download folder, transfers at once per host,
-//! whether hidden files show by default, and the terminal app "Open in Terminal" uses.
+//! whether hidden files show by default, the terminal app "Open in Terminal" uses, whether
+//! Dromon checks for updates by itself, and live updates.
 //!
 //! The values live in each main window's state ([`App::settings`]), the same in all of them.
-//! Each main window shows them on its Settings page (`page.rs`, `views/settings.rs`), which
+//! Each main window shows them on its Settings page (`page.rs`, `views/settings/`), which
 //! reads them from its state and sends each change as [`Action::Setting`](super::Action::Setting).
 //! A change applies there at once, is remembered in `prefs.json`
 //! ([`Saved::settings`](super::Saved::settings)) and reaches the other main windows as
@@ -122,27 +123,33 @@ impl Terminal {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
-    pub theme: Appearance,
+    /// Check GitHub for a newer Dromon at launch and once a day (`update.rs`).
+    pub check_updates: bool,
     pub density: Density,
     /// The folder downloads go to; `None` (or empty in the file) is the OS Downloads folder.
     pub download_folder: Option<PathBuf>,
-    /// Files running at once per host, within [`AT_ONCE`].
-    pub transfers_at_once: usize,
+    /// Watch the folder on screen live where the server can (`service/live.rs`); off: polls only.
+    pub live_updates: bool,
     /// Show dotfiles in hosts opened from now on (⌘⇧. still switches them for the session).
     pub show_hidden: bool,
     /// Where "Open in Terminal" opens ssh.
     pub terminal: Terminal,
+    pub theme: Appearance,
+    /// Files running at once per host, within [`AT_ONCE`].
+    pub transfers_at_once: usize,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            theme: Appearance::System,
+            check_updates: true,
             density: Density::Comfortable,
             download_folder: None,
-            transfers_at_once: AT_ONCE_DEFAULT,
+            live_updates: true,
             show_hidden: true,
             terminal: Terminal::System,
+            theme: Appearance::System,
+            transfers_at_once: AT_ONCE_DEFAULT,
         }
     }
 }
@@ -161,12 +168,14 @@ impl Settings {
     pub fn with(&self, change: SettingsChange) -> Settings {
         let mut s = self.clone();
         match change {
-            SettingsChange::Theme(theme) => s.theme = theme,
+            SettingsChange::CheckUpdates(on) => s.check_updates = on,
             SettingsChange::Density(density) => s.density = density,
             SettingsChange::DownloadFolder(folder) => s.download_folder = folder,
-            SettingsChange::TransfersAtOnce(n) => s.transfers_at_once = n,
+            SettingsChange::LiveUpdates(on) => s.live_updates = on,
             SettingsChange::ShowHidden(show) => s.show_hidden = show,
             SettingsChange::Terminal(terminal) => s.terminal = terminal,
+            SettingsChange::Theme(theme) => s.theme = theme,
+            SettingsChange::TransfersAtOnce(n) => s.transfers_at_once = n,
         }
         s.clamped()
     }
@@ -175,13 +184,15 @@ impl Settings {
 /// One control of the Settings page, set to a value.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SettingsChange {
-    Theme(Appearance),
+    CheckUpdates(bool),
     Density(Density),
     /// "Choose…" picked a folder; `None` is "Reset" (the OS Downloads folder).
     DownloadFolder(Option<PathBuf>),
-    TransfersAtOnce(usize),
+    LiveUpdates(bool),
     ShowHidden(bool),
     Terminal(Terminal),
+    Theme(Appearance),
+    TransfersAtOnce(usize),
 }
 
 /// What the Settings page shows: the settings, and the folder "default" stands for.
@@ -222,7 +233,9 @@ impl App {
 
     /// The settings remembered last time (`remember`). Prefs from before Settings existed have
     /// no section: the defaults, with ⌘⇧.'s last state (which used to be remembered) as the
-    /// hidden-files default.
+    /// hidden-files default. The service hears whether to check for updates by itself: the
+    /// launch check comes from here, so only a run that remembers its settings (the app, never
+    /// a headless run or a test on `NoStore` without `remember`) checks.
     pub(super) fn restore_settings(&mut self) {
         let saved = self.saved().settings.clone();
         let settings = match saved {
@@ -230,6 +243,7 @@ impl App {
             None => Settings { show_hidden: self.saved().show_hidden.unwrap_or(true), ..Settings::default() },
         };
         self.apply_settings(settings, true);
+        self.auto_updates(self.settings.check_updates);
     }
 
     /// A control on the Settings page: applied at once, remembered, and told to the other main
@@ -239,6 +253,10 @@ impl App {
         let new = self.settings.with(change);
         if new != self.settings {
             let theme = self.settings.theme;
+            // The service's updater is one for every window: told once, from here.
+            if new.check_updates != self.settings.check_updates {
+                self.auto_updates(new.check_updates);
+            }
             self.apply_settings(new, true);
             let settings = self.settings.clone();
             self.save(|s| {
@@ -263,9 +281,9 @@ impl App {
 
     /// Makes `new` the settings and carries out what changed: the theme repaints the windows,
     /// density the list (its views read [`Density::row`]), the download folder is read by the
-    /// next download, the engine hears the new limit (`engine`: from this window), and the
-    /// hidden-files default is the one hosts opened from now on start with (the ones open keep
-    /// theirs).
+    /// next download, the engine hears the new limit and the service whether to watch folders
+    /// live (`engine`: from this window), and the hidden-files default is the one hosts opened
+    /// from now on start with (the ones open keep theirs).
     fn apply_settings(&mut self, new: Settings, engine: bool) {
         let old = std::mem::replace(&mut self.settings, new);
         let s = &self.settings;
@@ -278,6 +296,10 @@ impl App {
         if engine && old.transfers_at_once != s.transfers_at_once {
             let n = s.transfers_at_once;
             self.send(Command::Transfer(TransferCommand::PerHost(n)));
+        }
+        let on = self.settings.live_updates;
+        if engine && old.live_updates != on {
+            self.send(Command::LiveUpdates { on });
         }
     }
 }

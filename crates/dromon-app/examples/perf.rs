@@ -41,7 +41,9 @@
 use std::time::Instant;
 
 use dromon_app::state::preview::{Phase, TEXT_LIMIT};
-use dromon_app::state::{Action, App, Backend, Command, HostDirectory, Listing, PreviewBytes, PreviewId, ServiceEvent};
+use dromon_app::state::{
+    Action, App, Backend, Command, HostDirectory, Listing, PreviewBytes, PreviewEvent, PreviewId, ServiceEvent,
+};
 use dromon_core::{ConnStatus, Entry, EntryKind, HostId, HostSpec, RemotePath};
 use rune::{Env, Key, KeyEvent, Mods, Runtime};
 
@@ -536,8 +538,8 @@ fn arrive(rt: &mut Runtime<App>, row: usize) -> Cost {
         // Minified: all of it on one line.
         bytes.iter_mut().filter(|b| **b == b'\n').for_each(|b| *b = b' ');
     }
-    let bytes = PreviewBytes(bytes.into());
-    measure(rt, move |rt| apply(rt, ServiceEvent::Preview { id, host: host(), bytes, total: TEXT_TOTAL }))
+    let ev = PreviewEvent::Done { id, host: host(), bytes: PreviewBytes(bytes.into()), total: TEXT_TOTAL };
+    measure(rt, move |rt| apply(rt, ServiceEvent::Preview(ev)))
 }
 
 /// Frames until the panel's text shows (the cursor rested); the frame it shows in.

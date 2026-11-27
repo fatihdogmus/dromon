@@ -7,7 +7,7 @@
 use rune::{ElementInfo, Env, Key, KeyEvent, Mods, Runtime};
 
 use crate::state::preview::{Body, Phase, Text};
-use crate::state::{App, ServiceEvent};
+use crate::state::{App, PreviewEvent, ServiceEvent};
 use crate::theme::space;
 use crate::views::{
     PREVIEW, PREVIEW_ADVANCE as ADVANCE, PREVIEW_CLOSE, PREVIEW_DOWNLOAD, PREVIEW_LINE_H as LINE_H,
@@ -108,7 +108,8 @@ fn answer(rt: &mut Runtime<App>, bytes: Vec<u8>, total: u64) {
     };
     rt.update(move |s, _| {
         let bytes = crate::state::PreviewBytes(bytes.into());
-        s.apply(ServiceEvent::Preview { id, host: dromon_core::HostId("prod".into()), bytes, total });
+        let host = dromon_core::HostId("prod".into());
+        s.apply(ServiceEvent::Preview(PreviewEvent::Done { id, host, bytes, total }));
     });
     settle(rt);
 }
@@ -366,7 +367,8 @@ fn a_read_that_failed_says_why() {
     };
     rt.update(move |s, _| {
         let error = dromon_core::Error::PermissionDenied(dromon_core::RemotePath::new("/var/www/site/index.html"));
-        s.apply(ServiceEvent::PreviewFailed { id, host: dromon_core::HostId("prod".into()), error });
+        let host = dromon_core::HostId("prod".into());
+        s.apply(ServiceEvent::Preview(PreviewEvent::Failed { id, host, error }));
     });
     settle(&mut rt);
     let note = shown(&rt, "preview-note").expect("why");

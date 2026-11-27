@@ -302,6 +302,7 @@ fn every_scene_builds() {
             "add-to-config",
             "host-menu",
             "settings",
+            "settings-general",
         ];
         if !welcome.contains(name) {
             assert!(s.conn().is_some(), "{name}");

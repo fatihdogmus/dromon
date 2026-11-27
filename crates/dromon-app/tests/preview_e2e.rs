@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use dromon_app::service::{self, Config, Sink};
 use dromon_app::state::preview::TEXT_LIMIT;
-use dromon_app::state::{Backend, Command, PreviewId, PreviewRange, ServiceEvent};
+use dromon_app::state::{Backend, Command, PreviewCommand, PreviewEvent, PreviewId, PreviewRange, ServiceEvent};
 use dromon_core::{ConnStatus, Error, HostId, RemotePath};
 use dromon_testkit::{Fixture, NULL_DEVICE, Role, copy_private_key};
 
@@ -130,10 +130,12 @@ impl Harness {
     fn preview(&mut self, id: u64, name: &str, range: PreviewRange) -> Result<(Vec<u8>, u64), Error> {
         let id = PreviewId(id);
         let path = self.scratch.join(name);
-        self.backend.send(Command::Preview { id, host: host(), path, range });
+        self.backend.send(Command::Preview(PreviewCommand::Start { id, host: host(), path, range }));
         self.wait_for("the preview", |ev| match ev {
-            ServiceEvent::Preview { id: i, bytes, total, .. } if *i == id => Some(Ok((bytes.0.to_vec(), *total))),
-            ServiceEvent::PreviewFailed { id: i, error, .. } if *i == id => Some(Err(error.clone())),
+            ServiceEvent::Preview(PreviewEvent::Done { id: i, bytes, total, .. }) if *i == id => {
+                Some(Ok((bytes.0.to_vec(), *total)))
+            }
+            ServiceEvent::Preview(PreviewEvent::Failed { id: i, error, .. }) if *i == id => Some(Err(error.clone())),
             _ => None,
         })
     }

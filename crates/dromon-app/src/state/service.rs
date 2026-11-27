@@ -19,6 +19,11 @@ use dromon_core::{ConnStatus, Entry, Error, HostId, HostSpec, Prompt, PromptAnsw
 use dromon_transfer::{ConflictChoice, JobId, JobRequest, JobView, TaskState};
 
 pub use super::hostbook::{HostBookCommand, HostBookEvent};
+pub use super::ops::{FileOp, FileOpEvent, FileOpKind, OpId};
+pub use super::preview::{PreviewBytes, PreviewCommand, PreviewEvent, PreviewId, PreviewRange};
+pub use super::properties::{SizeCommand, SizeEvent, SizeId, SizeTotal};
+pub use super::search::{Found, SearchCommand, SearchEvent, SearchId};
+pub use super::update::{UpdateCommand, UpdateEvent};
 
 /// One main window of the app, for the session: the first is [`WindowId::FIRST`], each ⌘N
 /// takes the next number.
@@ -33,231 +38,100 @@ impl WindowId {
 /// What the UI asks of the service.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Command {
+    /// The user's answer to the open prompt `id`. Answers to prompts that are gone are ignored.
+    AnswerPrompt { id: PromptId, answer: PromptAnswer },
     /// Start a connection; answered with `Status` changes, maybe `Prompt`s, then `Opened`.
     Connect { host: HostId },
-    /// List a folder; answered with `Listing` (whole) or `ListingPage`s, or `ListFailed`.
-    List { host: HostId, path: RemotePath },
     /// Close the connection and forget the host's remembered secrets; answered with
     /// `Status(Disconnected)`.
     Disconnect { host: HostId },
-    /// The user's answer to the open prompt `id`. Answers to prompts that are gone are ignored.
-    AnswerPrompt { id: PromptId, answer: PromptAnswer },
-    /// Something for the transfer engine; answered with `Transfers` snapshots.
-    Transfer(TransferCommand),
-    /// A one-shot file operation on the host's session; answered with `FileOpProgress`
-    /// (deletes), then `FileOpDone` or `FileOpFailed`, then a fresh listing of the folder on
-    /// screen when the operation changed it ([`FileOp::relists`]). A host that isn't connected
-    /// answers `FileOpFailed` with [`Error::ConnectionLost`] at once.
+    /// A one-shot file operation on the host's session (`state/ops.rs`); answered with `FileOp`
+    /// events: [`FileOpEvent::Progress`] (deletes), then `Done` or `Failed`, then a fresh
+    /// listing of the folder on screen when the operation changed it ([`FileOp::relists`]). A
+    /// host that isn't connected answers `Failed` with [`Error::ConnectionLost`] at once.
     FileOp { id: OpId, host: HostId, op: FileOp },
-    /// How the sending window shows (§4.5): a folder on screen is polled while a window that
-    /// shows it is `visible`, at the focused interval while one of them is focused, else the
-    /// slower unfocused one. Until a window's first one arrives its folders aren't polled.
-    Window { visible: bool, focused: bool },
-    /// Poll the sending window's folder on screen on `host` now (it just gained focus):
-    /// answered like any poll, with `Refreshed` or `ListFailed` when it changed, else nothing.
-    Poll { host: HostId },
-    /// The sending window closed: its folders aren't polled any more, and a prompt waiting
-    /// in it moves to another window.
-    WindowClosed,
+    /// The Properties sheet's folder sizes (`state/properties.rs`); answered with `FolderSize`
+    /// events.
+    FolderSize(SizeCommand),
     /// Saved and recent hosts, Add to SSH config (`state/hostbook.rs`); answered with
     /// `HostBook` events.
     HostBook(HostBookCommand),
+    /// List a folder; answered with `Listing` (whole) or `ListingPage`s, or `ListFailed`.
+    List { host: HostId, path: RemotePath },
+    /// Settings' "Live updates when the server supports them" (on by default): whether hosts
+    /// watch their folder on screen live (`service/live.rs`), for every host from now on.
+    /// Answered with `Live` events as hosts start or stop.
+    LiveUpdates { on: bool },
+    /// Poll the sending window's folder on screen on `host` now (it just gained focus):
+    /// answered like any poll, with `Refreshed` or `ListFailed` when it changed, else nothing.
+    Poll { host: HostId },
+    /// Quick preview, Space (`state/preview.rs`); answered with `Preview` events.
+    Preview(PreviewCommand),
+    /// Search in subfolders (`state/search.rs`); answered with `Search` events.
+    Search(SearchCommand),
+    /// The reconnecting banner's Sign in (§3.9): the host's open, unanswered prompts again, to
+    /// the sending window only; the host's later prompts go to it too. Nothing if none are open.
+    ShowPrompts { host: HostId },
+    /// Something for the transfer engine; answered with `Transfers` snapshots.
+    Transfer(TransferCommand),
+    /// Checking for and installing a newer Dromon (`state/update.rs`); answered with `Update`
+    /// events.
+    Update(UpdateCommand),
     /// The connection log's "Verbose logging" (§6.8): run ssh for `host` with `-v` (`on`) or
     /// without, from now on in this session, so its `debug1:` lines reach the log. A live
     /// connection reconnects at once to take it (silently, the folders on screen kept); a host
     /// that isn't connected takes it at its next connect. Answered with `Verbose` to every
     /// window, then the reconnect's `Status` changes and log lines.
     Verbose { host: HostId, on: bool },
-    /// The reconnecting banner's Sign in (§3.9): the host's open, unanswered prompts again, to
-    /// the sending window only; the host's later prompts go to it too. Nothing if none are open.
-    ShowPrompts { host: HostId },
-    /// The Properties sheet's Calculate: walk the folder `path` on the host's session and add up
-    /// what's in it ([`SizeTotal`]). Nothing on the server changes and nothing is listed again.
-    /// Answered to the sending window only with `FolderSizeProgress` (at most about ten times a
-    /// second), then `FolderSizeDone`, or `FolderSizeFailed` when the walk can't go on; a host
-    /// that isn't connected answers `FolderSizeFailed` with [`Error::ConnectionLost`] at once.
-    FolderSize { id: SizeId, host: HostId, path: RemotePath },
-    /// Stop the walk `id` (its sheet closed). Nothing answers; a walk that already ended, or an
-    /// unknown id, is ignored.
-    CancelFolderSize { id: SizeId, host: HostId },
-    /// Search in subfolders (`state/search.rs`): walk `root` on the host's session, as a folder
-    /// size walk does (links never followed), for entries whose name matches `query`
-    /// ([`super::search::Matcher`]); with `show_hidden` off, hidden entries are neither matched
-    /// nor walked into. Answered to the sending window only with `SearchFound` batches (at most
-    /// about ten a second), then `SearchDone`, or `SearchFailed` when the walk can't go on; a
-    /// host that isn't connected answers `SearchFailed` with [`Error::ConnectionLost`] at once.
-    /// The walk stops at [`super::search::CAP`] results.
-    Search { id: SearchId, host: HostId, root: RemotePath, query: String, show_hidden: bool },
-    /// Stop the search `id`. Nothing answers; one that already ended, or an unknown id, is ignored.
-    CancelSearch { id: SearchId, host: HostId },
-    /// Quick preview (Space): read `range` of the file `path` on the host's session, in a task
-    /// of its own, into memory only. Answered to the sending window only with `Preview`, or
-    /// `PreviewFailed`; a host that isn't connected answers `PreviewFailed` with
-    /// [`Error::ConnectionLost`] at once.
-    Preview { id: PreviewId, host: HostId, path: RemotePath, range: PreviewRange },
-    /// Stop the read `id` (the preview moved on, or closed). Nothing answers; a read that already
-    /// ended, or an unknown id, is ignored.
-    CancelPreview { id: PreviewId, host: HostId },
+    /// How the sending window shows (§4.5): a folder on screen is polled while a window that
+    /// shows it is `visible`, at the focused interval while one of them is focused, else the
+    /// slower unfocused one. Until a window's first one arrives its folders aren't polled.
+    Window { visible: bool, focused: bool },
+    /// The sending window closed: its folders aren't polled any more, and a prompt waiting
+    /// in it moves to another window.
+    WindowClosed,
 }
 
-/// Identifies one search, chosen by the UI (unique per session: each window numbers its own, as
-/// it does its [`SizeId`]s).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct SearchId(pub u64);
-
-/// One search result: the entry, and the folder it is in relative to where the search started
-/// (`assets/img`; `.` for that folder itself).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Found {
-    pub folder: String,
-    pub entry: Entry,
+/// Whether a host's folder on screen updates live (`service/live.rs`): the server tells the app
+/// of each change in it as it happens, and polls only back that up.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Live {
+    /// Polled, as always (nothing to watch, or the watch isn't up yet or ended).
+    #[default]
+    Off,
+    /// This folder is watched live.
+    On(RemotePath),
+    /// The server can't do it for this connection: polled.
+    Unavailable(LiveUnavailable),
 }
 
-impl Found {
-    /// The folder the entry is in, under the search's `root`.
-    pub fn dir(&self, root: &RemotePath) -> RemotePath {
-        root.join(&self.folder)
-    }
-
-    /// The entry's full path, under the search's `root`.
-    pub fn path(&self, root: &RemotePath) -> RemotePath {
-        self.dir(root).join(&self.entry.name)
-    }
-}
-
-/// Identifies one preview read, chosen by the UI (unique per session: each window numbers its
-/// own, as it does its [`SizeId`]s).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct PreviewId(pub u64);
-
-/// Which bytes of a file a preview reads.
+/// Why a host's connection has no live updates.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PreviewRange {
-    /// From the start: at most this many bytes.
-    Head(u64),
-    /// The end: the last this many bytes (the whole file when it's shorter).
-    Tail(u64),
+pub enum LiveUnavailable {
+    /// The server has no `inotifywait` (or isn't Linux).
+    NoInotify,
+    /// Signing in a second time needs an answer Dromon doesn't remember (a code, a host key).
+    SignIn,
+    /// The second session ended before its watch started.
+    Failed,
 }
 
-impl PreviewRange {
-    /// Where the read starts and how many bytes it takes, in a file of `size` bytes.
-    pub fn span(self, size: u64) -> (u64, u64) {
+impl LiveUnavailable {
+    /// Why, as the connection's tooltip and log say it.
+    pub fn reason(self) -> &'static str {
         match self {
-            PreviewRange::Head(n) => (0, n.min(size)),
-            PreviewRange::Tail(n) => {
-                let len = n.min(size);
-                (size - len, len)
-            }
-        }
-    }
-}
-
-/// What a preview read: a file's contents, which may hold secrets (a config file's), so its
-/// `Debug` says only how many bytes there are. Shared, never copied on the way to the view.
-#[derive(Clone, PartialEq, Eq)]
-pub struct PreviewBytes(pub std::sync::Arc<[u8]>);
-
-impl std::fmt::Debug for PreviewBytes {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "PreviewBytes(<{} bytes>)", self.0.len())
-    }
-}
-
-/// Identifies one folder size walk, chosen by the UI (unique per session: each window numbers
-/// its own, as it does its [`OpId`]s).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct SizeId(pub u64);
-
-/// What a folder holds, as far as a walk got. Counted as Finder counts a folder's size, not as
-/// `du` does: `bytes` adds up the sizes of the files, symlinks (the links themselves, never
-/// followed) and other non-folders; folders add no bytes. `folders` are those inside it (the
-/// walked folder itself isn't counted); `unreadable` the folders whose listing failed (no
-/// access, or gone meanwhile), the walked one included: what's in them isn't counted.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct SizeTotal {
-    pub bytes: u64,
-    pub files: u64,
-    pub folders: u64,
-    pub unreadable: u64,
-}
-
-impl SizeTotal {
-    /// Everything found so far: files and folders.
-    pub fn items(&self) -> u64 {
-        self.files + self.folders
-    }
-}
-
-/// Identifies one file operation, chosen by the UI (unique per session).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub struct OpId(pub u64);
-
-/// A simple file operation (§5 M3): new folder, rename, delete.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum FileOp {
-    /// Create one folder (its parent must exist).
-    Mkdir { path: RemotePath },
-    /// Rename an item within its folder (`to` is a sibling of `from`); fails with AlreadyExists if `to` exists.
-    Rename { from: RemotePath, to: RemotePath },
-    /// Delete items; folders recursively. Symlinks are removed themselves, never followed.
-    Delete { paths: Vec<RemotePath> },
-}
-
-/// What kind of [`FileOp`] it is, without its paths (for trace lines and the ops list).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FileOpKind {
-    Mkdir,
-    Rename,
-    Delete,
-}
-
-impl FileOpKind {
-    pub fn name(self) -> &'static str {
-        match self {
-            FileOpKind::Mkdir => "Mkdir",
-            FileOpKind::Rename => "Rename",
-            FileOpKind::Delete => "Delete",
-        }
-    }
-}
-
-impl FileOp {
-    pub fn kind(&self) -> FileOpKind {
-        match self {
-            FileOp::Mkdir { .. } => FileOpKind::Mkdir,
-            FileOp::Rename { .. } => FileOpKind::Rename,
-            FileOp::Delete { .. } => FileOpKind::Delete,
+            LiveUnavailable::NoInotify => "inotifywait isn't installed on this server",
+            LiveUnavailable::SignIn => "it needs a sign-in Dromon can't answer by itself",
+            LiveUnavailable::Failed => "the server didn't start watching the folder",
         }
     }
 
-    /// Every path the operation changes.
-    pub fn affected(&self) -> Vec<&RemotePath> {
+    fn name(self) -> &'static str {
         match self {
-            FileOp::Mkdir { path } => vec![path],
-            FileOp::Rename { from, to } => vec![from, to],
-            FileOp::Delete { paths } => paths.iter().collect(),
+            LiveUnavailable::NoInotify => "NoInotify",
+            LiveUnavailable::SignIn => "SignIn",
+            LiveUnavailable::Failed => "Failed",
         }
-    }
-
-    /// The paths that no longer exist once the operation succeeded.
-    pub fn removed(&self) -> Vec<&RemotePath> {
-        match self {
-            FileOp::Mkdir { .. } => Vec::new(),
-            FileOp::Rename { from, to } if from != to => vec![from],
-            FileOp::Rename { .. } => Vec::new(),
-            FileOp::Delete { paths } => paths.iter().collect(),
-        }
-    }
-
-    /// Whether the folder on screen, `on_screen`, is listed again after the operation ended
-    /// (`ok`: it succeeded). It is when it's the parent of an affected path, or affected itself
-    /// (or lies inside one) — except after a success that removed it (it, or an ancestor, was
-    /// deleted or renamed away): a path that's gone isn't listed, and the UI moves away from it.
-    pub fn relists(&self, on_screen: &RemotePath, ok: bool) -> bool {
-        let touched =
-            self.affected().iter().any(|a| a.parent().as_ref() == Some(on_screen) || on_screen.starts_with(a));
-        let gone = ok && self.removed().iter().any(|r| on_screen.starts_with(r));
-        touched && !gone
     }
 }
 
@@ -285,16 +159,18 @@ pub enum TransferCommand {
 /// What the service tells the UI.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServiceEvent {
+    /// How a file operation goes (`state/ops.rs`).
+    FileOp(FileOpEvent),
+    /// How a folder size walk goes (`state/properties.rs`).
+    FolderSize(SizeEvent),
+    /// Saved hosts and the ssh config (`state/hostbook.rs`).
+    HostBook(HostBookEvent),
     /// The hosts in the user's ssh config: replaces the sidebar's SSH Config section.
     Hosts(Vec<HostSpec>),
-    Status {
+    ListFailed {
         host: HostId,
-        status: ConnStatus,
-    },
-    /// The session is up and its starting folder resolved (home, or the last folder used).
-    Opened {
-        host: HostId,
-        start: RemotePath,
+        path: RemotePath,
+        error: Error,
     },
     /// A whole folder at once (tests that build listings by hand).
     Listing {
@@ -312,11 +188,29 @@ pub enum ServiceEvent {
         first: bool,
         done: bool,
     },
-    ListFailed {
+    /// Whether `host`'s folder on screen updates live now (`Command::LiveUpdates`), to every
+    /// window when it changes, and to a window that opens a host already connected.
+    Live {
         host: HostId,
-        path: RemotePath,
-        error: Error,
+        live: Live,
     },
+    /// One line for the host's connection log: ssh's stderr or our own lifecycle notes.
+    /// Never contains secrets.
+    Log {
+        host: HostId,
+        line: String,
+    },
+    /// The session is up and its starting folder resolved (home, or the last folder used).
+    Opened {
+        host: HostId,
+        start: RemotePath,
+    },
+    /// What a quick preview read brought, or why it couldn't (`state/preview.rs`).
+    Preview(PreviewEvent),
+    /// ssh asks something only the user can answer: show a sheet (or, for a notice, a toast).
+    Prompt(Prompt),
+    /// The prompt went away without an answer from here (ssh hung up, a notice ended).
+    PromptClosed(PromptId),
     /// A poll found the folder on screen changed (§4.5): its whole listing now. Always a
     /// refresh of a folder already listed, never a navigation; polls that find nothing new
     /// send nothing.
@@ -325,103 +219,22 @@ pub enum ServiceEvent {
         path: RemotePath,
         entries: Vec<Entry>,
     },
-    /// ssh asks something only the user can answer: show a sheet (or, for a notice, a toast).
-    Prompt(Prompt),
-    /// The prompt went away without an answer from here (ssh hung up, a notice ended).
-    PromptClosed(PromptId),
-    /// One line for the host's connection log: ssh's stderr or our own lifecycle notes.
-    /// Never contains secrets.
-    Log {
+    /// What a search in subfolders found, and how it ended (`state/search.rs`).
+    Search(SearchEvent),
+    Status {
         host: HostId,
-        line: String,
+        status: ConnStatus,
     },
     /// Every transfer job, newest first: replaces the list. Sent when something changed, at
     /// most about ten times a second while bytes move.
     Transfers(Vec<JobView>),
-    /// How far a delete got, at most about ten times a second: while it counts what's there,
-    /// `done` is the entries found so far and `total` is `None`; while it removes them, `done`
-    /// is the entries removed and `total` all of them.
-    FileOpProgress {
-        id: OpId,
-        host: HostId,
-        done: u64,
-        total: Option<u64>,
-    },
-    /// The operation succeeded.
-    FileOpDone {
-        id: OpId,
-        host: HostId,
-    },
-    /// The operation stopped at its first error (a delete may have removed some entries).
-    FileOpFailed {
-        id: OpId,
-        host: HostId,
-        error: Error,
-    },
-    /// Saved hosts and the ssh config (`state/hostbook.rs`).
-    HostBook(HostBookEvent),
+    /// The updater's news (`state/update.rs`).
+    Update(UpdateEvent),
     /// Whether ssh for `host` runs with `-v` (the log's "Verbose logging"): after a
     /// `Command::Verbose` from any window, and to a window that connects while it's on.
     Verbose {
         host: HostId,
         on: bool,
-    },
-    /// How far the walk `id` got (`Command::FolderSize`).
-    FolderSizeProgress {
-        id: SizeId,
-        host: HostId,
-        total: SizeTotal,
-    },
-    /// The walk `id` went through the whole folder; folders it couldn't read are counted in
-    /// `total.unreadable` and left out of the rest.
-    FolderSizeDone {
-        id: SizeId,
-        host: HostId,
-        total: SizeTotal,
-    },
-    /// The walk `id` stopped (the connection was lost): `total` is what it had counted.
-    FolderSizeFailed {
-        id: SizeId,
-        host: HostId,
-        total: SizeTotal,
-        error: Error,
-    },
-    /// What the search `id` found since its last batch, in the order found (maybe nothing), and
-    /// how many folders it has searched so far.
-    SearchFound {
-        id: SearchId,
-        host: HostId,
-        entries: Vec<Found>,
-        folders: u64,
-    },
-    /// The search `id` ended: it searched `folders` folders, `unreadable` more couldn't be read,
-    /// and `capped` says it stopped at [`super::search::CAP`] results.
-    SearchDone {
-        id: SearchId,
-        host: HostId,
-        folders: u64,
-        unreadable: u64,
-        capped: bool,
-    },
-    /// The search `id` stopped (the connection was lost); what it found stays found.
-    SearchFailed {
-        id: SearchId,
-        host: HostId,
-        error: Error,
-    },
-    /// The read `id` (`Command::Preview`): the asked range of a file of `total` bytes (shorter
-    /// only when the file shrank while it was read).
-    Preview {
-        id: PreviewId,
-        host: HostId,
-        bytes: PreviewBytes,
-        total: u64,
-    },
-    /// The read `id` couldn't be done: no access, the file is gone, the connection was lost.
-    PreviewFailed {
-        id: PreviewId,
-        host: HostId,
-        error: Error,
     },
 }
 
@@ -438,7 +251,27 @@ pub fn tracing() -> bool {
 /// text the event carries (paths, entries, prompt text, log lines, error messages).
 pub fn trace_line(ev: &ServiceEvent) -> String {
     match ev {
+        ServiceEvent::FileOp(ev) => super::ops::trace_line(ev),
+        ServiceEvent::FolderSize(ev) => super::properties::trace_line(ev),
+        ServiceEvent::HostBook(ev) => super::hostbook::trace_line(ev),
         ServiceEvent::Hosts(hosts) => format!("Hosts count={}", hosts.len()),
+        ServiceEvent::ListFailed { host, .. } => format!("ListFailed host={host}"),
+        ServiceEvent::Listing { host, entries, .. } => format!("Listing host={host} entries={}", entries.len()),
+        ServiceEvent::ListingPage { host, entries, done, .. } => {
+            format!("ListingPage host={host} entries={} done={done}", entries.len())
+        }
+        ServiceEvent::Live { host, live } => match live {
+            Live::Off => format!("Live host={host} state=Off"),
+            Live::On(_) => format!("Live host={host} state=On"),
+            Live::Unavailable(why) => format!("Live host={host} state=Unavailable why={}", why.name()),
+        },
+        ServiceEvent::Log { host, .. } => format!("Log host={host}"),
+        ServiceEvent::Opened { host, .. } => format!("Opened host={host}"),
+        ServiceEvent::Preview(ev) => super::preview::trace_line(ev),
+        ServiceEvent::Prompt(p) => format!("Prompt host={} id={}", p.host, p.id.0),
+        ServiceEvent::PromptClosed(id) => format!("PromptClosed id={}", id.0),
+        ServiceEvent::Refreshed { host, entries, .. } => format!("Refreshed host={host} entries={}", entries.len()),
+        ServiceEvent::Search(ev) => super::search::trace_line(ev),
         ServiceEvent::Status { host, status } => {
             let state = match status {
                 ConnStatus::Connecting => "Connecting".to_owned(),
@@ -450,40 +283,13 @@ pub fn trace_line(ev: &ServiceEvent) -> String {
             };
             format!("Status host={host} status={state}")
         }
-        ServiceEvent::Opened { host, .. } => format!("Opened host={host}"),
-        ServiceEvent::Listing { host, entries, .. } => format!("Listing host={host} entries={}", entries.len()),
-        ServiceEvent::ListingPage { host, entries, done, .. } => {
-            format!("ListingPage host={host} entries={} done={done}", entries.len())
-        }
-        ServiceEvent::ListFailed { host, .. } => format!("ListFailed host={host}"),
-        ServiceEvent::Refreshed { host, entries, .. } => format!("Refreshed host={host} entries={}", entries.len()),
-        ServiceEvent::Prompt(p) => format!("Prompt host={} id={}", p.host, p.id.0),
-        ServiceEvent::PromptClosed(id) => format!("PromptClosed id={}", id.0),
-        ServiceEvent::Log { host, .. } => format!("Log host={host}"),
         ServiceEvent::Transfers(jobs) => {
             let active = jobs.iter().filter(|j| j.state.is_active()).count();
             let done = jobs.iter().filter(|j| j.state == TaskState::Done).count();
             format!("Transfers jobs={} active={active} done={done}", jobs.len())
         }
-        ServiceEvent::FileOpProgress { id, host, .. } => format!("FileOpProgress host={host} id={}", id.0),
-        ServiceEvent::FileOpDone { id, host } => format!("FileOpDone host={host} id={}", id.0),
-        ServiceEvent::FileOpFailed { id, host, .. } => format!("FileOpFailed host={host} id={}", id.0),
-        ServiceEvent::HostBook(ev) => super::hostbook::trace_line(ev),
+        ServiceEvent::Update(ev) => format!("Update {}", ev.name()),
         ServiceEvent::Verbose { host, on } => format!("Verbose host={host} on={on}"),
-        ServiceEvent::FolderSizeProgress { id, host, .. } => format!("FolderSizeProgress host={host} id={}", id.0),
-        ServiceEvent::FolderSizeDone { id, host, .. } => format!("FolderSizeDone host={host} id={}", id.0),
-        ServiceEvent::FolderSizeFailed { id, host, .. } => format!("FolderSizeFailed host={host} id={}", id.0),
-        ServiceEvent::SearchFound { id, host, entries, folders } => {
-            format!("SearchFound host={host} id={} entries={} folders={folders}", id.0, entries.len())
-        }
-        ServiceEvent::SearchDone { id, host, folders, unreadable, capped } => {
-            format!("SearchDone host={host} id={} folders={folders} unreadable={unreadable} capped={capped}", id.0)
-        }
-        ServiceEvent::SearchFailed { id, host, .. } => format!("SearchFailed host={host} id={}", id.0),
-        ServiceEvent::Preview { id, host, bytes, total } => {
-            format!("Preview host={host} id={} bytes={} total={total}", id.0, bytes.0.len())
-        }
-        ServiceEvent::PreviewFailed { id, host, .. } => format!("PreviewFailed host={host} id={}", id.0),
     }
 }
 
@@ -598,15 +404,11 @@ mod tests {
     fn file_op_trace_lines_name_the_kind_host_and_id_only() {
         let host = HostId("prod".into());
         let events = [
-            ServiceEvent::FileOpProgress { id: OpId(3), host: host.clone(), done: 12, total: Some(40) },
-            ServiceEvent::FileOpDone { id: OpId(3), host: host.clone() },
-            ServiceEvent::FileOpFailed {
-                id: OpId(4),
-                host,
-                error: Error::PermissionDenied(RemotePath::new("/secret/dir")),
-            },
+            FileOpEvent::Progress { id: OpId(3), host: host.clone(), done: 12, total: Some(40) },
+            FileOpEvent::Done { id: OpId(3), host: host.clone() },
+            FileOpEvent::Failed { id: OpId(4), host, error: Error::PermissionDenied(RemotePath::new("/secret/dir")) },
         ];
-        let lines: Vec<String> = events.iter().map(trace_line).collect();
+        let lines: Vec<String> = events.into_iter().map(|e| trace_line(&ServiceEvent::FileOp(e))).collect();
         assert_eq!(
             lines,
             ["FileOpProgress host=prod id=3", "FileOpDone host=prod id=3", "FileOpFailed host=prod id=4"]
@@ -618,16 +420,16 @@ mod tests {
         let host = HostId("prod".into());
         let total = SizeTotal { bytes: 9, files: 2, folders: 1, unreadable: 1 };
         let events = [
-            ServiceEvent::FolderSizeProgress { id: SizeId(5), host: host.clone(), total },
-            ServiceEvent::FolderSizeDone { id: SizeId(5), host: host.clone(), total },
-            ServiceEvent::FolderSizeFailed {
+            SizeEvent::Progress { id: SizeId(5), host: host.clone(), total },
+            SizeEvent::Done { id: SizeId(5), host: host.clone(), total },
+            SizeEvent::Failed {
                 id: SizeId(6),
                 host,
                 total,
                 error: Error::PermissionDenied(RemotePath::new("/secret")),
             },
         ];
-        let lines: Vec<String> = events.iter().map(trace_line).collect();
+        let lines: Vec<String> = events.into_iter().map(|e| trace_line(&ServiceEvent::FolderSize(e))).collect();
         assert_eq!(
             lines,
             ["FolderSizeProgress host=prod id=5", "FolderSizeDone host=prod id=5", "FolderSizeFailed host=prod id=6"]
@@ -640,9 +442,10 @@ mod tests {
         let host = HostId("prod".into());
         let bytes = PreviewBytes(b"DB_PASSWORD=secret\n".as_slice().into());
         let events = [
-            ServiceEvent::Preview { id: PreviewId(4), host: host.clone(), bytes: bytes.clone(), total: 1204 },
-            ServiceEvent::PreviewFailed { id: PreviewId(5), host, error: Error::NotFound(RemotePath::new("/secret")) },
-        ];
+            PreviewEvent::Done { id: PreviewId(4), host: host.clone(), bytes: bytes.clone(), total: 1204 },
+            PreviewEvent::Failed { id: PreviewId(5), host, error: Error::NotFound(RemotePath::new("/secret")) },
+        ]
+        .map(ServiceEvent::Preview);
         let lines: Vec<String> = events.iter().map(trace_line).collect();
         assert_eq!(lines, ["Preview host=prod id=4 bytes=19 total=1204", "PreviewFailed host=prod id=5"]);
         assert_eq!(format!("{bytes:?}"), "PreviewBytes(<19 bytes>)");
@@ -677,15 +480,11 @@ mod tests {
             RemotePath::new("/srv")
         );
         let events = [
-            ServiceEvent::SearchFound { id: SearchId(3), host: host.clone(), entries: vec![found], folders: 12 },
-            ServiceEvent::SearchDone { id: SearchId(3), host: host.clone(), folders: 40, unreadable: 1, capped: false },
-            ServiceEvent::SearchFailed {
-                id: SearchId(4),
-                host,
-                error: Error::PermissionDenied(RemotePath::new("/secret")),
-            },
+            SearchEvent::Found { id: SearchId(3), host: host.clone(), entries: vec![found], folders: 12 },
+            SearchEvent::Done { id: SearchId(3), host: host.clone(), folders: 40, unreadable: 1, capped: false },
+            SearchEvent::Failed { id: SearchId(4), host, error: Error::PermissionDenied(RemotePath::new("/secret")) },
         ];
-        let lines: Vec<String> = events.iter().map(trace_line).collect();
+        let lines: Vec<String> = events.into_iter().map(|e| trace_line(&ServiceEvent::Search(e))).collect();
         assert_eq!(
             lines,
             [
@@ -715,46 +514,52 @@ mod tests {
         assert_eq!(trace_line(&ev), "Refreshed host=prod entries=1");
     }
 
-    fn p(s: &str) -> RemotePath {
-        RemotePath::new(s)
-    }
-
     #[test]
-    fn file_ops_name_what_they_change() {
-        let mk = FileOp::Mkdir { path: p("/a/new") };
-        assert_eq!((mk.kind(), mk.affected(), mk.removed()), (FileOpKind::Mkdir, vec![&p("/a/new")], vec![]));
-        let mv = FileOp::Rename { from: p("/a/x"), to: p("/a/y") };
+    fn live_trace_lines_name_the_state_and_never_the_folder() {
+        let host = HostId("prod".into());
+        let live = |live| ServiceEvent::Live { host: host.clone(), live };
+        let lines = [
+            live(Live::On(RemotePath::new("/secret/folder"))),
+            live(Live::Off),
+            live(Live::Unavailable(LiveUnavailable::SignIn)),
+        ]
+        .map(|ev| trace_line(&ev));
         assert_eq!(
-            (mv.kind(), mv.affected(), mv.removed()),
-            (FileOpKind::Rename, vec![&p("/a/x"), &p("/a/y")], vec![&p("/a/x")])
+            lines,
+            ["Live host=prod state=On", "Live host=prod state=Off", "Live host=prod state=Unavailable why=SignIn"]
         );
-        assert!(FileOp::Rename { from: p("/a/x"), to: p("/a/x") }.removed().is_empty());
-        let rm = FileOp::Delete { paths: vec![p("/a/x"), p("/b")] };
-        assert_eq!((rm.kind(), rm.removed()), (FileOpKind::Delete, vec![&p("/a/x"), &p("/b")]));
-        assert_eq!(FileOpKind::Delete.name(), "Delete");
     }
 
     #[test]
-    fn the_folder_on_screen_is_listed_again_when_it_changed_and_still_exists() {
-        let rm = FileOp::Delete { paths: vec![p("/srv/www/old"), p("/srv/logs")] };
-        // The parent of a deleted item: listed again, whether or not the delete got through.
-        assert!(rm.relists(&p("/srv/www"), true) && rm.relists(&p("/srv/www"), false));
-        assert!(rm.relists(&p("/srv"), true));
-        // Unrelated folders aren't.
-        assert!(!rm.relists(&p("/srv/www/new"), true) && !rm.relists(&p("/"), true));
-        // The deleted folder itself, or one inside it: gone after a success, so not listed;
-        // after a failure it may still be there, and is.
-        assert!(!rm.relists(&p("/srv/www/old"), true) && !rm.relists(&p("/srv/www/old/a/b"), true));
-        assert!(rm.relists(&p("/srv/www/old"), false) && rm.relists(&p("/srv/logs/x"), false));
-
-        let mk = FileOp::Mkdir { path: p("/home/u/new") };
-        assert!(mk.relists(&p("/home/u"), true) && mk.relists(&p("/home/u"), false));
-        assert!(!mk.relists(&p("/home"), true));
-
-        let mv = FileOp::Rename { from: p("/home/u/a"), to: p("/home/u/b") };
-        assert!(mv.relists(&p("/home/u"), true));
-        // Renaming the folder on screen: its old path is gone.
-        assert!(!mv.relists(&p("/home/u/a"), true) && mv.relists(&p("/home/u/a"), false));
-        assert!(!mv.relists(&p("/home/u/c"), true));
+    fn update_trace_lines_name_the_event_and_never_its_versions_or_errors() {
+        use crate::state::update::{Manual, Method, Offer, Version};
+        let offer = Offer {
+            version: Version::parse("7.7.7").unwrap(),
+            page: "https://example.invalid/secret".into(),
+            method: Method::Page(Manual::Unknown),
+        };
+        let events = [
+            UpdateEvent::Checking,
+            UpdateEvent::UpToDate,
+            UpdateEvent::Available(offer),
+            UpdateEvent::CheckFailed("secret".into()),
+            UpdateEvent::Installing,
+            UpdateEvent::InstallFailed("secret".into()),
+            UpdateEvent::Installed { relaunch: true },
+        ];
+        let lines: Vec<String> = events.into_iter().map(|e| trace_line(&ServiceEvent::Update(e))).collect();
+        assert_eq!(
+            lines,
+            [
+                "Update Checking",
+                "Update UpToDate",
+                "Update Available",
+                "Update CheckFailed",
+                "Update Installing",
+                "Update InstallFailed",
+                "Update Installed",
+            ]
+        );
+        assert!(lines.iter().all(|l| !l.contains("secret") && !l.contains("7.7.7")));
     }
 }

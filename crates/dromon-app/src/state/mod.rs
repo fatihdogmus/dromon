@@ -34,6 +34,7 @@ pub mod settings;
 pub mod sheets;
 pub mod toast;
 pub mod transfers;
+pub mod update;
 pub mod windows;
 
 #[cfg(test)]
@@ -62,8 +63,9 @@ pub use selection::{Selection, TypeSelect};
 #[cfg(test)]
 pub use service::Recorder;
 pub use service::{
-    Backend, Command, FileOp, FileOpKind, Found, HostBookCommand, HostBookEvent, OpId, PreviewBytes, PreviewId,
-    PreviewRange, SearchId, ServiceEvent, Silent, SizeId, SizeTotal, TransferCommand, WindowId,
+    Backend, Command, FileOp, FileOpEvent, FileOpKind, Found, HostBookCommand, HostBookEvent, Live, LiveUnavailable,
+    OpId, PreviewBytes, PreviewCommand, PreviewEvent, PreviewId, PreviewRange, SearchCommand, SearchEvent, SearchId,
+    ServiceEvent, Silent, SizeCommand, SizeEvent, SizeId, SizeTotal, TransferCommand, WindowId,
 };
 pub use settings::{Density, Settings, SettingsChange, SettingsView};
 pub use sheets::{Sheet, Sheets};
@@ -172,6 +174,8 @@ pub struct App {
     inbox: VecDeque<ServiceEvent>,
     /// The window's state as the service polls by, and refresh animation (`refresh.rs`).
     pub poll: refresh::PollUi,
+    /// A newer version, and installing it (`update.rs`).
+    pub update: update::Update,
 }
 
 /// What the user did, in the app's terms.
@@ -288,6 +292,8 @@ pub enum Action {
     NewWindow,
     /// ⌘W, the File menu: close this window (the last one asks first while transfers run).
     CloseWindow,
+    /// The update toast's, the Settings page's and the update sheet's buttons (`update.rs`).
+    Update(update::UpdateAction),
     /// "Open in Terminal" (the menus, the palette, ⌘⇧T): ssh in the user's terminal app, in the
     /// row `Some(name)` when it's a folder, else in the folder on screen (`menu.rs`).
     OpenTerminal(Option<String>),
@@ -324,6 +330,11 @@ pub enum Effect {
     FocusPreview,
     /// The preview panel closed: the keyboard, if it was in it, goes back to the list.
     FocusList,
+    /// Open this https link in the browser (a release's page).
+    OpenUrl(String),
+    /// Quit the app (every window), starting it again once it has exited when `relaunch`: an
+    /// update is in place (`update.rs`).
+    Quit { relaunch: bool },
     /// Open `terminal` running ssh to `host` in `folder`, off the UI thread (`crate::terminal`);
     /// a failure comes back to `window` as [`Action::TerminalFailed`].
     OpenTerminal { window: WindowId, terminal: settings::Terminal, host: dromon_core::HostSpec, folder: RemotePath },
@@ -354,6 +365,7 @@ impl App {
             downloads: PathBuf::from("Downloads"),
             inbox: VecDeque::new(),
             poll: refresh::PollUi::default(),
+            update: update::Update::default(),
         }
     }
 
@@ -420,18 +432,29 @@ impl App {
 
     fn apply_one(&mut self, ev: ServiceEvent) {
         match ev {
+            ServiceEvent::FileOp(ev) => self.ops.event(ev),
+            ServiceEvent::FolderSize(ev) => self.size_event(ev),
+            ServiceEvent::HostBook(ev) => self.host_event(ev),
             // Discovery owns the SSH Config section; saved and recent hosts stay.
             ServiceEvent::Hosts(specs) => self.set_config_hosts(specs),
-            ServiceEvent::HostBook(ev) => self.host_event(ev),
-            ServiceEvent::Status { host, status } => {
-                if matches!(status, ConnStatus::Ready | ConnStatus::Failed(_) | ConnStatus::Disconnected) {
-                    self.ui.sheets.on_settled(&host);
+            ServiceEvent::ListFailed { host, path, error } => {
+                // The folder on screen is gone: up to the nearest one that exists (§6.8).
+                if self.vanished(&host, &path, &error) {
+                    return;
                 }
-                if let Some(c) = self.conns.get_mut(&host) {
-                    c.status = status;
+                let Some(c) = self.conns.get_mut(&host) else { return };
+                // The folder remembered from last time is gone or closed now: go home instead.
+                if path == c.cwd
+                    && let Some(home) = c.fallback.take()
+                    && c.go(home.clone(), Nav::Replace)
+                {
+                    self.remember_folder(&host, &home);
+                    self.send(Command::List { host, path: home });
+                    return;
                 }
+                c.set_failed(&path, error.into());
+                self.vanish_landed(&host, &path);
             }
-            ServiceEvent::Opened { host, start } => self.opened(host, start),
             ServiceEvent::Listing { host, path, entries } | ServiceEvent::Refreshed { host, path, entries } => {
                 let query = self.folder_query();
                 if let Some(c) = self.conns.get_mut(&host) {
@@ -468,34 +491,25 @@ impl App {
                 }
                 self.vanish_landed(&host, &path);
             }
-            ServiceEvent::ListFailed { host, path, error } => {
-                // The folder on screen is gone: up to the nearest one that exists (§6.8).
-                if self.vanished(&host, &path, &error) {
-                    return;
-                }
-                let Some(c) = self.conns.get_mut(&host) else { return };
-                // The folder remembered from last time is gone or closed now: go home instead.
-                if path == c.cwd
-                    && let Some(home) = c.fallback.take()
-                    && c.go(home.clone(), Nav::Replace)
-                {
-                    self.remember_folder(&host, &home);
-                    self.send(Command::List { host, path: home });
-                    return;
-                }
-                c.set_failed(&path, error.into());
-                self.vanish_landed(&host, &path);
+            ServiceEvent::Live { host, live } => {
+                self.conns.entry(host).and_modify(|c| c.live = live);
             }
-            ServiceEvent::Prompt(prompt) => self.ui.sheets.on_prompt(prompt),
-            ServiceEvent::PromptClosed(id) => self.ui.sheets.on_closed(id),
             ServiceEvent::Log { host, line } => {
                 if let Some(c) = self.conns.get_mut(&host) {
                     c.log.push((self.wall_ms)(), line);
                 }
             }
-            ServiceEvent::Verbose { host, on } => {
+            ServiceEvent::Opened { host, start } => self.opened(host, start),
+            ServiceEvent::Preview(ev) => self.preview_event(ev),
+            ServiceEvent::Prompt(prompt) => self.ui.sheets.on_prompt(prompt),
+            ServiceEvent::PromptClosed(id) => self.ui.sheets.on_closed(id),
+            ServiceEvent::Search(ev) => self.search_event(ev),
+            ServiceEvent::Status { host, status } => {
+                if matches!(status, ConnStatus::Ready | ConnStatus::Failed(_) | ConnStatus::Disconnected) {
+                    self.ui.sheets.on_settled(&host);
+                }
                 if let Some(c) = self.conns.get_mut(&host) {
-                    c.log.verbose = on;
+                    c.status = status;
                 }
             }
             ServiceEvent::Transfers(jobs) => {
@@ -511,16 +525,12 @@ impl App {
                     }
                 }
             }
-            ServiceEvent::FileOpProgress { id, host, done, total } => self.ops.progress(id, &host, done, total),
-            ServiceEvent::FileOpDone { id, host } => self.ops.done(id, &host),
-            ServiceEvent::FileOpFailed { id, host, error } => self.ops.failed(id, &host, error),
-            ev @ (ServiceEvent::FolderSizeProgress { .. }
-            | ServiceEvent::FolderSizeDone { .. }
-            | ServiceEvent::FolderSizeFailed { .. }) => self.size_event(ev),
-            ev @ (ServiceEvent::SearchFound { .. }
-            | ServiceEvent::SearchDone { .. }
-            | ServiceEvent::SearchFailed { .. }) => self.search_event(ev),
-            ev @ (ServiceEvent::Preview { .. } | ServiceEvent::PreviewFailed { .. }) => self.preview_event(ev),
+            ServiceEvent::Update(ev) => self.update_event(ev),
+            ServiceEvent::Verbose { host, on } => {
+                if let Some(c) = self.conns.get_mut(&host) {
+                    c.log.verbose = on;
+                }
+            }
         }
     }
 
@@ -589,6 +599,10 @@ impl App {
                 if std::mem::take(&mut self.ui.confirm_quit) {
                     return fx;
                 }
+                if self.update.confirming() {
+                    self.update_action(update::UpdateAction::Cancel, &mut fx);
+                    return fx;
+                }
                 if let Some((id, answer)) = self.ui.sheets.cancel() {
                     self.send(Command::AnswerPrompt { id, answer });
                 }
@@ -642,10 +656,9 @@ impl App {
             Action::Preview(a) => self.preview_action(a, &mut fx),
             Action::NewWindow => self.new_window(),
             Action::CloseWindow => self.close_window(&mut fx),
+            Action::Update(a) => self.update_action(a, &mut fx),
             Action::OpenTerminal(row) => self.open_terminal(row, &mut fx),
-            Action::TerminalFailed(why) => {
-                self.files.toasts.push(format!("Couldn't open a terminal: {why}"));
-            }
+            Action::TerminalFailed(why) => self.terminal_failed(&why),
             Action::TerminalsFound(found) => self.ui.settings_page.terminals = found,
         }
         fx
@@ -673,7 +686,7 @@ impl App {
             Shortcut::CloseWindow => return self.act(Action::CloseWindow),
             _ => {}
         }
-        if self.conflict_on_screen().is_some() || self.ui.confirm_quit {
+        if self.conflict_on_screen().is_some() || self.ui.confirm_quit || self.update.confirming() {
             return Vec::new();
         }
         // The quick-connect popover is modal too: Escape closes it, nothing reaches the list.

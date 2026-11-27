@@ -6,7 +6,7 @@ use std::sync::Arc;
 use dromon_core::{ConnStatus, Error, HostId, RemotePath};
 
 use super::*;
-use crate::state::{Backend, Command, Found, SearchId, ServiceEvent};
+use crate::state::{Backend, Command, Found, SearchCommand, SearchEvent, SearchId, ServiceEvent};
 
 fn prod() -> HostId {
     HostId("prod".into())
@@ -31,19 +31,24 @@ fn backend() -> FixtureBackend {
 }
 
 fn search(b: &mut FixtureBackend, root: &str, query: &str, show_hidden: bool) -> Vec<ServiceEvent> {
-    let cmd = Command::Search {
+    let cmd = Command::Search(SearchCommand::Start {
         id: SearchId(1),
         host: prod(),
         root: RemotePath::new(root),
         query: query.into(),
         show_hidden,
-    };
+    });
     b.send(cmd)
+}
+
+/// The search failing with `ConnectionLost`.
+fn lost() -> ServiceEvent {
+    ServiceEvent::Search(SearchEvent::Failed { id: SearchId(1), host: prod(), error: Error::ConnectionLost })
 }
 
 fn found(evs: &[ServiceEvent]) -> Vec<String> {
     let hits = evs.iter().filter_map(|e| match e {
-        ServiceEvent::SearchFound { entries, .. } => {
+        ServiceEvent::Search(SearchEvent::Found { entries, .. }) => {
             Some(entries.iter().map(|Found { folder, entry }| format!("{folder}/{}", entry.name)))
         }
         _ => None,
@@ -64,7 +69,13 @@ fn a_search_finds_names_in_every_folder_below_and_notes_what_it_couldnt_read() {
     );
     assert_eq!(
         evs.last(),
-        Some(&ServiceEvent::SearchDone { id: SearchId(1), host: prod(), folders: 4, unreadable: 1, capped: false })
+        Some(&ServiceEvent::Search(SearchEvent::Done {
+            id: SearchId(1),
+            host: prod(),
+            folders: 4,
+            unreadable: 1,
+            capped: false
+        }))
     );
 }
 
@@ -83,14 +94,14 @@ fn a_search_on_a_host_that_isnt_up_fails_at_once() {
     let mut b = backend();
     b.send(Command::Disconnect { host: prod() });
     let evs = search(&mut b, "/w", "log", false);
-    assert_eq!(evs, [ServiceEvent::SearchFailed { id: SearchId(1), host: prod(), error: Error::ConnectionLost }]);
+    assert_eq!(evs, [lost()]);
 }
 
 #[test]
 fn a_folder_that_loses_the_connection_fails_the_search_and_drops_it() {
     let mut b = backend();
     let evs = search(&mut b, "/w/gone", "x", false);
-    assert!(evs.contains(&ServiceEvent::SearchFailed { id: SearchId(1), host: prod(), error: Error::ConnectionLost }));
+    assert!(evs.contains(&lost()));
     assert!(
         evs.iter().any(|e| matches!(e, ServiceEvent::Status { status: ConnStatus::Reconnecting { .. }, .. })),
         "{evs:#?}"

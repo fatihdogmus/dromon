@@ -15,6 +15,10 @@
 //! - `hostkey`: asks the unknown-host question; anything but `yes` is "Host key verification
 //!   failed."
 //! - `vanish`: asks for a code, then exits (once the test saw the prompt) before it's answered.
+//! - Without `-s` (live updates' watch, `<alias> -- <command>`): `pw` asks its password again
+//!   and `hostkey` its question, then the command runs in a local shell, which has a fake
+//!   `inotifywait` (a line per change of the folder's listing, ending when `live-stop` appears)
+//!   while the file `inotify` exists, and none otherwise.
 //!
 //! Skipped (with a note) where `sftp-server` or `python3` is missing. The Docker-based tests
 //! against a real sshd are `tests/e2e.rs`.
@@ -27,7 +31,7 @@ use dromon_core::{ConnStatus, Error, HostId, HostSpec, Prompt, PromptAnswer, Pro
 use tokio::sync::mpsc;
 
 use super::{Config, Sink, serve};
-use crate::state::{Command, FileOp, OpId, ServiceEvent, WindowId};
+use crate::state::{Command, FileOp, FileOpEvent, OpId, ServiceEvent, WindowId};
 
 const SFTP_SERVERS: [&str; 2] = ["/usr/lib/openssh/sftp-server", "/usr/lib/ssh/sftp-server"];
 const WAIT: Duration = Duration::from_secs(20);
@@ -37,6 +41,22 @@ const FAKE_SSH: &str = r#"#!/bin/bash
 dir="$(cd "$(dirname "$0")" && pwd)"
 alias=""; prev=""
 for a in "$@"; do [ "$prev" = "-s" ] && alias="$a"; prev="$a"; done
+if [ -z "$alias" ]; then
+  # A remote command (live updates' watch): `<options> <alias> -- <command>`.
+  for a in "$@"; do [ "$a" = "--" ] && host="$last"; last="$a"; done
+  if [ "$host" = "pw" ]; then
+    answer="$("$SSH_ASKPASS" "x@y's password: ")" || exit 255
+    [ "$answer" = "secret" ] || { echo "x@y: Permission denied (password)." >&2; exit 255; }
+  fi
+  if [ "$host" = "hostkey" ]; then
+    "$SSH_ASKPASS" "The authenticity of host 'hostkey (127.0.0.1)' can't be established.
+ED25519 key fingerprint is SHA256:fakefingerprint.
+Are you sure you want to continue connecting (yes/no/[fingerprint])? " >/dev/null || exit 255
+  fi
+  # The server has inotifywait (the fake one in bin/) while the file `inotify` exists.
+  [ -e "$dir/inotify" ] && exec env PATH="$dir/bin" /bin/sh -c "$last"
+  exec env PATH=/nonexistent /bin/sh -c "$last"
+fi
 echo "debug1: fake ssh for $alias" >&2
 for a in "$@"; do [ "$a" = "-v" ] && echo "debug1: verbose output from the fake ssh" >&2; done
 case "$alias" in
@@ -77,6 +97,21 @@ while kill -0 "$pid" 2>/dev/null; do
   sleep 0.1
 done
 wait "$pid"
+"#;
+
+/// A fake `inotifywait -m … <folder>`: a line whenever the folder's listing changes; it ends when
+/// the file `live-stop` appears (a killed watch).
+const FAKE_INOTIFYWAIT: &str = r#"#!/bin/bash
+export PATH=/usr/bin:/bin
+dir="$(cd "$(dirname "$0")/.." && pwd)"
+for a in "$@"; do folder="$a"; done
+seen="$(ls -la "$folder" | cksum)"
+while :; do
+  [ -e "$dir/live-stop" ] && { rm -f "$dir/live-stop"; exit 1; }
+  now="$(ls -la "$folder" | cksum)"
+  [ "$now" != "$seen" ] && { seen="$now"; echo CREATE; }
+  sleep 0.05
+done
 "#;
 
 const FAKE_ASKPASS: &str = r#"#!/usr/bin/env python3
@@ -144,6 +179,8 @@ impl Fixture {
         write_exe(&ssh, &FAKE_SSH.replace("\"$SFTP_SERVER\"", &format!("\"{}\"", sftp_server.display())));
         let helper = dir.path().join("askpass.py");
         write_exe(&helper, FAKE_ASKPASS);
+        std::fs::create_dir(dir.path().join("bin")).unwrap();
+        write_exe(&dir.path().join("bin/inotifywait"), FAKE_INOTIFYWAIT);
         let root = dir.path().join("root");
         std::fs::create_dir_all(root.join("sub")).unwrap();
         std::fs::write(root.join("a.txt"), "hello").unwrap();
@@ -272,8 +309,8 @@ impl Fixture {
     pub(super) async fn op_end(&mut self, id: u64) -> Result<(), Error> {
         let id = OpId(id);
         self.until("the operation to end", |ev| match ev {
-            ServiceEvent::FileOpDone { id: i, .. } if *i == id => Some(Ok(())),
-            ServiceEvent::FileOpFailed { id: i, error, .. } if *i == id => Some(Err(error.clone())),
+            ServiceEvent::FileOp(FileOpEvent::Done { id: i, .. }) if *i == id => Some(Ok(())),
+            ServiceEvent::FileOp(FileOpEvent::Failed { id: i, error, .. }) if *i == id => Some(Err(error.clone())),
             _ => None,
         })
         .await
@@ -342,7 +379,7 @@ async fn file_ops_run_on_the_session_and_list_the_folder_on_screen_again() {
     let mark = fx.seen.len();
     fx.op(7, FileOp::Delete { paths: vec![start.join("tree"), start.join("new")] });
     assert_eq!(fx.op_end(7).await, Ok(()));
-    assert!(fx.saw_since(mark, |ev| matches!(ev, ServiceEvent::FileOpProgress { id: OpId(7), .. })));
+    assert!(fx.saw_since(mark, |ev| matches!(ev, ServiceEvent::FileOp(FileOpEvent::Progress { id: OpId(7), .. }))));
     assert_eq!(fx.listing(&start).await, [".hidden", "b.txt", "sub"]);
     assert!(fx.local("sub/keep.txt").is_file());
 
@@ -366,7 +403,7 @@ async fn file_ops_run_on_the_session_and_list_the_folder_on_screen_again() {
     fx.op(10, FileOp::Delete { paths: vec![start.join("d2"), start.join("missing")] });
     let order = fx
         .until("the first delete to end", |ev| match ev {
-            ServiceEvent::FileOpDone { id, .. } | ServiceEvent::FileOpFailed { id, .. } => Some(*id),
+            ServiceEvent::FileOp(FileOpEvent::Done { id, .. } | FileOpEvent::Failed { id, .. }) => Some(*id),
             _ => None,
         })
         .await;
@@ -396,8 +433,10 @@ async fn a_connection_dropped_mid_delete_fails_it_with_connection_lost() {
     let start = fx.sign_in().await;
     fx.op(1, FileOp::Delete { paths: vec![start.join("big")] });
     // Once removing has begun, the network drops.
-    fx.until("removal progress", |ev| matches!(ev, ServiceEvent::FileOpProgress { total: Some(_), .. }).then_some(()))
-        .await;
+    fx.until("removal progress", |ev| {
+        matches!(ev, ServiceEvent::FileOp(FileOpEvent::Progress { total: Some(_), .. })).then_some(())
+    })
+    .await;
     // (Here the whole delete takes about a second; the drop ends it within ~0.1 s.)
     std::fs::write(fx.dir.path().join("drop"), "").unwrap();
     assert_eq!(fx.op_end(1).await, Err(Error::ConnectionLost));

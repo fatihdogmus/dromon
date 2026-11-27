@@ -7,7 +7,7 @@ use dromon_core::{ConnStatus, Entry, EntryKind, HostId, RemotePath};
 
 use super::*;
 use crate::fixture;
-use crate::state::{Action, App, FileAction, Recorder, Shortcut};
+use crate::state::{Action, App, FileAction, Recorder, ServiceEvent, Shortcut};
 
 fn prod() -> HostId {
     HostId("prod".into())
@@ -31,7 +31,7 @@ fn recorded() -> (App, Recorder) {
 }
 
 fn searches_sent(rec: &Recorder) -> Vec<Command> {
-    rec.sent().into_iter().filter(|c| matches!(c, Command::Search { .. } | Command::CancelSearch { .. })).collect()
+    rec.sent().into_iter().filter(|c| matches!(c, Command::Search(_))).collect()
 }
 
 fn act(s: &mut App, a: SearchAction) -> Vec<Effect> {
@@ -69,7 +69,7 @@ fn sent_id(rec: &Recorder) -> SearchId {
     rec.sent()
         .iter()
         .rev()
-        .find_map(|c| if let Command::Search { id, .. } = c { Some(*id) } else { None })
+        .find_map(|c| if let Command::Search(SearchCommand::Start { id, .. }) = c { Some(*id) } else { None })
         .expect("a search was sent")
 }
 
@@ -173,7 +173,13 @@ fn typing_in_subfolders_searches_the_folder_on_screen_once_typing_pauses() {
     let id = sent_id(&rec);
     assert_eq!(
         searches_sent(&rec),
-        [Command::Search { id, host: prod(), root: site(), query: "log".into(), show_hidden: true }]
+        [Command::Search(SearchCommand::Start {
+            id,
+            host: prod(),
+            root: site(),
+            query: "log".into(),
+            show_hidden: true
+        })]
     );
     assert_eq!(id.0 >> 32, u64::from(s.window.0), "ids are the window's");
     assert!(s.results().is_some());
@@ -223,7 +229,7 @@ fn switching_the_scope_searches_at_once_and_switching_back_filters_the_folder_ag
     assert_eq!(searches_sent(&rec).len(), 1, "no wait: the text was there");
     assert_eq!(s.conn().unwrap().filter, Filter::On(String::new()));
     act(&mut s, SearchAction::Scope(Scope::Folder));
-    assert_eq!(searches_sent(&rec).last(), Some(&Command::CancelSearch { id, host: prod() }));
+    assert_eq!(searches_sent(&rec).last(), Some(&Command::Search(SearchCommand::Cancel { id, host: prod() })));
     assert!(s.results().is_none());
     assert_eq!(s.conn().unwrap().filter, Filter::On("index".into()), "This folder filters by the text again");
 }
@@ -233,12 +239,13 @@ fn running() -> (App, Recorder, SearchId) {
     let (mut s, rec) = recorded();
     searched(&mut s, "log");
     let id = sent_id(&rec);
-    s.apply(ServiceEvent::SearchFound { id, host: prod(), entries: vec![found(".", "server.log")], folders: 1 });
+    let entries = vec![found(".", "server.log")];
+    s.apply(ServiceEvent::Search(SearchEvent::Found { id, host: prod(), entries, folders: 1 }));
     (s, rec, id)
 }
 
 fn cancelled(rec: &Recorder, id: SearchId) -> bool {
-    searches_sent(rec).last() == Some(&Command::CancelSearch { id, host: prod() })
+    searches_sent(rec).last() == Some(&Command::Search(SearchCommand::Cancel { id, host: prod() }))
 }
 
 #[test]
@@ -292,9 +299,9 @@ fn a_disconnect_ends_the_search() {
 #[test]
 fn a_search_that_already_ended_isnt_cancelled() {
     let (mut s, rec, id) = running();
-    s.apply(ServiceEvent::SearchDone { id, host: prod(), folders: 3, unreadable: 0, capped: false });
+    s.apply(ServiceEvent::Search(SearchEvent::Done { id, host: prod(), folders: 3, unreadable: 0, capped: false }));
     s.act(Action::Escape);
-    assert!(!searches_sent(&rec).iter().any(|c| matches!(c, Command::CancelSearch { .. })));
+    assert!(!searches_sent(&rec).iter().any(|c| matches!(c, Command::Search(SearchCommand::Cancel { .. }))));
 }
 
 #[test]
@@ -338,7 +345,7 @@ fn results_take_the_lists_keys_menus_and_downloads_but_not_its_changes() {
     searched(&mut s, "log");
     let id = sent_id(&rec);
     let entries = vec![found(".", "server.log"), found("logs/2026", "jan.log"), found("logs", "old.log")];
-    s.apply(ServiceEvent::SearchFound { id, host: prod(), entries, folders: 3 });
+    s.apply(ServiceEvent::Search(SearchEvent::Found { id, host: prod(), entries, folders: 3 }));
     s.act(Action::Move { delta: 1, extend: false });
     s.act(Action::Move { delta: 1, extend: true });
     assert_eq!(s.ui.search.selection.len(), 2);

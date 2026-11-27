@@ -4,20 +4,41 @@
 //! off, a hidden entry is neither matched nor walked into, as the list shows it. The fixture
 //! backend searches its trees with the same [`Matches`].
 
+use std::collections::HashMap;
 use std::ops::ControlFlow;
 
 use dromon_core::{Entry, EntryKind, Error, HostId, RemotePath};
 use dromon_sftp::Sftp;
 
 use super::Sink;
+use super::conn::{ConnCmd, ConnHandle};
 use super::sizes::{Visit, Walks, walk};
 use crate::state::search::{CAP, Matcher};
-use crate::state::{Found, SearchId, ServiceEvent, WindowId};
+use crate::state::{Found, SearchCommand, SearchEvent, SearchId, ServiceEvent, WindowId};
 
 /// What the manager asks of a host's searches.
 pub enum SearchCmd {
     Start { id: SearchId, root: RemotePath, query: String, show_hidden: bool },
     Cancel(SearchId),
+}
+
+/// A search command from window `from`: the host's task searches, or stops the search; a host
+/// without one isn't connected, and the search fails at once.
+pub(super) fn route<S: Sink>(from: WindowId, cmd: SearchCommand, conns: &HashMap<HostId, ConnHandle>, sink: &S) {
+    let send = |host: &HostId, cmd: SearchCmd| {
+        conns.get(host).is_some_and(|c| c.cmds.send(ConnCmd::Search(from, cmd)).is_ok())
+    };
+    match cmd {
+        SearchCommand::Start { id, host, root, query, show_hidden } => {
+            if !send(&host, SearchCmd::Start { id, root, query, show_hidden }) {
+                let ev = SearchEvent::Failed { id, host, error: Error::ConnectionLost };
+                sink.emit_to(from, ServiceEvent::Search(ev));
+            }
+        }
+        SearchCommand::Cancel { id, host } => {
+            send(&host, SearchCmd::Cancel(id));
+        }
+    }
 }
 
 /// A search's visit: what it found since the last batch, and how far it got.
@@ -59,16 +80,12 @@ impl<F: FnMut(Vec<Found>, u64)> Matches<F> {
     /// The event that ends the search `id`: its last batch has gone out.
     pub fn end(mut self, id: SearchId, host: HostId, walked: Result<(), Error>) -> ServiceEvent {
         self.flush();
-        match walked {
-            Ok(()) => ServiceEvent::SearchDone {
-                id,
-                host,
-                folders: self.folders,
-                unreadable: self.unreadable,
-                capped: self.capped,
-            },
-            Err(error) => ServiceEvent::SearchFailed { id, host, error },
-        }
+        ServiceEvent::Search(match walked {
+            Ok(()) => {
+                SearchEvent::Done { id, host, folders: self.folders, unreadable: self.unreadable, capped: self.capped }
+            }
+            Err(error) => SearchEvent::Failed { id, host, error },
+        })
     }
 }
 
@@ -117,16 +134,16 @@ impl Walks<SearchId> {
         match cmd {
             SearchCmd::Start { id, root, query, show_hidden } => {
                 let Some(sftp) = sftp else {
-                    let ev = ServiceEvent::SearchFailed { id, host: host.clone(), error: Error::ConnectionLost };
-                    return sink.emit_to(window, ev);
+                    let ev = SearchEvent::Failed { id, host: host.clone(), error: Error::ConnectionLost };
+                    return sink.emit_to(window, ServiceEvent::Search(ev));
                 };
                 let (host, sink) = (host.clone(), sink.clone());
                 self.start(id, async move {
                     let batches = sink.clone();
                     let to = host.clone();
                     let mut matches = Matches::new(&root, &query, show_hidden, move |entries, folders| {
-                        let ev = ServiceEvent::SearchFound { id, host: to.clone(), entries, folders };
-                        batches.emit_to(window, ev);
+                        let ev = SearchEvent::Found { id, host: to.clone(), entries, folders };
+                        batches.emit_to(window, ServiceEvent::Search(ev));
                     });
                     let walked = walk(&sftp, &root, &mut matches).await;
                     sink.emit_to(window, matches.end(id, host, walked));
@@ -190,7 +207,9 @@ mod tests {
         assert_eq!(m.listed(&root, many, &mut Vec::new()), ControlFlow::Break(()));
         assert!(m.capped);
         assert_eq!(m.batch.len(), CAP);
-        let ServiceEvent::SearchDone { capped, folders, .. } = m.end(SearchId(1), HostId("h".into()), Ok(())) else {
+        let ServiceEvent::Search(SearchEvent::Done { capped, folders, .. }) =
+            m.end(SearchId(1), HostId("h".into()), Ok(()))
+        else {
             panic!("a search that went through ends Done")
         };
         assert!(capped && folders == 1);

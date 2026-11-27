@@ -55,7 +55,8 @@ packaging/
 │               window), verify-dmg.sh
 ├─ windows/     build-exe.ps1 (dromon.exe, version resource and icon stamped), dromon.wxs
 │               (WiX v5 source), build-msi.ps1, verify-msi.ps1
-└─ signpath/    dromon-msi.xml (SignPath artifact configuration: exe-in-MSI, then the MSI)
+├─ signpath/    dromon-msi.xml (SignPath artifact configuration: exe-in-MSI, then the MSI)
+└─ update/      release-key.pub (the minisign key the app's updater trusts, built in)
 ```
 
 - `scripts/package-linux.sh` (`cargo package-linux`) builds the Linux binary, in an
@@ -66,6 +67,11 @@ packaging/
 - `dromon.desktop`'s `StartupWMClass` is the app id, `dromon` (`rune::set_app_id`).
 - The `verify-*` scripts check a package the way a user would (install, run, uninstall). CI's
   package jobs run them; the release workflow does not.
+- The updater relies on the identifiers below: the MSI's UpgradeCode makes `msiexec /i` of a new
+  release upgrade the installed one, and the macOS bundle id is part of the code requirement a
+  new app must meet. It also relies on the release's file names (`assemble.sh`) and on
+  `/usr/bin/dromon` and the package name `dromon` to tell a `.deb` or Arch install
+  ([security.md](security.md#decision-updates-install-only-what-the-release-key-signed)).
 
 ### Agent note
 

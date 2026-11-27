@@ -249,9 +249,9 @@ Adding a server or changing what the matrix runs.
 
 | Variant | Image | What differs |
 | --- | --- | --- |
-| `Trixie` (default, `fixture()`) | `Dockerfile` | OpenSSH 10, PAM: everything |
-| `Bullseye` | `bullseye/Dockerfile` | OpenSSH 8.4p1: posix-rename, no `limits` (32 KiB chunks), no `copy-data` (same-host copies stream); packages from a fixed snapshot.debian.org date |
-| `Alpine` | `alpine/Dockerfile`, `alpine/sshd_config` | musl OpenSSH, busybox tools, no PAM: `kbd` can't log in, no TOTP |
+| `Trixie` (default, `fixture()`) | `Dockerfile` | OpenSSH 10, PAM, `inotify-tools` (live updates): everything |
+| `Bullseye` | `bullseye/Dockerfile` | OpenSSH 8.4p1: posix-rename, no `limits` (32 KiB chunks), no `copy-data` (same-host copies stream), no `inotifywait` (polls only); packages from a fixed snapshot.debian.org date |
+| `Alpine` | `alpine/Dockerfile`, `alpine/sshd_config` | musl OpenSSH, busybox tools, no PAM: `kbd` can't log in, no TOTP, no `inotifywait` (polls only) |
 | `Toxic` | `Dockerfile` + `toxiproxy/` | trixie behind toxiproxy: added latency, a bandwidth cap, replies sliced into small pieces (`toxiproxy::BASE_TOXICS`) |
 
 - `fixture_of(Variant, test)` starts one server per variant and test process on first use.
@@ -266,6 +266,10 @@ Adding a server or changing what the matrix runs.
   that changes them uses `matrix::run_exclusive`, since toxics apply to every live connection.
 - The 100k-entry folder is made on the server in the matrix run only (`Outcome::matrix_only()`)
   and deleted again.
+- Only the trixie image installs `inotify-tools`, so the matrix sees both sides of live updates
+  (`crates/dromon-app/tests/live_e2e.rs`): trixie and toxic go live, bullseye and alpine fall
+  back to polls. Tests ask the server (`command -v inotifywait` through `Fixture::exec`) rather
+  than assume it; the native backend's servers usually have none, and those checks skip.
 - CI: the `linux-matrix` job runs both `--test matrix` binaries with `DROMON_SERVER_MATRIX=1`.
 
 ### Agent note

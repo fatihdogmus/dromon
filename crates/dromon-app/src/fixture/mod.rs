@@ -28,6 +28,7 @@ mod hostbook;
 mod parse;
 mod preview;
 mod search;
+mod sizes;
 pub mod transfers;
 mod tree;
 mod windows;

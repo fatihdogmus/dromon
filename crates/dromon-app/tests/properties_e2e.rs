@@ -16,7 +16,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use dromon_app::service::{self, Config, Sink};
-use dromon_app::state::{Backend, Command, ServiceEvent, SizeId, SizeTotal};
+use dromon_app::state::{Backend, Command, ServiceEvent, SizeCommand, SizeEvent, SizeId, SizeTotal};
 use dromon_core::{ConnStatus, Entry, Error, HostId, RemotePath};
 use dromon_testkit::{Fixture, NULL_DEVICE, Role, copy_private_key};
 
@@ -116,15 +116,15 @@ impl Harness {
     /// Calculate on `path`: how the walk ended, and the progress it reported before.
     fn folder_size(&mut self, id: u64, path: &RemotePath) -> (Result<SizeTotal, (SizeTotal, Error)>, Vec<SizeTotal>) {
         let id = SizeId(id);
-        self.backend.send(Command::FolderSize { id, host: host(), path: path.clone() });
+        self.backend.send(Command::FolderSize(SizeCommand::Start { id, host: host(), path: path.clone() }));
         let mut progress = Vec::new();
         let end = self.wait_for("the walk to end", |ev| match ev {
-            ServiceEvent::FolderSizeProgress { id: i, total, .. } if *i == id => {
+            ServiceEvent::FolderSize(SizeEvent::Progress { id: i, total, .. }) if *i == id => {
                 progress.push(*total);
                 None
             }
-            ServiceEvent::FolderSizeDone { id: i, total, .. } if *i == id => Some(Ok(*total)),
-            ServiceEvent::FolderSizeFailed { id: i, total, error, .. } if *i == id => {
+            ServiceEvent::FolderSize(SizeEvent::Done { id: i, total, .. }) if *i == id => Some(Ok(*total)),
+            ServiceEvent::FolderSize(SizeEvent::Failed { id: i, total, error, .. }) if *i == id => {
                 Some(Err((*total, error.clone())))
             }
             _ => None,

@@ -134,14 +134,7 @@ impl Shared {
                 // A folder size is the asking window's sheet's alone, a search its list's and a
                 // preview its panel's,
                 // as the service sends them.
-                ServiceEvent::FolderSizeProgress { .. }
-                | ServiceEvent::FolderSizeDone { .. }
-                | ServiceEvent::FolderSizeFailed { .. }
-                | ServiceEvent::SearchFound { .. }
-                | ServiceEvent::SearchDone { .. }
-                | ServiceEvent::SearchFailed { .. }
-                | ServiceEvent::Preview { .. }
-                | ServiceEvent::PreviewFailed { .. } => to(self, from, ev),
+                ServiceEvent::FolderSize(_) | ServiceEvent::Preview(_) | ServiceEvent::Search(_) => to(self, from, ev),
                 _ => {
                     if let ServiceEvent::Status {
                         host,

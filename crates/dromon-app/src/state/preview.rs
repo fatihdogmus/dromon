@@ -38,9 +38,13 @@ use std::sync::Arc;
 use dromon_core::{ConnStatus, Entry, EntryKind, Error, HostId, LinkTarget, RemotePath};
 use rune::{Image, ImageCache};
 
-use super::service::{Command, PreviewBytes, PreviewId, PreviewRange, ServiceEvent};
+use super::service::Command;
 use super::transfers::Stepped;
 use super::{Action, App, Effect, Shortcut};
+
+#[path = "preview_read.rs"]
+mod read;
+pub use read::{PreviewBytes, PreviewCommand, PreviewEvent, PreviewId, PreviewRange, trace_line};
 
 #[cfg(test)]
 #[path = "preview_tests.rs"]
@@ -715,8 +719,10 @@ impl App {
     fn preview_step(&mut self, ev: Event) {
         for fx in step(&mut self.ui.preview.phase, ev) {
             match fx {
-                Fx::Read { id, host, path, range } => self.send(Command::Preview { id, host, path, range }),
-                Fx::Cancel { id, host } => self.send(Command::CancelPreview { id, host }),
+                Fx::Read { id, host, path, range } => {
+                    self.send(Command::Preview(PreviewCommand::Start { id, host, path, range }));
+                }
+                Fx::Cancel { id, host } => self.send(Command::Preview(PreviewCommand::Cancel { id, host })),
                 Fx::Keep(target, body) => self.ui.preview.keep(target, body),
             }
         }
@@ -724,11 +730,10 @@ impl App {
     }
 
     /// A preview read's answer from the service.
-    pub(super) fn preview_event(&mut self, ev: ServiceEvent) {
+    pub(super) fn preview_event(&mut self, ev: PreviewEvent) {
         let (host, ev) = match ev {
-            ServiceEvent::Preview { id, host, bytes, total } => (host, Event::Read { id, bytes, total }),
-            ServiceEvent::PreviewFailed { id, host, error } => (host, Event::Failed { id, error }),
-            _ => return,
+            PreviewEvent::Done { id, host, bytes, total } => (host, Event::Read { id, bytes, total }),
+            PreviewEvent::Failed { id, host, error } => (host, Event::Failed { id, error }),
         };
         if self.ui.preview.phase.target().is_some_and(|t| t.host == host) {
             self.preview_step(ev);

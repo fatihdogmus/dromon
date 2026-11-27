@@ -17,7 +17,8 @@ use dromon_sftp::Sftp;
 use tokio::task::JoinHandle;
 
 use super::Sink;
-use crate::state::{PreviewBytes, PreviewId, PreviewRange, ServiceEvent, WindowId};
+use super::conn::{ConnCmd, ConnHandle};
+use crate::state::{PreviewBytes, PreviewCommand, PreviewEvent, PreviewId, PreviewRange, ServiceEvent, WindowId};
 
 /// Read requests a preview keeps in flight at once.
 pub const IN_FLIGHT: usize = 16;
@@ -26,6 +27,25 @@ pub const IN_FLIGHT: usize = 16;
 pub enum PreviewCmd {
     Start { id: PreviewId, path: RemotePath, range: PreviewRange },
     Cancel(PreviewId),
+}
+
+/// A preview command from window `from`: the host's task reads, or stops the read; a host
+/// without one isn't connected, and the read fails at once.
+pub(super) fn route<S: Sink>(from: WindowId, cmd: PreviewCommand, conns: &HashMap<HostId, ConnHandle>, sink: &S) {
+    let send = |host: &HostId, cmd: PreviewCmd| {
+        conns.get(host).is_some_and(|c| c.cmds.send(ConnCmd::Preview(from, cmd)).is_ok())
+    };
+    match cmd {
+        PreviewCommand::Start { id, host, path, range } => {
+            if !send(&host, PreviewCmd::Start { id, path, range }) {
+                let ev = PreviewEvent::Failed { id, host, error: Error::ConnectionLost };
+                sink.emit_to(from, ServiceEvent::Preview(ev));
+            }
+        }
+        PreviewCommand::Cancel { id, host } => {
+            send(&host, PreviewCmd::Cancel(id));
+        }
+    }
 }
 
 /// The preview reads running on one connection, by id.
@@ -50,18 +70,16 @@ impl Reads {
         match cmd {
             PreviewCmd::Start { id, path, range } => {
                 let Some(sftp) = sftp else {
-                    let ev = ServiceEvent::PreviewFailed { id, host: host.clone(), error: Error::ConnectionLost };
-                    return sink.emit_to(window, ev);
+                    let ev = PreviewEvent::Failed { id, host: host.clone(), error: Error::ConnectionLost };
+                    return sink.emit_to(window, ServiceEvent::Preview(ev));
                 };
                 let (host, sink) = (host.clone(), sink.clone());
                 let read = tokio::spawn(async move {
                     let ev = match read(&sftp, &path, range).await {
-                        Ok((bytes, total)) => {
-                            ServiceEvent::Preview { id, host, bytes: PreviewBytes(bytes.into()), total }
-                        }
-                        Err(error) => ServiceEvent::PreviewFailed { id, host, error },
+                        Ok((bytes, total)) => PreviewEvent::Done { id, host, bytes: PreviewBytes(bytes.into()), total },
+                        Err(error) => PreviewEvent::Failed { id, host, error },
                     };
-                    sink.emit_to(window, ev);
+                    sink.emit_to(window, ServiceEvent::Preview(ev));
                 });
                 if let Some(old) = self.running.insert(id, read) {
                     old.abort();

@@ -13,11 +13,29 @@
 
 use dromon_core::{Entry, Error, RemotePath};
 
-use crate::state::PreviewRange;
+use super::backend::Core;
 use crate::state::preview::{Plan, plan};
+use crate::state::{PreviewBytes, PreviewCommand, PreviewEvent, PreviewRange, ServiceEvent};
 
 /// The length of a generated text line, its line break included.
 pub const LINE: u64 = 64;
+
+impl Core {
+    /// A preview command from window `Core::from`: read at once from what this module makes up,
+    /// so there's never a read to cancel.
+    pub(super) fn preview(&mut self, cmd: PreviewCommand, out: &mut Vec<ServiceEvent>) {
+        let PreviewCommand::Start { id, host, path, range } = cmd else { return };
+        let read = if self.up(&host) {
+            read(self.transfers.tree.entry_at(&host, &path), &path, range)
+        } else {
+            Err(Error::ConnectionLost)
+        };
+        out.push(ServiceEvent::Preview(match read {
+            Ok((bytes, total)) => PreviewEvent::Done { id, host, bytes: PreviewBytes(bytes.into()), total },
+            Err(error) => PreviewEvent::Failed { id, host, error },
+        }));
+    }
+}
 
 /// Reads `range` of the file `entry` at `path` lists (`None`: there's none): its bytes, and its
 /// size.

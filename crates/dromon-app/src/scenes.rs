@@ -12,8 +12,8 @@ use rune::TextEdit;
 use crate::fixture;
 use crate::state::log::LogBuffer;
 use crate::state::{
-    Action, App, DropTarget, Effect, FileAction, HostAction, MenuKind, PaletteAction, RowTarget, SearchAction,
-    ServiceEvent, Silent, Tab,
+    Action, App, DropTarget, Effect, FileAction, FileOpEvent, HostAction, Live, MenuKind, PaletteAction, RowTarget,
+    SearchAction, ServiceEvent, Silent, Tab,
 };
 use crate::theme::Appearance;
 
@@ -21,6 +21,8 @@ use crate::theme::Appearance;
 mod preview;
 #[path = "scenes_settings.rs"]
 mod settings;
+#[path = "scenes_update.rs"]
+mod update;
 
 /// The demo's big folder: 10,000 photos.
 pub const BIG_FOLDER: &str = "/srv/media/photos";
@@ -54,6 +56,13 @@ pub fn listing(s: &mut App) {
     act(s, Action::SelectHost(HostId("nas".into())));
     act(s, Action::SelectHost(prod()));
     act(s, Action::Click { name: "index.html".into(), extend: false, toggle: false });
+}
+
+/// The listing watched live: "Live" before the connection in the status bar.
+pub fn live(s: &mut App) {
+    listing(s);
+    let live = Live::On(RemotePath::new("/var/www/site"));
+    s.apply(ServiceEvent::Live { host: prod(), live });
 }
 
 pub fn listing_sorted_size(s: &mut App) {
@@ -387,7 +396,7 @@ pub fn delete_progress(s: &mut App) {
     s.backend = Box::new(Silent::default());
     deleting(s, &["releases", "node_modules", "backup-2026-11-01.tar.gz"]);
     let id = deleting(s, &["assets"]);
-    s.apply(ServiceEvent::FileOpProgress { id, host: prod(), done: 1204, total: Some(5005) });
+    s.apply(ServiceEvent::FileOp(FileOpEvent::Progress { id, host: prod(), done: 1204, total: Some(5005) }));
 }
 
 /// A delete that stopped: its toast stays with the reason and a dismiss button.
@@ -396,7 +405,7 @@ pub fn delete_failed(s: &mut App) {
     s.backend = Box::new(Silent::default());
     let id = deleting(s, &["uploads"]);
     let error = dromon_core::Error::PermissionDenied(RemotePath::new("/var/www/site/uploads/2026"));
-    s.apply(ServiceEvent::FileOpFailed { id, host: prod(), error });
+    s.apply(ServiceEvent::FileOp(FileOpEvent::Failed { id, host: prod(), error }));
 }
 
 /// index.html and robots.txt cut (⌘X): dimmed until they're pasted.
@@ -679,6 +688,7 @@ pub const SCENES: &[Scene] = &[
     ("welcome", welcome),
     ("connecting", connecting),
     ("listing", listing),
+    ("live", live),
     ("listing-sorted-size", listing_sorted_size),
     ("big-folder", big_folder),
     ("empty-folder", empty_folder),
@@ -742,4 +752,7 @@ pub const SCENES: &[Scene] = &[
     ("settings", settings::settings),
     ("settings-light", settings::settings_light),
     ("settings-transfers", settings::settings_transfers),
+    ("settings-general", update::settings_general),
+    ("update-toast", update::update_toast),
+    ("update-confirm", update::update_confirm),
 ];
