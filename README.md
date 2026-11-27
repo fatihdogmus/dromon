@@ -134,7 +134,7 @@ Linux needs `libxkbcommon-dev` and `libwayland-dev`. Want to look around without
 
 **Signing in.** Host-key checks, passwords, key passphrases, keyboard-interactive 2FA and jump hosts, all in native sheets. Each host has a connection log with a *Verbose logging* switch for the day something goes wrong.
 
-**Files.** Browse, sort, filter, new folder, rename, delete, copy path. Copy, cut and paste work across hosts and windows, and you can drag rows onto a folder, a breadcrumb or another host. Right-click for everything else.
+**Files.** Browse, sort, filter, new folder, rename, delete, copy path. Copy, cut and paste work across hosts and windows, and you can drag rows onto a folder, a breadcrumb or another host. *Open in Terminal* opens your own terminal app already ssh'd into the folder (pick the app under Settings → General). Right-click for everything else.
 
 **Transfers.** Downloads and uploads of files and whole folders, with resume, Chrome-style `name (1)` renaming or a Replace / Keep both / Skip choice on clashes. Progress in the toolbar, a badge in the Dock or taskbar, and a notification when a long job finishes while you're elsewhere.
 
@@ -152,6 +152,7 @@ Linux needs `libxkbcommon-dev` and `libwayland-dev`. Want to look around without
   <tr><td><kbd>⌘1</kbd>…<kbd>⌘9</kbd></td><td>Switch host</td><td><kbd>⌘⌫</kbd></td><td>Delete</td></tr>
   <tr><td><kbd>⌘⇧K</kbd></td><td>Quick connect</td><td><kbd>⌘⇧J</kbd></td><td>Show transfers</td></tr>
   <tr><td><kbd>⌘⇧.</kbd></td><td>Show hidden files</td><td><kbd>⌘N</kbd> · <kbd>⌘,</kbd></td><td>New window · Settings</td></tr>
+  <tr><td><kbd>⌘⇧T</kbd></td><td>Open in Terminal: your terminal app, signed in, in this folder</td><td></td><td></td></tr>
 </table>
 
 On Windows and Linux, <kbd>Ctrl</kbd> takes the place of <kbd>⌘</kbd>; Delete deletes and <kbd>F5</kbd> refreshes. Or just start typing a file's name to jump to it.
