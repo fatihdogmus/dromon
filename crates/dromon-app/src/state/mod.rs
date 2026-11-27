@@ -461,6 +461,7 @@ impl App {
                 // Every window sees every snapshot; the badge and notifications come from the
                 // leading one alone (`state/windows.rs`).
                 self.transfers.watch.lead(self.leads());
+                self.log_failures(&jobs);
                 // A folder on screen that a job just finished changing is listed again (until
                 // polling, §4.5, the only way to see what a paste, move or upload made).
                 for (host, path) in self.transfers.set(jobs) {

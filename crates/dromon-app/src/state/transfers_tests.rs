@@ -362,6 +362,54 @@ fn the_folder_on_screen_is_listed_again_when_a_job_changing_it_ends() {
     assert_eq!(lists(&rec), 2);
 }
 
+/// The connection log's lines about failed transfers on `host`.
+fn failures(s: &App, host: &HostId) -> Vec<String> {
+    s.conns[host].log.iter().map(|l| l.text.clone()).filter(|t| t.contains(" failed: ")).collect()
+}
+
+#[test]
+fn each_failed_file_goes_into_its_hosts_connection_log_once() {
+    let (mut s, _rec) = connected();
+    s.wall_ms = || 1_795_615_200_123;
+    let failing = |id, kind, errors: &[&str]| JobView {
+        errors: errors.iter().map(|e| (*e).to_owned()).collect(),
+        ..job(id, kind, TaskState::Failed { error: "1 file failed".into() }, 0, 1)
+    };
+    let denied = "key.pem: You don't have permission to write in /home/u/.gradle";
+    let upload = |errors: &[&str]| failing(1, JobKind::Upload, errors);
+    s.apply(ServiceEvent::Transfers(vec![upload(&[denied])]));
+    s.apply(ServiceEvent::Transfers(vec![upload(&[denied])]));
+    assert_eq!(failures(&s, &prod()), [format!("Upload failed: {denied}")], "once, though the snapshot came again");
+    assert_eq!(s.conns[&prod()].log.iter().last().unwrap().at_ms, 1_795_615_200_123, "stamped as the log's lines");
+
+    // Another file of the job fails: one more line.
+    s.apply(ServiceEvent::Transfers(vec![upload(&[denied, "b.txt: gone"])]));
+    assert_eq!(failures(&s, &prod()).len(), 2);
+    assert_eq!(failures(&s, &prod())[1], "Upload failed: b.txt: gone");
+    // Retried here, and both fail again before a snapshot showed them cleared: new lines.
+    s.act(Action::Transfer(TransferCommand::Retry(JobId(1))));
+    s.apply(ServiceEvent::Transfers(vec![upload(&[denied, "b.txt: gone"])]));
+    assert_eq!(failures(&s, &prod()).len(), 4);
+    // Retried elsewhere: the queue clears them, and what fails then is new.
+    s.apply(ServiceEvent::Transfers(vec![job(1, JobKind::Upload, TaskState::Running, 0, 1)]));
+    s.apply(ServiceEvent::Transfers(vec![upload(&[denied])]));
+    assert_eq!(failures(&s, &prod()).len(), 5);
+
+    // Each kind says what failed; a cross-host job logs on its row's host, the destination.
+    s.apply(ServiceEvent::Transfers(vec![
+        upload(&[denied]),
+        failing(2, JobKind::Download, &["db.sql: gone"]),
+        failing(3, JobKind::RemoteCopy, &["a: gone"]),
+        failing(4, JobKind::CrossHostMove, &["b: gone"]),
+        JobView { host: HostId("nas".into()), ..failing(5, JobKind::Upload, &["c: gone"]) },
+    ]));
+    assert_eq!(
+        failures(&s, &prod())[5..],
+        ["Download failed: db.sql: gone", "Copy failed: a: gone", "Move failed: b: gone"]
+    );
+    assert!(!s.conns.contains_key(&HostId("nas".into())), "a host not open in this window logs nothing");
+}
+
 #[test]
 fn changed_folders_are_the_destination_and_for_moves_the_sources() {
     let item = |p: &str| RemoteItem { path: RemotePath::new(p), kind: EntryKind::File, size: 1 };

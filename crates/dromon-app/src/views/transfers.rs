@@ -33,7 +33,7 @@ use super::{Paint, run};
 use crate::fmt;
 use crate::icons::{self, IconPair};
 use crate::service::RuneSink;
-use crate::state::transfers::{Bar, Dock, Flourish, Notice, OsEffect, PULSE, STARTED};
+use crate::state::transfers::{Bar, Dock, Flourish, Notice, OsEffect, PULSE, STARTED, failure_text};
 use crate::state::{Action, App, Tab, TransferCommand};
 use crate::theme::{motion, radius, size, space, type_};
 
@@ -384,7 +384,9 @@ pub fn status_line(j: &JobView) -> String {
         TaskState::Paused => "Paused".to_owned(),
         TaskState::Done if j.progress.total == 0 && j.files_total == 0 => "Done".to_owned(),
         TaskState::Done => format!("Done · {}", format_bytes(j.progress.total)),
-        TaskState::Failed { error } => format!("Failed: {error}"),
+        // "3 files failed: …" says it failed already.
+        TaskState::Failed { .. } if j.errors.len() > 1 => failure_text(j),
+        TaskState::Failed { .. } => format!("Failed: {}", failure_text(j)),
         TaskState::Cancelled => "Cancelled".to_owned(),
     };
     if j.state.is_finished() && !j.skipped.is_empty() {
