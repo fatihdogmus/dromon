@@ -127,6 +127,17 @@ fn each_kind_of_job_says_what_it_did_or_why_it_could_not() {
 }
 
 #[test]
+fn a_failure_says_why_as_its_row_does_not_how_many() {
+    let why = "You don't have permission to write in /home/u/.gradle";
+    let mut j = titled(JobKind::Upload, "key.pem", failed("1 file failed"));
+    j.errors = vec![format!("key.pem: {why}")];
+    assert_eq!(notice(&j).unwrap().line(), format!("Couldn't upload key.pem to prod: {why}"));
+    j.title = "photos".into();
+    j.errors = vec!["a.jpg: denied".into(), "b.jpg: gone".into()];
+    assert_eq!(notice(&j).unwrap().body, "2 files failed: a.jpg: denied");
+}
+
+#[test]
 fn only_a_long_job_ending_out_of_sight_is_worth_telling() {
     assert!(worth_telling(10_001, false));
     assert!(!worth_telling(10_000, false), "more than 10 s");

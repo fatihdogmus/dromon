@@ -47,6 +47,9 @@ pub enum Shortcut {
     Host(usize),
     /// ⌘⇧J: the transfers popover.
     ShowTransfers,
+    /// ⌘⇧T (Ctrl+Shift+T elsewhere): "Open in Terminal", in the cursor row if it's a folder,
+    /// else in the folder on screen.
+    OpenTerminal,
     /// ⌘, (Ctrl+, elsewhere): the Settings page.
     Settings,
     /// ⌘N (Ctrl+N elsewhere): another main window.
@@ -134,6 +137,9 @@ pub fn shortcut(ev: &KeyEvent, platform: KeyPlatform) -> Option<Shortcut> {
     }
     if (command(key, 'j') || command(key, 'J')) && m.shift && !m.alt {
         return Some(Shortcut::ShowTransfers);
+    }
+    if (command(key, 't') || command(key, 'T')) && m.shift && !m.alt {
+        return Some(Shortcut::OpenTerminal);
     }
     if !m.shift && !m.alt {
         if command(key, 'k') {
@@ -359,6 +365,25 @@ mod tests {
             // Plain digits and letters still type.
             assert_eq!(on(Key::Text("1".into()), NONE, p), Some(Shortcut::Type("1".into())));
             assert_eq!(on(Key::Text("l".into()), NONE, p), Some(Shortcut::Type("l".into())));
+        }
+    }
+
+    #[test]
+    fn open_in_terminal_is_cmd_shift_t_and_clashes_with_nothing() {
+        let ctrl = Mods { ctrl: true, logo: false, ..CMD };
+        let shift = |m: Mods| Mods { shift: true, ..m };
+        let alt = |m: Mods| Mods { alt: true, ..m };
+        for p in [KeyPlatform::Mac, KeyPlatform::Windows, KeyPlatform::Linux] {
+            let primary = if p == KeyPlatform::Mac { CMD } else { ctrl };
+            assert_eq!(on(Key::Command('t'), shift(primary), p), Some(Shortcut::OpenTerminal), "{p:?}");
+            assert_eq!(on(Key::Command('T'), shift(primary), p), Some(Shortcut::OpenTerminal), "{p:?}: Shift applied");
+            assert_eq!(on(Key::Command('t'), primary, p), None, "{p:?}: ⌘T alone is nothing");
+            assert_eq!(on(Key::Command('t'), alt(shift(primary)), p), None, "{p:?}: ⌥⌘⇧T is nothing");
+            assert_eq!(on(Key::Text("T".into()), SHIFT, p), Some(Shortcut::Type("T".into())), "{p:?}: Shift+T types");
+            // Its neighbours keep theirs.
+            assert_eq!(on(Key::Command('n'), shift(primary), p), Some(Shortcut::File(FileKey::NewFolder)));
+            assert_eq!(on(Key::Command('k'), shift(primary), p), Some(Shortcut::QuickConnect));
+            assert_eq!(on(Key::Command('j'), shift(primary), p), Some(Shortcut::ShowTransfers));
         }
     }
 

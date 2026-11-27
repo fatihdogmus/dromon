@@ -12,7 +12,7 @@
 //! runs) they stay in [`Os::held`] for a test to read, and nothing reaches the OS.
 //!
 //! Notification text never holds more than the popover shows: the job's title (an item's name
-//! or "3 items"), the host's alias and the engine's reason for a failure.
+//! or "3 items"), the host's alias and the reason for a failure (`failure_text`, as the row).
 
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -117,7 +117,7 @@ pub fn notice(j: &JobView) -> Option<Notice> {
             };
             (title, body)
         }
-        TaskState::Failed { error } => {
+        TaskState::Failed { .. } => {
             let title = match j.kind {
                 JobKind::Download => format!("Couldn't download {what}"),
                 JobKind::Upload => format!("Couldn't upload {what} to {host}"),
@@ -126,7 +126,7 @@ pub fn notice(j: &JobView) -> Option<Notice> {
                 JobKind::CrossHostCopy => format!("Couldn't copy {what} to {host}"),
                 JobKind::CrossHostMove => format!("Couldn't move {what} to {host}"),
             };
-            (title, error.clone())
+            (title, super::failure_text(j))
         }
         _ => return None,
     };

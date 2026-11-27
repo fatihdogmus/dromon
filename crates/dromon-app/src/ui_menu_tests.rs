@@ -63,6 +63,23 @@ fn items(rt: &Runtime<App>) -> Vec<String> {
         .collect()
 }
 
+/// A row's menu, by label.
+const ROW_ITEMS: [&str; 11] = [
+    "Open",
+    "Download",
+    "Open in Terminal",
+    "Copy",
+    "Cut",
+    "Paste",
+    "Copy path",
+    "New folder",
+    "Rename",
+    "Delete",
+    "Properties",
+];
+/// The empty area's.
+const EMPTY_ITEMS: [&str; 5] = ["New folder", "Paste", "Open in Terminal", "Refresh", "Show hidden files"];
+
 fn below_rows(rt: &Runtime<App>) -> (f32, f32) {
     let (x, y) = at(rt, "rows/server.log");
     (x, y + 80.0)
@@ -77,10 +94,7 @@ fn a_rows_menu_selects_it_and_lists_its_actions() {
     assert!(shown(&rt, "ctx-menu"));
     let c = rt.state.conn().unwrap();
     assert!(c.selection.contains("index.html") && !c.selection.contains("README.md"), "right-click selects the row");
-    assert_eq!(
-        items(&rt),
-        ["Open", "Download", "Copy", "Cut", "Paste", "Copy path", "New folder", "Rename", "Delete", "Properties"]
-    );
+    assert_eq!(items(&rt), ROW_ITEMS);
     // Paste without a clip is disabled: clicking it does nothing, and the menu stays.
     click(&mut rt, "ctx-paste");
     assert!(shown(&rt, "ctx-menu"));
@@ -123,7 +137,7 @@ fn the_empty_areas_menu_makes_a_folder_and_toggles_hidden_files() {
     let mut rt = runtime();
     let spot = below_rows(&rt);
     right_click(&mut rt, spot);
-    assert_eq!(items(&rt), ["New folder", "Paste", "Refresh", "Show hidden files"]);
+    assert_eq!(items(&rt), EMPTY_ITEMS);
     let check = rt.elements().into_iter().find(|e| e.key.as_deref() == Some("ctx-hidden")).map(|e| e.role);
     assert_eq!(check, Some("menuitemcheckbox"));
     click(&mut rt, "ctx-hidden");
@@ -169,6 +183,47 @@ fn while_reconnecting_the_server_changing_items_are_off() {
     assert!(!shown(&rt, "ctx-menu"), "copy path still works");
 }
 
+/// "Open in Terminal" in both menus and the palette: enabled while connected, picking it closes
+/// the menu (the terminal itself never starts in tests), off while reconnecting.
+#[test]
+fn open_in_terminal_is_in_both_menus_and_the_palette() {
+    let mut rt = runtime();
+    let at_row = at(&rt, "rows/assets");
+    right_click(&mut rt, at_row);
+    click(&mut rt, "ctx-terminal");
+    assert!(!shown(&rt, "ctx-menu"), "picked: the menu closes");
+    let spot = below_rows(&rt);
+    right_click(&mut rt, spot);
+    click(&mut rt, "ctx-terminal");
+    assert!(!shown(&rt, "ctx-menu"));
+    // The palette lists it with its chord.
+    let primary =
+        Mods { cmd: true, logo: cfg!(target_os = "macos"), ctrl: !cfg!(target_os = "macos"), ..Mods::default() };
+    press(&mut rt, Key::Command('k'), primary);
+    rt.update(|s, _| {
+        s.ui.palette.edit = rune::TextEdit::new("terminal");
+        s.act(Action::Palette(crate::state::PaletteAction::Edited));
+    });
+    settle(&mut rt);
+    assert!(shown(&rt, "pal-terminal"));
+    click(&mut rt, "pal-terminal");
+    assert!(!rt.state.ui.palette.is_open(), "running it closes the palette");
+    // ⌘⇧T opens it and moves nothing on screen.
+    let before = rt.state.conn().unwrap().selection.clone();
+    press(&mut rt, Key::Command('t'), Mods { shift: true, ..primary });
+    assert_eq!(rt.state.conn().unwrap().selection, before);
+    assert!(!shown(&rt, "ctx-menu") && !rt.state.ui.palette.is_open());
+    // Reconnecting: the item is there but does nothing.
+    rt.update(|s, _| s.apply(ServiceEvent::Status { host: prod(), status: ConnStatus::Reconnecting { attempt: 1 } }));
+    settle(&mut rt);
+    rt.update(|s, _| {
+        s.act(Action::File(crate::state::FileAction::OpenMenu { kind: MenuKind::Empty, at: Some((400.0, 300.0)) }));
+    });
+    settle(&mut rt);
+    click(&mut rt, "ctx-terminal");
+    assert!(shown(&rt, "ctx-menu"), "disabled while reconnecting");
+}
+
 const SHIFT: Mods = Mods { shift: true, cmd: false, alt: false, ctrl: false, logo: false };
 
 fn press(rt: &mut Runtime<App>, key: Key, mods: Mods) {
@@ -186,8 +241,7 @@ fn rect_of(rt: &Runtime<App>, key: &str) -> [f32; 4] {
 
 #[test]
 fn shift_f10_opens_the_cursor_rows_menu_at_the_row_and_the_menu_key_too() {
-    let row_items =
-        ["Open", "Download", "Copy", "Cut", "Paste", "Copy path", "New folder", "Rename", "Delete", "Properties"];
+    let row_items = ROW_ITEMS;
     for (key, mods) in [(Key::Function(10), SHIFT), (Key::ContextMenu, Mods::default())] {
         let mut rt = runtime();
         // A row near the top, so the whole menu fits below it (lower down it flips above).
@@ -215,7 +269,7 @@ fn shift_f10_without_a_cursor_row_opens_the_empty_areas_menu_and_never_over_a_fi
     settle(&mut rt);
     assert_eq!(rt.state.conn().unwrap().selection.cursor(), None);
     press(&mut rt, Key::Function(10), SHIFT);
-    assert_eq!(items(&rt), ["New folder", "Paste", "Refresh", "Show hidden files"]);
+    assert_eq!(items(&rt), EMPTY_ITEMS);
     let (list, menu) = (rect_of(&rt, "list"), rect_of(&rt, "ctx-menu"));
     assert!(
         (menu[0] - list[0]).abs() < 1.5 && (menu[1] - (list[1] + 2.0)).abs() < 1.5,
@@ -261,6 +315,7 @@ fn the_native_menu_has_the_same_items_and_shortcut_hints() {
         [
             "open",
             "download",
+            "terminal",
             "—",
             "copy",
             "cut",

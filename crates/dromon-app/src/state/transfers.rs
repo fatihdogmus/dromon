@@ -7,6 +7,7 @@
 //! with the toolbar ring's pulse ([`Flourishes`], stepped on the window's clock by the app's
 //! poll, `views::transfers::poll`). A download this window starts plays [`Started`] there too.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use dromon_core::{HostId, RemotePath};
@@ -58,6 +59,9 @@ pub struct Transfers {
     pub watch: Watch,
     /// Done flourishes playing, the toolbar ring's pulse and the download-started animation.
     pub flourish: Flourishes,
+    /// How many of each job's `errors` its host's connection log has already
+    /// ([`App::log_failures`]): snapshots repeat them.
+    logged: BTreeMap<JobId, usize>,
 }
 
 /// How long a finished job's bar takes to fill before it collapses into the check (the `move`
@@ -216,6 +220,29 @@ impl Flourishes {
     }
 }
 
+/// Why a failed job failed, as its row, the screen reader and the notification say it, from its
+/// files' errors ("name: why"): the one error (without the name when it's the job's own
+/// title), or how many failed and the first ("3 files failed: a.jpg: …"); the queue's own
+/// reason when it listed none. Empty for a job that didn't fail.
+pub fn failure_text(j: &JobView) -> String {
+    let TaskState::Failed { error } = &j.state else { return String::new() };
+    match j.errors.as_slice() {
+        [] => error.clone(),
+        [one] => one.strip_prefix(&format!("{}: ", j.title)).unwrap_or(one).to_owned(),
+        [first, ..] => format!("{} files failed: {first}", crate::fmt::thousands(j.errors.len() as u64)),
+    }
+}
+
+/// "Download", "Upload", "Copy", "Move": what a log line says failed.
+fn kind_word(kind: JobKind) -> &'static str {
+    match kind {
+        JobKind::Download => "Download",
+        JobKind::Upload => "Upload",
+        JobKind::RemoteCopy | JobKind::CrossHostCopy => "Copy",
+        JobKind::Move | JobKind::CrossHostMove => "Move",
+    }
+}
+
 /// Where a file drag would upload to.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DropTarget {
@@ -339,7 +366,14 @@ impl App {
                 }
             }
             Action::DropHover { target, over, count } => self.drop_hover(target, over, count),
-            Action::Transfer(cmd) => self.send(Command::Transfer(cmd)),
+            Action::Transfer(cmd) => {
+                // A retried file can fail again before any snapshot shows its error cleared:
+                // what comes after the retry is new.
+                if let TransferCommand::Retry(id) = &cmd {
+                    self.transfers.logged.remove(id);
+                }
+                self.send(Command::Transfer(cmd));
+            }
             Action::ResolveConflict(choice) => {
                 if let Some((job, _)) = self.transfers.conflict() {
                     let apply_all = std::mem::take(&mut self.transfers.apply_all);
@@ -356,6 +390,27 @@ impl App {
             },
             _ => {}
         }
+    }
+
+    /// Puts what failed in `jobs` since the last snapshot in the connection log of each job's
+    /// host, one line per file or item ("Upload failed: a.log: Permission denied"), stamped as
+    /// the log's other lines. A cross-host copy or move logs on its destination: the host its
+    /// row is listed under (`JobView::host`), where it writes, and so where it usually fails.
+    /// Snapshots repeat a job's errors: only those past the count already logged are new, and
+    /// the count starts over once the queue clears them (a retry) or this window retries it.
+    pub(super) fn log_failures(&mut self, jobs: &[JobView]) {
+        let at = (self.wall_ms)();
+        let mut logged = BTreeMap::new();
+        for j in jobs {
+            let before = self.transfers.logged.get(&j.id).copied().filter(|&n| n <= j.errors.len()).unwrap_or(0);
+            if let Some(c) = self.conns.get_mut(&j.host) {
+                for e in &j.errors[before..] {
+                    c.log.push(at, format!("{} failed: {e}", kind_word(j.kind)));
+                }
+            }
+            logged.insert(j.id, j.errors.len());
+        }
+        self.transfers.logged = logged;
     }
 
     /// A click on a transfer's notification: the popover opens on the job's tab (the app has

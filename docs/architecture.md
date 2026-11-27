@@ -109,8 +109,9 @@ only through the boundary in `state/service.rs`:
 ### Rules and examples
 
 - Nothing on the UI thread does file I/O or waits on the network. Files are read or written on
-  other threads: prefs by the `dromon-prefs` thread (`persist.rs`), "Show in Finder" on a
-  short-lived thread (`reveal.rs`), `hosts.conf` and ssh config on the service's blocking threads
+  other threads: prefs by the `dromon-prefs` thread (`persist.rs`), "Show in Finder" and "Open
+  in Terminal" on short-lived threads (`reveal.rs`, `terminal.rs`; the terminal's answer comes
+  back to its window through the window's `AppHandle`, `views::answer`), `hosts.conf` and ssh config on the service's blocking threads
   (`service/hostfiles.rs`).
 - Each connected host has one task (`service/conn.rs`) owning its ssh child, its SFTP session,
   its prompts and its lifecycle; everything about a host happens on that task, in order.
@@ -369,7 +370,7 @@ Finding the file for a change.
 | `scenes.rs`, `scenes_settings.rs` | Named states for `--scene`, the goldens and the audits. |
 | `windows.rs` | Rune windows: the main windows' `Fleet`, opening and placing them. |
 | `state/settings.rs`, `views/settings.rs` | Settings: the values, and their view. |
-| `fmt.rs`, `persist.rs`, `reveal.rs` | Number and date text, the prefs writer, "Show in Finder". |
+| `fmt.rs`, `persist.rs`, `reveal.rs`, `terminal.rs` | Number and date text, the prefs writer, "Show in Finder", "Open in Terminal" (finding and starting the user's terminal app). |
 | `ui_*_tests.rs` | Headless UI tests. See [testing.md](testing.md). |
 
 ### Agent note

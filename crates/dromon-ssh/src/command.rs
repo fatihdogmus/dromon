@@ -1,4 +1,5 @@
-//! The exact `ssh` command line for an SFTP session (plan §4.3 "Process launch").
+//! The exact `ssh` command line for an SFTP session (plan §4.3 "Process launch"), and for an
+//! interactive session in the user's terminal app ("Open in Terminal", [`SshCommand::terminal`]).
 
 use std::ffi::{OsStr, OsString};
 use std::fmt;
@@ -11,6 +12,25 @@ use crate::askpass::{ENDPOINT_ENV, TOKEN_ENV};
 /// Options every session gets, in order, before any per-host options.
 pub const BASE_ARGS: &[&str] = &[
     "-T",
+    "-x",
+    "-e",
+    "none",
+    "-o",
+    "BatchMode=no",
+    "-o",
+    "ServerAliveInterval=15",
+    "-o",
+    "ServerAliveCountMax=3",
+    "-o",
+    "ConnectTimeout=15",
+    "-o",
+    "ControlMaster=no",
+];
+
+/// Options an interactive session in a terminal app gets: [`BASE_ARGS`] with `-t` (a terminal
+/// on the server, for the shell) in place of `-T`.
+pub(crate) const TERMINAL_ARGS: &[&str] = &[
+    "-t",
     "-x",
     "-e",
     "none",
@@ -160,21 +180,46 @@ impl SshCommand {
         env: Vec<(OsString, OsString)>,
         verbose: bool,
     ) -> Result<Self, CommandError> {
-        check_arg("The host alias", &host.alias)?;
-        let mut args: Vec<OsString> = BASE_ARGS.iter().map(OsString::from).collect();
-        if matches!(host.source, HostSource::Saved | HostSource::Recent) {
-            for (keyword, value, percent) in host_options(host) {
-                if let Some(value) = value {
-                    args.push("-o".into());
-                    args.push(config_option(keyword, &value, percent)?.into());
-                }
-            }
-        }
+        let mut args = host_args(BASE_ARGS, host)?;
         if verbose {
             args.push("-v".into());
         }
         args.extend(["-s".into(), OsString::from(&host.alias), "sftp".into()]);
         Ok(SshCommand { program, args, env, env_remove: Vec::new() })
+    }
+
+    /// `ssh -t <base options> [host options] <alias> [cd -- '<folder>' && …]`: an interactive
+    /// login shell on the host, in `folder`, for the user's terminal app to run.
+    ///
+    /// The host options are [`SshCommand::sftp`]'s. There is no askpass environment: the
+    /// terminal's ssh asks for passwords, passphrases and codes itself, and Dromon never hands
+    /// over one it remembers. The remote command, which the server's shell parses, is
+    /// `cd -- '<folder>' && exec "$SHELL" -l || exec "$SHELL" -l`, the folder single-quoted
+    /// ([`quote`]): when the folder is gone or unreadable, the shell's own message shows and the
+    /// login shell still starts, in the home folder. Windows servers' shells aren't POSIX, so a
+    /// folder there (`/C:/…`) gets no remote command: the session opens in the home folder.
+    pub fn terminal(host: &HostSpec, folder: &str) -> Result<Self, CommandError> {
+        Self::terminal_with(ssh_program(), host, folder)
+    }
+
+    fn terminal_with(program: PathBuf, host: &HostSpec, folder: &str) -> Result<Self, CommandError> {
+        let mut args = host_args(TERMINAL_ARGS, host)?;
+        args.push(OsString::from(&host.alias));
+        if !is_drive_path(folder) {
+            let shell = r#"exec "$SHELL" -l"#;
+            args.push(format!("cd -- {} && {shell} || {shell}", quote(folder)).into());
+        }
+        Ok(SshCommand { program, args, env: Vec::new(), env_remove: Vec::new() })
+    }
+
+    /// The program and its arguments as one line for a POSIX shell, every word [`quote`]d: for
+    /// a terminal app that runs a shell script rather than an argument vector (the `.command`
+    /// file macOS's Terminal and iTerm2 open). The shell reads back exactly [`SshCommand::program`]
+    /// and [`SshCommand::args`].
+    pub fn shell_line(&self) -> String {
+        let program = self.program.as_os_str().to_string_lossy();
+        let words = std::iter::once(program).chain(self.args.iter().map(|a| a.to_string_lossy()));
+        words.map(|w| quote(&w)).collect::<Vec<_>>().join(" ")
     }
 
     /// Reads `path` as the only ssh config file: inserts `-F <path>` right after [`BASE_ARGS`].
@@ -207,6 +252,34 @@ pub(crate) fn host_options(host: &HostSpec) -> [(&'static str, Option<String>, P
         ("IdentityFile", host.identity_file.clone(), Percent::Escape),
         ("ProxyJump", host.proxy_jump.clone(), Percent::Literal),
     ]
+}
+
+/// `base`, then a saved or recent host's `-o` options ([`host_options`]); the alias checked.
+fn host_args(base: &[&str], host: &HostSpec) -> Result<Vec<OsString>, CommandError> {
+    check_arg("The host alias", &host.alias)?;
+    let mut args: Vec<OsString> = base.iter().map(OsString::from).collect();
+    if matches!(host.source, HostSource::Saved | HostSource::Recent) {
+        for (keyword, value, percent) in host_options(host) {
+            if let Some(value) = value {
+                args.push("-o".into());
+                args.push(config_option(keyword, &value, percent)?.into());
+            }
+        }
+    }
+    Ok(args)
+}
+
+/// `word` as one word for a POSIX shell: in single quotes, each `'` written `'\''`. Nothing
+/// inside single quotes is special to `sh` (`$`, backticks, `\`, `"`, line breaks, a leading
+/// `-` all stay as they are).
+pub(crate) fn quote(word: &str) -> String {
+    format!("'{}'", word.replace('\'', r"'\''"))
+}
+
+/// A Windows server's path as SFTP shows it: `/C:` or `/C:/…`.
+fn is_drive_path(path: &str) -> bool {
+    let b = path.as_bytes();
+    b.len() >= 3 && b[0] == b'/' && b[1].is_ascii_alphabetic() && b[2] == b':' && (b.len() == 3 || b[3] == b'/')
 }
 
 /// `Keyword=value`, escaped so ssh's config-line parser reads back exactly `value`.

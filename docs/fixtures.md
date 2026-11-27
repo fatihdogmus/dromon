@@ -298,7 +298,9 @@ with files copied in Finder or Explorer) run on the fixture through the real tra
 - An upload asks the server's tree whether its name exists. If it does, the conflict sheet asks:
   Replace, Keep both (a free name like `index (1).html`) or Skip, with "Apply to all". Each
   uploaded path counts as one file of 1,200,000 bytes (nothing on your disk is read; a folder is
-  one file too). An upload into a folder that doesn't exist fails with why. The sheet shows both
+  one file too). An upload into a folder that doesn't exist fails with why; so does an upload or
+  copy into a folder whose `mode` (in its parent's listing) has no owner write bit (`"0555"`):
+  "You don't have permission to write in …", as the real engine says it. The sheet shows both
   items' sizes and dates: the existing one from the tree, the upload as 1,200,000 bytes dated
   `now`; for a copy or move, the source entry's size and date.
 - Files are done the moment they start: jobs finish at once, so the ring never shows on its own.
@@ -337,7 +339,7 @@ answering a clash) and Clear finished removes the finished ones, but they never 
 | `title` | required | The row's name: `"report.pdf"`, `"photos"`, `"3 items"`. |
 | `state` | required | `"queued"`, `"preparing"`, `"running"`, `"paused"`, `"done"`, `"failed"` or `"cancelled"`. |
 | `found` | preparing | Files found so far ("Preparing… 1,204 files"). Default 0. |
-| `error` | failed, required | Why it failed ("Failed: …"). |
+| `error` | failed, required | The queue's summary ("1 file failed"); the row shows it ("Failed: …") only when `errors` is empty. |
 | `done`, `total` | optional | Bytes copied and in all (`done` at most `total`). Default 0: the ring and bars sum them. |
 | `files` | optional | `[done, total]` files. |
 | `speed` | optional | Bytes per second, shown while running ("8.1 MB/s"). |
@@ -345,7 +347,7 @@ answering a clash) and Clear finished removes the finished ones, but they never 
 | `waiting` | optional | `true`: paused because the connection is away ("Waiting for connection"). |
 | `conflict` | optional | `{"name", "folder", "dir"?, "more"?, "existing"?, "incoming"?}`: the job waits on a name clash (`dir`: the existing item is a folder; `more`: how many clashes follow, for "Apply to all N conflicts"; `existing` and `incoming`: `{"size"?, "mtime"?}` of the item already there and the one coming, a size in bytes and a date as an RFC 3339 string or epoch seconds, shown side by side on the sheet, the later date marked "newer"; a folder has no size; left out, the sheet shows a dash, and no block at all when both are). The conflict sheet asks about the oldest job with one. |
 | `reveal` | optional | Where a click on the finished row goes: a local path (downloads; the file manager is never opened from headless runs) or an absolute server path (uploads). |
-| `errors`, `skipped` | optional | Lines for the row's tooltip ("a.txt: Permission denied", "cache: a link to a folder"). |
+| `errors`, `skipped` | optional | What failed ("a.txt: Permission denied") and what was left out ("cache: a link to a folder"): the row's line says the first error ("Failed: …", "3 files failed: …"), its tooltip lists them all. |
 
 Ids are given in order, newest first, above any id the session's own jobs get.
 

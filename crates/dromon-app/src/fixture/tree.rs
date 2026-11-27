@@ -190,8 +190,14 @@ impl Tree {
         Ok(())
     }
 
-    /// A file of `size` bytes lands at `path` (replacing what was there).
+    /// A file of `size` bytes lands at `path` (replacing what was there). A folder whose mode
+    /// doesn't let its owner write (`"0555"`) refuses it as the real engine words it.
     pub fn put_file(&mut self, host: &HostId, path: &RemotePath, size: u64, mtime: Option<i64>) -> Result<(), Error> {
+        if let Some(dir) = path.parent()
+            && self.entry_at(host, &dir).and_then(|e| e.mode).is_some_and(|m| m & 0o200 == 0)
+        {
+            return Err(dromon_transfer::io::cant_write_in(&dir));
+        }
         let kind = EntryKind::File;
         self.place(
             host,

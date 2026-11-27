@@ -4,11 +4,18 @@
 //! showing them: a native menu where Rune has one (macOS, Windows), a drawn one elsewhere
 //! (`views/menu.rs`). Items that would change the server are disabled while the host isn't
 //! connected; Paste also needs a clip.
+//!
+//! "Open in Terminal" is in both (and in the palette, and ⌘⇧T): the user's terminal app, signed
+//! in over its own ssh, in a folder row's folder, else in the folder on screen. The state only
+//! says what to open ([`Effect::OpenTerminal`]); `crate::terminal` starts it off the UI thread.
 
 use dromon_core::HostId;
 
 use super::files::FileAction;
-use super::{Action, App};
+use super::{Action, App, Effect};
+
+/// "Open in Terminal"'s chord: ⌘⇧T (Ctrl+Shift+T elsewhere).
+pub const TERMINAL_CHORD: &str = "mod+shift+t";
 
 #[cfg(test)]
 #[path = "menu_tests.rs"]
@@ -89,6 +96,8 @@ impl App {
                 vec![
                     item("open", "Open", live, None),
                     item("download", "Download", live, Some("mod+d")),
+                    // A folder row's folder; a file's is the folder on screen.
+                    item("terminal", "Open in Terminal", live, Some(TERMINAL_CHORD)),
                     MenuEntry::Separator,
                     item("copy", "Copy", true, Some("mod+c")),
                     item("cut", "Cut", true, Some("mod+x")),
@@ -117,6 +126,7 @@ impl App {
                     item("new-folder", "New folder", live, Some("mod+shift+n")),
                     item("paste", "Paste", paste, Some("mod+v")),
                     MenuEntry::Separator,
+                    item("terminal", "Open in Terminal", live, Some(TERMINAL_CHORD)),
                     item("refresh", "Refresh", live, None),
                     MenuEntry::Item(MenuItem {
                         id: "hidden",
@@ -159,7 +169,33 @@ impl App {
             (_, "refresh") => Action::File(FileAction::Refresh),
             (_, "hidden") => Action::ToggleHidden,
             (MenuKind::Row(_) | MenuKind::Hit(_), "properties") => Action::File(FileAction::Properties),
+            (MenuKind::Row(name), "terminal") => Action::OpenTerminal(Some(name.clone())),
+            (_, "terminal") => Action::OpenTerminal(None),
             _ => return None,
         })
+    }
+
+    /// The row the keyboard is on, if it's on screen: where ⌘⇧T and the palette's "Open in
+    /// Terminal" open when it's a folder.
+    pub(super) fn cursor_row(&self) -> Option<String> {
+        let c = self.conn()?;
+        c.selection.cursor().filter(|name| c.row_names().contains(name)).map(str::to_owned)
+    }
+
+    /// "Open in Terminal": in the row `row` when it's a folder, else in the folder on screen;
+    /// nothing while the host isn't connected.
+    pub(super) fn open_terminal(&mut self, row: Option<String>, fx: &mut Vec<Effect>) {
+        let Some(c) = self.conn().filter(|c| c.interactive()) else { return };
+        let Some(host) = self.hosts.get(&c.host) else { return };
+        let folder = match row.as_deref().and_then(|name| c.find(name)) {
+            Some(e) if e.kind.is_dir_like() => c.cwd.join(&e.name),
+            _ => c.cwd.clone(),
+        };
+        fx.push(Effect::OpenTerminal {
+            window: self.window,
+            terminal: self.settings.terminal,
+            host: host.clone(),
+            folder,
+        });
     }
 }
