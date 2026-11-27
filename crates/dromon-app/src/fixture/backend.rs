@@ -45,7 +45,7 @@ use super::{Fixture, Step};
 use crate::service::lifecycle::{self, Event, Lifecycle, Phase};
 use crate::service::poll::{Collector, Outcome};
 use crate::service::windows::Watch;
-use crate::state::{Command, FileOp, OpId, ServiceEvent, SizeId, SizeTotal, TransferCommand, WindowId};
+use crate::state::{Command, FileOp, OpId, PreviewBytes, ServiceEvent, SizeId, SizeTotal, TransferCommand, WindowId};
 
 /// Entries per listing page, as the service pages them (§4.4).
 pub const PAGE: usize = 512;
@@ -753,6 +753,19 @@ impl Core {
             Command::Poll { host } => self.poll(&host, &mut out),
             Command::FolderSize { id, host, path } => self.folder_size(id, host, path, &mut out),
             Command::CancelFolderSize { .. } => {}
+            // Read at once from what `preview.rs` makes up, so there's never one to cancel.
+            Command::Preview { id, host, path, range } => {
+                let read = if self.up(&host) {
+                    super::preview::read(self.transfers.tree.entry_at(&host, &path), &path, range)
+                } else {
+                    Err(Error::ConnectionLost)
+                };
+                out.push(match read {
+                    Ok((bytes, total)) => ServiceEvent::Preview { id, host, bytes: PreviewBytes(bytes.into()), total },
+                    Err(error) => ServiceEvent::PreviewFailed { id, host, error },
+                });
+            }
+            Command::CancelPreview { .. } => {}
             Command::Verbose { host, on } => self.verbose(host, on, &mut out),
             Command::ShowPrompts { host } => self.show_prompts(&host, &mut out),
             Command::HostBook(cmd) => self.book.command(cmd, &mut out),

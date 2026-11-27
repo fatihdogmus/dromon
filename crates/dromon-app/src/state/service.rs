@@ -80,6 +80,52 @@ pub enum Command {
     /// Stop the walk `id` (its sheet closed). Nothing answers; a walk that already ended, or an
     /// unknown id, is ignored.
     CancelFolderSize { id: SizeId, host: HostId },
+    /// Quick preview (Space): read `range` of the file `path` on the host's session, in a task
+    /// of its own, into memory only. Answered to the sending window only with `Preview`, or
+    /// `PreviewFailed`; a host that isn't connected answers `PreviewFailed` with
+    /// [`Error::ConnectionLost`] at once.
+    Preview { id: PreviewId, host: HostId, path: RemotePath, range: PreviewRange },
+    /// Stop the read `id` (the preview moved on, or closed). Nothing answers; a read that already
+    /// ended, or an unknown id, is ignored.
+    CancelPreview { id: PreviewId, host: HostId },
+}
+
+/// Identifies one preview read, chosen by the UI (unique per session: each window numbers its
+/// own, as it does its [`SizeId`]s).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct PreviewId(pub u64);
+
+/// Which bytes of a file a preview reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PreviewRange {
+    /// From the start: at most this many bytes.
+    Head(u64),
+    /// The end: the last this many bytes (the whole file when it's shorter).
+    Tail(u64),
+}
+
+impl PreviewRange {
+    /// Where the read starts and how many bytes it takes, in a file of `size` bytes.
+    pub fn span(self, size: u64) -> (u64, u64) {
+        match self {
+            PreviewRange::Head(n) => (0, n.min(size)),
+            PreviewRange::Tail(n) => {
+                let len = n.min(size);
+                (size - len, len)
+            }
+        }
+    }
+}
+
+/// What a preview read: a file's contents, which may hold secrets (a config file's), so its
+/// `Debug` says only how many bytes there are. Shared, never copied on the way to the view.
+#[derive(Clone, PartialEq, Eq)]
+pub struct PreviewBytes(pub std::sync::Arc<[u8]>);
+
+impl std::fmt::Debug for PreviewBytes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "PreviewBytes(<{} bytes>)", self.0.len())
+    }
 }
 
 /// Identifies one folder size walk, chosen by the UI (unique per session: each window numbers
@@ -305,6 +351,20 @@ pub enum ServiceEvent {
         total: SizeTotal,
         error: Error,
     },
+    /// The read `id` (`Command::Preview`): the asked range of a file of `total` bytes (shorter
+    /// only when the file shrank while it was read).
+    Preview {
+        id: PreviewId,
+        host: HostId,
+        bytes: PreviewBytes,
+        total: u64,
+    },
+    /// The read `id` couldn't be done: no access, the file is gone, the connection was lost.
+    PreviewFailed {
+        id: PreviewId,
+        host: HostId,
+        error: Error,
+    },
 }
 
 /// Set to `1` to have [`super::App::apply`] write one [`trace_line`] per event to stderr.
@@ -355,6 +415,10 @@ pub fn trace_line(ev: &ServiceEvent) -> String {
         ServiceEvent::FolderSizeProgress { id, host, .. } => format!("FolderSizeProgress host={host} id={}", id.0),
         ServiceEvent::FolderSizeDone { id, host, .. } => format!("FolderSizeDone host={host} id={}", id.0),
         ServiceEvent::FolderSizeFailed { id, host, .. } => format!("FolderSizeFailed host={host} id={}", id.0),
+        ServiceEvent::Preview { id, host, bytes, total } => {
+            format!("Preview host={host} id={} bytes={} total={total}", id.0, bytes.0.len())
+        }
+        ServiceEvent::PreviewFailed { id, host, .. } => format!("PreviewFailed host={host} id={}", id.0),
     }
 }
 
@@ -504,6 +568,29 @@ mod tests {
             ["FolderSizeProgress host=prod id=5", "FolderSizeDone host=prod id=5", "FolderSizeFailed host=prod id=6"]
         );
         assert_eq!(total.items(), 3);
+    }
+
+    #[test]
+    fn preview_trace_lines_and_bytes_count_and_never_show_the_contents() {
+        let host = HostId("prod".into());
+        let bytes = PreviewBytes(b"DB_PASSWORD=secret\n".as_slice().into());
+        let events = [
+            ServiceEvent::Preview { id: PreviewId(4), host: host.clone(), bytes: bytes.clone(), total: 1204 },
+            ServiceEvent::PreviewFailed { id: PreviewId(5), host, error: Error::NotFound(RemotePath::new("/secret")) },
+        ];
+        let lines: Vec<String> = events.iter().map(trace_line).collect();
+        assert_eq!(lines, ["Preview host=prod id=4 bytes=19 total=1204", "PreviewFailed host=prod id=5"]);
+        assert_eq!(format!("{bytes:?}"), "PreviewBytes(<19 bytes>)");
+        assert!(!format!("{:?}", events[0]).contains("secret"), "{:?}", events[0]);
+    }
+
+    #[test]
+    fn a_preview_range_is_the_head_or_the_tail_of_what_there_is() {
+        assert_eq!(PreviewRange::Head(10).span(4), (0, 4));
+        assert_eq!(PreviewRange::Head(10).span(25), (0, 10));
+        assert_eq!(PreviewRange::Tail(10).span(25), (15, 10));
+        assert_eq!(PreviewRange::Tail(10).span(4), (0, 4));
+        assert_eq!(PreviewRange::Tail(10).span(0), (0, 0));
     }
 
     #[test]

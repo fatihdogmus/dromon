@@ -34,6 +34,8 @@ mod ui_palette_tests;
 #[cfg(test)]
 mod ui_poll_tests;
 #[cfg(test)]
+mod ui_preview_tests;
+#[cfg(test)]
 mod ui_properties_tests;
 #[cfg(test)]
 mod ui_quick_tests;
@@ -99,8 +101,10 @@ fn spec() -> AppSpec<App> {
         fonts: theme::FONTS,
         families: theme::FAMILIES,
         on_key: Some(on_key),
-        // The done flourish's phases, on the window's clock.
+        // The done flourish's phases, on the window's clock; a preview's image decoded.
         poll: Some(views::poll),
+        // Rune's waker, for a preview's image that finished decoding.
+        setup: Some(views::setup),
         ..AppSpec::new("Dromon", SIZE, init, views::view)
     }
 }

@@ -17,7 +17,8 @@
 //! The manager ([`run`]) routes commands and askpass requests to one task per host
 //! (`conn.rs`), whose lifecycle is the pure machine in `lifecycle.rs` and whose prompts go
 //! through `auth.rs`; its file operations (new folder, rename, delete) run in `fileops.rs`
-//! on its SFTP session, and the Properties sheet's folder size walks in `sizes.rs`. The password store lives here only: cleared per host on Disconnect, and
+//! on its SFTP session, the Properties sheet's folder size walks in `sizes.rs` and quick preview
+//! reads in `preview.rs`. The password store lives here only: cleared per host on Disconnect, and
 //! all of it when the UI goes away. `hostfiles.rs` owns the files: discovery and its watcher,
 //! the saved hosts' `hosts.conf`, and "Add to SSH config".
 //!
@@ -34,6 +35,8 @@ pub(crate) mod hosts;
 pub(crate) mod lifecycle;
 /// Adaptive polling of the folder on screen (§4.5); the fixture backend's polls use it too.
 pub(crate) mod poll;
+/// Quick preview reads: one range of one file.
+mod preview;
 /// Folder size walks for the Properties sheet; the fixture backend counts with it too.
 pub(crate) mod sizes;
 mod transfers;
@@ -64,6 +67,7 @@ use tokio::sync::mpsc;
 
 use self::auth::PromptIds;
 use self::conn::{ConnCmd, ConnHandle, Shared};
+use self::preview::PreviewCmd;
 use self::sizes::SizeCmd;
 use crate::state::{App, Backend, Command, ServiceEvent, WindowId};
 
@@ -388,8 +392,30 @@ fn dispatch<S: Sink>(
                 let _ = c.cmds.send(ConnCmd::Size(from, SizeCmd::Cancel(id)));
             }
         }
+        cmd @ (Command::Preview { .. } | Command::CancelPreview { .. }) => preview(from, cmd, conns, sink),
         // The manager's loop takes these first.
         Command::HostBook(_) => {}
+    }
+}
+
+/// A quick preview read from window `from`, or stopping one: the host's task reads it; a host
+/// without one isn't connected, and the read fails at once.
+fn preview<S: Sink>(from: WindowId, cmd: Command, conns: &HashMap<HostId, ConnHandle>, sink: &S) {
+    match cmd {
+        Command::Preview { id, host, path, range } => {
+            let cmd = ConnCmd::Preview(from, PreviewCmd::Start { id, path, range });
+            if conns.get(&host).is_none_or(|c| c.cmds.send(cmd).is_err()) {
+                let error = dromon_core::Error::ConnectionLost;
+                sink.emit_to(from, ServiceEvent::PreviewFailed { id, host, error });
+            }
+        }
+        Command::CancelPreview { id, host } => {
+            if let Some(c) = conns.get(&host) {
+                let _ = c.cmds.send(ConnCmd::Preview(from, PreviewCmd::Cancel(id)));
+            }
+        }
+        // `dispatch` hands over only the two above.
+        _ => {}
     }
 }
 

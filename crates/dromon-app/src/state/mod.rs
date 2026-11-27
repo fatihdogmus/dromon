@@ -23,6 +23,7 @@ pub mod ops;
 pub mod page;
 pub mod palette;
 pub mod prefs;
+pub mod preview;
 pub mod properties;
 pub mod quick;
 pub mod refresh;
@@ -54,12 +55,13 @@ pub use ops::{OpView, Ops};
 pub use page::{Page, SettingsSection};
 pub use palette::PaletteAction;
 pub use prefs::{NoStore, Saved, Store};
+pub use preview::PreviewAction;
 pub use selection::{Selection, TypeSelect};
 #[cfg(test)]
 pub use service::Recorder;
 pub use service::{
-    Backend, Command, FileOp, FileOpKind, HostBookCommand, HostBookEvent, OpId, ServiceEvent, Silent, SizeId,
-    SizeTotal, TransferCommand, WindowId,
+    Backend, Command, FileOp, FileOpKind, HostBookCommand, HostBookEvent, OpId, PreviewBytes, PreviewId, PreviewRange,
+    ServiceEvent, Silent, SizeId, SizeTotal, TransferCommand, WindowId,
 };
 pub use settings::{Density, Settings, SettingsChange, SettingsView};
 pub use sheets::{Sheet, Sheets};
@@ -99,6 +101,8 @@ pub struct UiState {
     pub settings_page: page::SettingsPage,
     /// What screen readers are told as it happens (`focus.rs`, §6.9).
     pub announcer: focus::Announcer,
+    /// The quick preview panel (Space, `preview.rs`).
+    pub preview: preview::Preview,
 }
 
 impl Default for UiState {
@@ -118,6 +122,7 @@ impl Default for UiState {
             page: Page::Files,
             settings_page: page::SettingsPage::default(),
             announcer: focus::Announcer::default(),
+            preview: preview::Preview::default(),
         }
     }
 }
@@ -269,6 +274,8 @@ pub enum Action {
     SettingsSection(SettingsSection),
     /// A control on the Settings page (`settings.rs`).
     Setting(SettingsChange),
+    /// Space, the quick preview panel's buttons (`preview.rs`).
+    Preview(PreviewAction),
     /// ⌘N, the File menu: another main window, on the welcome state (`windows.rs`).
     NewWindow,
     /// ⌘W, the File menu: close this window (the last one asks first while transfers run).
@@ -298,6 +305,10 @@ pub enum Effect {
     /// Open the native multi-file picker, titled for `folder` (the folder on screen); the files
     /// picked upload into it (`Action::Upload` with no folder).
     PickUpload { folder: String },
+    /// The preview panel opened: the keyboard goes into it.
+    FocusPreview,
+    /// The preview panel closed: the keyboard, if it was in it, goes back to the list.
+    FocusList,
 }
 
 impl App {
@@ -358,8 +369,15 @@ impl App {
         self.inbox.extend(events);
         while let Some(ev) = self.inbox.pop_front() {
             self.apply_one(ev);
-            self.sync_files();
+            self.sync();
         }
+    }
+
+    /// After every action and event: what follows the list catches up with it (`files.rs`,
+    /// `preview.rs`).
+    fn sync(&mut self) {
+        self.sync_files();
+        self.sync_preview();
     }
 
     /// Applies one event from the service. This is the integration point for the real
@@ -375,7 +393,7 @@ impl App {
         self.inbox.push_back(ev);
         while let Some(ev) = self.inbox.pop_front() {
             self.apply_one(ev);
-            self.sync_files();
+            self.sync();
         }
     }
 
@@ -475,6 +493,7 @@ impl App {
             ev @ (ServiceEvent::FolderSizeProgress { .. }
             | ServiceEvent::FolderSizeDone { .. }
             | ServiceEvent::FolderSizeFailed { .. }) => self.size_event(ev),
+            ev @ (ServiceEvent::Preview { .. } | ServiceEvent::PreviewFailed { .. }) => self.preview_event(ev),
         }
     }
 
@@ -499,7 +518,7 @@ impl App {
     /// Carries out `action`; returns what the view should do next.
     pub fn act(&mut self, action: Action) -> Vec<Effect> {
         let fx = self.act_one(action);
-        self.sync_files();
+        self.sync();
         fx
     }
 
@@ -590,6 +609,7 @@ impl App {
             Action::LeaveSettings => self.leave_settings(),
             Action::SettingsSection(section) => self.show_section(section),
             Action::Setting(change) => self.change_setting(change),
+            Action::Preview(a) => self.preview_action(a, &mut fx),
             Action::NewWindow => self.new_window(),
             Action::CloseWindow => self.close_window(&mut fx),
         }
@@ -636,6 +656,12 @@ impl App {
         if self.on_settings() {
             return self.settings_shortcut(sc);
         }
+        // The preview panel takes a few, lets the cursor's through, and holds the rest.
+        if self.ui.preview.is_open()
+            && let Some(fx) = self.preview_shortcut(&sc, now)
+        {
+            return fx;
+        }
         let action = match sc {
             // ⌘K opens the palette from anywhere, a focused field included.
             Shortcut::Palette => Action::Palette(PaletteAction::Toggle),
@@ -657,6 +683,9 @@ impl App {
             }
             Shortcut::End { last, extend } => Action::End { last, extend },
             Shortcut::Type(text) => Action::Type { text, now },
+            // Space types while type-to-select is collecting letters ("my file"), as in Finder.
+            Shortcut::Preview if self.ui.type_select.collecting(now) => Action::Type { text: " ".into(), now },
+            Shortcut::Preview => Action::Preview(PreviewAction::Toggle),
             // Shift+F10 and the Menu key: the cursor row's menu, else the empty list's.
             Shortcut::ContextMenu => return self.context_menu_key(),
             // A focused text field keeps its keys (§7): these are the list's.

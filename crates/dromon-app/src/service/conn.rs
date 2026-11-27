@@ -33,6 +33,7 @@ use super::auth::{self, PromptIds, Routed};
 use super::fileops::{FileOps, Finished};
 use super::lifecycle::{Effect, Event, Lifecycle, Phase, step};
 use super::poll::Outcome;
+use super::preview::{PreviewCmd, Reads};
 use super::sizes::{SizeCmd, Walks};
 use super::transfers::EngineMsg;
 use super::wake::{ProbeGate, Why};
@@ -68,6 +69,8 @@ pub enum ConnCmd {
     Verbose(bool),
     /// A folder size walk for the window, or stopping one (`sizes.rs`).
     Size(WindowId, SizeCmd),
+    /// A quick preview read for the window, or stopping one (`preview.rs`).
+    Preview(WindowId, PreviewCmd),
 }
 
 /// What the connection tasks share: configuration, the askpass endpoint, the password store,
@@ -107,6 +110,7 @@ pub fn start<S: Sink>(spec: HostSpec, shared: Shared, sink: S) -> ConnHandle {
         route: Route::default(),
         ops: FileOps::default(),
         walks: Walks::default(),
+        reads: Reads::default(),
         epoch: 0,
     };
     tokio::spawn(task.run(cmd_rx, ask_rx));
@@ -164,6 +168,8 @@ struct Task<S: Sink> {
     ops: FileOps,
     /// Folder size walks for the Properties sheet (`sizes.rs`).
     walks: Walks,
+    /// Quick preview reads (`preview.rs`).
+    reads: Reads,
     /// Counts SFTP sessions that came up: an operation's lost connection only ends the
     /// session it ran on.
     epoch: u64,
@@ -334,6 +340,7 @@ impl<S: Sink> Task<S> {
             ConnCmd::Focus => self.probe(Why::Focus),
             ConnCmd::Verbose(on) => self.set_verbose(on).await,
             ConnCmd::Size(window, cmd) => self.walks.command(window, cmd, self.sftp(), &self.host, &self.sink),
+            ConnCmd::Preview(window, cmd) => self.reads.command(window, cmd, self.sftp(), &self.host, &self.sink),
         }
     }
 

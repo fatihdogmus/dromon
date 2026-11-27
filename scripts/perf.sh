@@ -3,7 +3,7 @@
 # target, result.
 #
 #   bash scripts/perf.sh                          # frames, first-rows, throughput
-#   bash scripts/perf.sh --gate frames            # any of frames,first-rows,throughput,soak (or all)
+#   bash scripts/perf.sh --gate frames            # any of frames,first-rows,throughput,soak,preview (or all)
 #   bash scripts/perf.sh --gate soak --soak-gib 2
 #   bash scripts/perf.sh --samples 9 --runs 5
 #
@@ -29,6 +29,17 @@
 # - soak: the same file's `soak_large_file`: one --soak-gib file (default 10) down and up, SHA-1
 #   checked both ways, the resident memory of the copying process and its ssh sampled every
 #   200 ms. Needs that much free disk twice over (checked first). Not in the default set.
+# - preview: the same example: the quick preview (Space) of text files whose reads bring a full
+#   256,000-byte head of JSON- or log-like lines. The panel open with nothing changing, the
+#   pointer moving over the text, and the text wheel-scrolled 24 pt and 280 pt a frame are held
+#   to the frames gate's target (CPU/frame p99, 4.2 ms). The frame a text arrives in after Space
+#   in a window whose panel showed another text before (its first layout), the frame the next
+#   file's text arrives in while the cursor may still move (held),
+#   the frame it shows in once the cursor rested, Up to a text the panel kept, and a minified
+#   file's single 256 KB line showing (cut at 2,000 characters) are held to the whole 120 Hz
+#   frame (8.3 ms; over it exits 1). The Down key's frame and Down again to the text just left
+#   are listed as info against the same budget; the window's first preview (cold) as info only,
+#   since a window rasterises its first mono glyphs once. Not in the default set.
 #
 # Result: PASS; FAIL (missed the target); FAIL! (missed by the wide margin below, and the script
 # exits 1); info; n/a (not measured: Docker not reachable, or the gate wasn't asked for).
@@ -53,13 +64,13 @@ while [[ $# -gt 0 ]]; do
     --runs) runs="$2"; shift 2 ;;
     --soak-gib) soak_gib="$2"; shift 2 ;;
     -h|--help) sed -n '2,/^set -uo/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
-    *) echo "usage: perf.sh [--gate frames,first-rows,throughput,soak|all] [--samples N] [--runs N] [--soak-gib N]" >&2; exit 2 ;;
+    *) echo "usage: perf.sh [--gate frames,first-rows,throughput,soak,preview|all] [--samples N] [--runs N] [--soak-gib N]" >&2; exit 2 ;;
   esac
 done
-[[ $gates == all ]] && gates="frames,first-rows,throughput,soak"
+[[ $gates == all ]] && gates="frames,first-rows,throughput,soak,preview"
 want() { [[ ",$gates," == *",$1,"* ]]; }
 for g in ${gates//,/ }; do
-  case "$g" in frames|first-rows|throughput|soak) ;; *) echo "perf.sh: unknown gate $g" >&2; exit 2 ;; esac
+  case "$g" in frames|first-rows|throughput|soak|preview) ;; *) echo "perf.sh: unknown gate $g" >&2; exit 2 ;; esac
 done
 
 cd "$root"
@@ -81,12 +92,17 @@ run() {
   grep '^METRIC ' "$out/$name.log" >>"$metrics" || true
 }
 
-if want frames || want first-rows; then
+if want frames || want first-rows || want preview; then
   cargo build --release --quiet -p dromon-app --example perf --features perf || exit 1
+fi
+if want frames || want first-rows; then
   list=""
   want frames && list="scroll,stream,refresh"
   want first-rows && list="${list:+$list,}first-rows"
   run frames "$target/release/examples/perf" --samples "$samples" --gate "$list"
+fi
+if want preview; then
+  run preview "$target/release/examples/perf" --samples "$samples" --gate preview
 fi
 if want first-rows; then
   DROMON_PERF_RUNS=$((runs > 5 ? runs : 5)) run first-rows-sshd \
@@ -155,6 +171,18 @@ row frames "100k: jump to last row, worst frame" "$(get jump-end cpu_max_ms)" ms
 row frames "100k streaming in: worst page (apply + frame)" "$(get stream-100k worst_page_ms)" ms "<= 8.3 ms" info-max 8.33
 row frames "100k streaming in: all 196 pages" "$(get stream-100k total_ms)" ms "-" info 0
 row frames "100k refresh, one file added: frame" "$(get refresh-100k cpu_ms)" ms "<= 8.3 ms" info-max 8.33
+row preview "Preview 256 KB text, open, at rest: CPU/frame p99" "$(get preview-idle cpu_p99_ms)" ms "<= 4.2 ms" max 4.17 8.33
+row preview "Preview 256 KB text, pointer over it: CPU/frame p99" "$(get preview-hover cpu_p99_ms)" ms "<= 4.2 ms" max 4.17 8.33
+row preview "Preview 256 KB text, 24 pt/frame: CPU/frame p99" "$(get preview-scroll cpu_p99_ms)" ms "<= 4.2 ms" max 4.17 8.33
+row preview "Preview 256 KB text, 280 pt/frame: CPU/frame p99" "$(get preview-fling cpu_p99_ms)" ms "<= 4.2 ms" max 4.17 8.33
+row preview "Preview: the text arrives, the window's first preview (cold)" "$(get preview-arrive-cold cpu_ms)" ms "-" info 0
+row preview "Preview: the text arrives, a later preview, frame" "$(get preview-arrive-warm cpu_ms)" ms "<= 8.3 ms" max 8.33 8.33
+row preview "Preview: Down key frame (the next read starts)" "$(get preview-down cpu_ms)" ms "<= 8.3 ms" info-max 8.33
+row preview "Preview: the next file's text arrives, held, frame" "$(get preview-held cpu_ms)" ms "<= 8.3 ms" max 8.33 8.33
+row preview "Preview: the next file's text shows (rested), frame" "$(get preview-switch cpu_ms)" ms "<= 8.3 ms" max 8.33 8.33
+row preview "Preview: Up to a kept text, frame" "$(get preview-back cpu_ms)" ms "<= 8.3 ms" max 8.33 8.33
+row preview "Preview: Down again to the text just left, frame" "$(get preview-again cpu_ms)" ms "<= 8.3 ms" info-max 8.33
+row preview "Preview: a one-line 256 KB text shows, frame" "$(get preview-one-line cpu_ms)" ms "<= 8.3 ms" max 8.33 8.33
 row first-rows "First rows of 10k, headless (first page -> frame)" "$(get first-rows-10k wall_ms)" ms "<= 150 ms" max 150 300
 row first-rows "First rows of 10k, sshd (List -> first page)" "$(get first-rows-10k-sshd first_page_ms)" ms "<= 150 ms" info-max 150
 row first-rows "First rows of 10k, sshd (List -> rows on screen)" "$(get first-rows-10k-sshd first_rows_ms)" ms "<= 150 ms" max 150 300

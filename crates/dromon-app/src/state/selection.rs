@@ -202,6 +202,12 @@ impl TypeSelect {
     pub fn reset(&mut self) {
         self.buffer.clear();
     }
+
+    /// Whether what's typed at `now` adds to a prefix being typed: then a Space types too,
+    /// rather than opening the preview.
+    pub fn collecting(&self, now: f64) -> bool {
+        !self.buffer.is_empty() && now - self.last <= TYPE_SELECT_PAUSE
+    }
 }
 
 /// The first row whose name starts with `prefix`, ignoring case. A repeated single letter
@@ -325,6 +331,18 @@ mod tests {
         assert_eq!(t.push("s", 10.0), "s");
         assert_eq!(t.push("r", 10.4), "sr");
         assert_eq!(t.push("b", 12.0), "b");
+    }
+
+    #[test]
+    fn type_select_is_collecting_until_a_pause() {
+        let mut t = TypeSelect::default();
+        assert!(!t.collecting(0.5), "nothing typed yet");
+        t.push("m", 10.0);
+        assert!(t.collecting(10.6));
+        assert!(!t.collecting(11.2), "a pause starts a new prefix");
+        t.push("y", 11.2);
+        t.reset();
+        assert!(!t.collecting(11.3));
     }
 
     #[test]
