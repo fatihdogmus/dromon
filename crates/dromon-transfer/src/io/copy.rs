@@ -17,8 +17,8 @@ use std::collections::VecDeque;
 use dromon_core::{EntryKind, Error, RemotePath, Result};
 use dromon_sftp::{COPY_DATA_CHUNK, PendingRead, RemoteFile, Sftp, WriteAck, WriteMode};
 
-use super::CopyOptions;
 use super::upload::{finish, part_path};
+use super::{CopyOptions, write_denied};
 use crate::FilePlan;
 
 /// What a finished copy put where.
@@ -163,7 +163,7 @@ pub async fn delete_verified(from: &Sftp, to: &Sftp, src: &RemotePath, copied: &
 async fn server_side(sftp: &Sftp, p: &Plan<'_>, progress: &mut (impl FnMut(u64) + Send)) -> Result<Copied> {
     let reader = sftp.open_read(p.src).await?;
     let now = reader.stat().await?;
-    let writer = sftp.open_write(&p.part, WriteMode::Truncate).await?;
+    let writer = sftp.open_write(&p.part, WriteMode::Truncate).await.map_err(write_denied(p.dst))?;
     let mut done = 0;
     while done < now.size {
         let len = COPY_DATA_CHUNK.min(now.size - done);
@@ -178,7 +178,7 @@ async fn server_side(sftp: &Sftp, p: &Plan<'_>, progress: &mut (impl FnMut(u64) 
         return Err(changed_while_copying(&p.name));
     }
     if let Some(t) = now.mtime {
-        sftp.set_mtime(&p.part, t).await?;
+        sftp.set_mtime(&p.part, t).await.map_err(write_denied(p.dst))?;
     }
     let dst = finish(sftp, &p.part, p.dst, p.overwrite).await?;
     Ok(Copied { dst, size: now.size, mtime: now.mtime })
@@ -206,7 +206,7 @@ async fn stream(
         0
     };
     let mode = if offset > 0 { WriteMode::Resume } else { WriteMode::Truncate };
-    let writer = to.open_write(&p.part, mode).await?;
+    let writer = to.open_write(&p.part, mode).await.map_err(write_denied(p.dst))?;
     if offset > 0 {
         progress(offset);
     }
@@ -222,7 +222,7 @@ async fn stream(
     drop(reader);
     writer.close().await?;
     if let Some(t) = now.mtime {
-        to.set_mtime(&p.part, t).await?;
+        to.set_mtime(&p.part, t).await.map_err(write_denied(p.dst))?;
     }
     let dst = finish(to, &p.part, p.dst, p.overwrite).await?;
     Ok(Copied { dst, size: copied, mtime: now.mtime })
