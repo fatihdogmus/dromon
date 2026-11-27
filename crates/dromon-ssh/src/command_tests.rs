@@ -387,7 +387,12 @@ fn run_watch(dir: &Path, body: &str) -> (Option<Vec<String>>, bool) {
         let _ = tx.send(BufReader::new(reader).lines().map_while(Result::ok).collect::<Vec<_>>());
     });
     let out = rx.recv_timeout(Duration::from_secs(2)).ok();
-    ours.shutdown(std::net::Shutdown::Write).unwrap();
+    // macOS refuses to shut down a socket whose other end is closed already (the command ended):
+    // its input is closed either way.
+    match ours.shutdown(std::net::Shutdown::Write) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotConnected => {}
+        r => r.unwrap(),
+    }
     let deadline = Instant::now() + Duration::from_secs(5);
     while child.try_wait().unwrap().is_none() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));
