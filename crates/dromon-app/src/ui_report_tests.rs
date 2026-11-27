@@ -93,7 +93,7 @@ fn the_sheets_buttons_take_tab_in_order_and_escape_cancels() {
     assert!(order.iter().all(|k| k.starts_with("report-")), "Tab stays in the sheet: {order:?}");
     let at = order.iter().position(|k| k == "report-copy").unwrap_or_else(|| panic!("{order:?}"));
     order.rotate_left(at);
-    assert_eq!(order, ["report-copy", "report-cancel", "report-open"], "in reading order, once each");
+    assert_eq!(order, ["report-copy", "report-record", "report-cancel", "report-open"], "in reading order, once each");
     let here = order.iter().position(|k| *k == focused_key(&rt)).expect("focus in the sheet");
     key(&mut rt, Key::Tab, SHIFT);
     assert_eq!(focused_key(&rt), order[(here + order.len() - 1) % order.len()], "Shift+Tab goes back");

@@ -1,13 +1,19 @@
-//! Stand-ins for the names a bug report must never carry (`report.rs`; the recording of steps
-//! reuses them). Hosts become `host-1`, `host-2` …, in the order the report first names them;
-//! a folder's path becomes `<path>`, and a file's `<dir>/file-3.txt`, keeping only a short,
-//! plain extension. Numbering is stable within one [`Redactor`]: the same host or file is the
-//! same stand-in everywhere in one report.
+//! Stand-ins for the names a bug report must never carry (`report.rs`, and a recording of steps,
+//! `record.rs`). Hosts become `host-1`, `host-2` …, in the order the report first names them.
+//! In the report's sentences a folder's path becomes `<path>`, and a file's `<dir>/file-3.txt`,
+//! keeping only a short, plain extension. A recording needs names that still work as names (a
+//! fixture's folders, a script's element keys): a folder is `dir-4`, a file `file-3.txt`, a path
+//! `/dir-1/dir-2`, and a leading dot stays so hidden files stay hidden ([`Redactor::name`],
+//! [`Redactor::remote_path`]). Files are numbered by their name, folders likewise: the same name
+//! is the same stand-in wherever it is, in one [`Redactor`], which a report and its recording
+//! share.
 //!
 //! A host's id is replaced whole, so a quick connect's `user@203.0.113.7:2222` leaves no user,
 //! address or port behind. Errors are rendered from their variant with the stand-in in the
 //! path's place ([`Redactor::error`]), never by searching their text; a variant whose text is
 //! free-form (ssh's reason, an I/O message) is left out with a sentence saying why.
+
+use std::collections::HashMap;
 
 use dromon_core::{Error, HostId, RemotePath};
 
@@ -24,21 +30,23 @@ const MAX_EXT: usize = 8;
 /// One report's stand-ins.
 #[derive(Clone, Debug, Default)]
 pub struct Redactor {
-    /// Host ids, in the order first named: `host-<index + 1>`.
-    hosts: Vec<String>,
-    /// Files' full paths, in the order first named: `file-<index + 1>`.
-    files: Vec<String>,
+    /// Host ids, numbered in the order first named: `host-<n>`.
+    hosts: HashMap<String, usize>,
+    /// Files' names, likewise: `file-<n>`.
+    files: HashMap<String, usize>,
+    /// Folders' names, likewise: `dir-<n>`.
+    dirs: HashMap<String, usize>,
 }
 
-/// The 1-based number of `name` in `seen`, adding it when it's new.
-fn number(seen: &mut Vec<String>, name: &str) -> usize {
-    match seen.iter().position(|s| s == name) {
-        Some(i) => i + 1,
-        None => {
-            seen.push(name.to_owned());
-            seen.len()
-        }
+/// The 1-based number of `name` among `seen`, numbering it next when it's new (a recording names
+/// whole folders, so this is a lookup, not a search).
+fn number(seen: &mut HashMap<String, usize>, name: &str) -> usize {
+    if let Some(n) = seen.get(name) {
+        return *n;
     }
+    let n = seen.len() + 1;
+    seen.insert(name.to_owned(), n);
+    n
 }
 
 /// A file name's extension worth keeping: after the last dot of a name that isn't only a dot
@@ -77,10 +85,34 @@ impl Redactor {
     /// `<dir>/file-N.ext` for a file's path; `<path>` for anything whose name has no extension
     /// to keep (a folder, mostly).
     pub fn path(&mut self, path: &RemotePath) -> String {
-        match path.file_name().and_then(extension) {
-            Some(ext) => format!("<dir>/file-{}.{ext}", number(&mut self.files, path.as_str())),
+        let Some(name) = path.file_name() else { return "<path>".to_owned() };
+        match extension(name) {
+            Some(ext) => format!("<dir>/file-{}.{ext}", number(&mut self.files, name)),
             None => "<path>".to_owned(),
         }
+    }
+
+    /// The stand-in for an entry's `name`: `dir-N` for a folder (`dir`: a folder, or a link to
+    /// one), `file-N.ext` for anything else, keeping a short, plain extension; with the leading
+    /// dot of a hidden one (`.file-4`).
+    pub fn name(&mut self, name: &str, dir: bool) -> String {
+        let dot = if name.starts_with('.') { "." } else { "" };
+        if dir {
+            return format!("{dot}dir-{}", number(&mut self.dirs, name));
+        }
+        let n = number(&mut self.files, name);
+        match extension(name) {
+            Some(ext) => format!("{dot}file-{n}.{ext}"),
+            None => format!("{dot}file-{n}"),
+        }
+    }
+
+    /// A folder's path with a stand-in for each part: `/dir-1/dir-2`; the root stays `/`.
+    pub fn remote_path(&mut self, path: &RemotePath) -> String {
+        if path.is_root() {
+            return "/".to_owned();
+        }
+        path.components().map(|part| format!("/{}", self.name(part, true))).collect()
     }
 
     /// The error's own message with stand-ins for what it names, or [`WITHHELD`] for a

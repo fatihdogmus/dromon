@@ -381,41 +381,59 @@ installed by hand ([releasing.md](releasing.md#2b-updates-the-minisign-key)).
 ## Decision: Bug Reports Are Built Locally, Without Names
 
 **Status:** Accepted
-**Scope:** `dromon-app/src/state/report.rs`, `state/redact.rs`, `views/report.rs`, `.github/ISSUE_TEMPLATE/bug.yml`
+**Scope:** `dromon-app/src/state/report.rs`, `state/record*.rs`, `state/redact.rs`, `views/report.rs`, `.github/ISSUE_TEMPLATE/bug.yml`
 
 ### Context
 
-"Report a Bug…" gathers diagnostics for people who can't write a repro. Users browse servers
-whose names, users and paths can be private, and Dromon has no server of its own to send
-anything to.
+"Report a Bug…" gathers diagnostics for people who can't write a repro, and Record Steps… lets
+them record one. Users browse servers whose names, users and paths can be private, and Dromon
+has no server of its own to send anything to.
 
 ### Decision
 
-The report is built on the machine, from what the window already knows, and shown whole
-before anything happens. Open GitHub only opens the browser at the repository's new-issue form
-with the report in its query; the user edits and submits it there, or uses Copy report and
-sends it however they like. Nothing is sent by Dromon.
+The report, and a recording in it, is built on the machine, from what the window already knows
+or saw while recording, and shown whole before anything happens. Open GitHub only opens the
+browser at the repository's new-issue form with the report in its query (and puts on the
+clipboard what the link can't hold, as the sheet says first); the user edits and submits it
+there, or uses Copy report and sends it however they like. Nothing is sent by Dromon, and a
+recording is never written to disk: it lives in the window and goes with it.
 
 ### Rules and examples
 
 - Names are replaced, always (`state/redact.rs`): hosts become `host-1`, `host-2` … (a quick
-  connect's `user@address:port` id goes whole), a folder's path `<path>`, a file's
-  `<dir>/file-3.txt` with only a short plain extension kept; numbering is stable within one
-  report.
+  connect's `user@address:port` id goes whole). In the report's sentences a folder's path is
+  `<path>` and a file's `<dir>/file-3.txt`, with only a short plain extension kept. A recording
+  needs names that still work as names: folders `dir-4`, files `file-3.txt`, paths
+  `/dir-1/dir-2`, with a hidden one's leading dot. Files and folders are numbered by name, so
+  the same name is the same stand-in everywhere; one redactor serves the whole report, its
+  diagnostics, fixture, script and steps.
 - Errors are rendered from their variant with the stand-in in the path's place, never by
   searching their text. Free-form messages (ssh's reasons, I/O errors, an update's failure)
   are left out with a sentence saying why.
 - Events go in as their trace lines (already kinds, ids and counts, [Tracing and
   Logs](#standard-tracing-and-logs)) with the hosts replaced; actions by kind only. Never a
   secret, a prompt's text, a log line or file contents.
-- A test fills a window with distinctive names and checks none reaches the report or the link.
+- A recording keeps each step's action and the rows it named, and of each server: its home,
+  the kinds of sign-in question it asked and whether an answer was refused, the first listing of
+  each folder (sizes, dates and permissions kept; owners and groups dropped) and listing errors.
+  It never reads the prompt sheet's field: the fixture accepts placeholders (`pw`, `123456`)
+  and the replay types those, or `wrong` where the server refused. Host-key fingerprints are
+  made up, prompt and notice texts are generic, a failed connection's ssh text is left out.
+  Text typed into the filter or a search (pieces of names) isn't recorded, only that it
+  happened; a rename's or ⌘L's text is a name or a path, and goes through the redactor. Local
+  paths (uploads, the download folder) don't enter it: those steps are named by kind only.
+- Tests fill a window with distinctive names, a recording with listings, a rename to a secret
+  name, a ⌘L path, a password answered with a secret string and an upload from a local path, and
+  check none reaches the report, the link, any of its fields or what Open GitHub copies.
 
 ### Consequences
 
 Reports say less than a log would; a maintainer who needs more asks for the repro form or the
-connection log, which the user reads before sharing.
+connection log, which the user reads before sharing. A recording replays what the window did,
+not the real servers: anything their real names or contents decide can't show in a replay.
 
 ### Agent checklist
 
-- Does new report content come from kinds and counts, through the redactor?
+- Does new report or recording content come from kinds and counts, through the redactor?
 - Does the no-names test still seed every new kind of name the report could carry?
+- Does a new recorded step read anything a user types into a prompt? It must not.

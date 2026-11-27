@@ -26,7 +26,8 @@
 # Exit status: 0 when Dromon ran (whether or not the bug shows: look at the outputs);
 # 1 when Dromon failed to run (the build, an invalid fixture or script, a crash; summary.md
 # says which); 2 on bad arguments, an unreadable issue or refused input (args off the list, a
-# block given twice); 3 when the issue has no ```json script block (nothing to run).
+# block given twice); 3 when the issue has no ```json script block (nothing to run), or steps
+# recorded in Dromon came without the ```json fixture block recorded with them.
 set -uo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -141,7 +142,14 @@ done
 
 fixture="$out/fixture.json"
 fixture_note="fixture.json (from the issue)"
-if [[ "$(count fixture)" -eq 0 ]] || ! grep -q '[^[:space:]]' "$fixture"; then
+no_fixture=0
+{ [[ "$(count fixture)" -eq 0 ]] || ! grep -q '[^[:space:]]' "$fixture"; } && no_fixture=1
+# Steps recorded in Dromon (Record Steps…) replay only on the fixture recorded with them: the demo
+# has none of their hosts. When the link was too long, the user pastes that fixture by hand.
+if [[ $no_fixture -eq 1 ]] && grep -Eq '"description"[[:space:]]*:[[:space:]]*"Recorded steps' "$out/script.json"; then
+  refuse 3 "the fixture wasn't pasted: these steps were recorded in Dromon and replay only on the \`\`\`json fixture block recorded with them (Open GitHub copied it to the clipboard to paste into the Recorded fixture field)."
+fi
+if [[ $no_fixture -eq 1 ]]; then
   rm -f "$fixture"
   fixture="$root/crates/dromon-app/assets/fixtures/demo.json"
   fixture_note="the built-in demo (no \`\`\`json fixture block)"

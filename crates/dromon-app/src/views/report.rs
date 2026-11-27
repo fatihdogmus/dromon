@@ -1,11 +1,15 @@
 //! The bug report sheet (`state/report.rs`): its title, a line saying the details go into a new
 //! GitHub issue in the browser where they can be edited before submitting, and the report
 //! itself, read-only, in the mono face, scrolling and selectable: the exact text Copy report
-//! copies and Open GitHub fills in. **Copy report**, **Cancel**, **Open GitHub** (the default);
-//! Escape cancels. When the link can't hold every event, a note under the text says so.
+//! copies and Open GitHub fills in. **Copy report**, **Record Steps…** (without a recording in
+//! it), **Cancel**, **Open GitHub** (the default); Escape cancels. When the link can't hold
+//! every event, a note under the text says so; with a recording, notes say what the link can't
+//! hold (Open GitHub copies it), which folders were summed up, and that a recording started on
+//! an open host has no sign-in in it.
 //!
 //! Keys: `report`, `sheet-title`, `report-explain`, `report-scroll`, `report-text`,
-//! `report-note`, `report-copy`, `report-cancel`, `report-open`.
+//! `report-note`, `report-recording-note`, `report-copy`, `report-record`, `report-cancel`,
+//! `report-open`.
 //!
 //! Also the launch's read of the OS for the report ([`detect`]): a file or `reg.exe`, on a thread
 //! of its own.
@@ -14,7 +18,7 @@ use rune::{El, ScrollSpec, row, text};
 
 use super::Paint;
 use super::sheets::{button, buttons, frame};
-use crate::state::report::{self, ReportAction, System};
+use crate::state::report::{self, Draft, ReportAction, System};
 use crate::state::{Action, App};
 use crate::theme::{radius, space, type_};
 
@@ -25,14 +29,45 @@ const TITLE: &str = "Report a Bug";
 const EXPLAIN: &str = "The details below go into a new issue on GitHub, in your browser, where you can edit them \
                        before you submit. Names of hosts, users, folders and files are replaced; nothing is sent \
                        until you submit.";
+const EXPLAIN_RECORDED: &str = "The details below, with the steps you recorded and what the servers answered, go \
+                                into a new issue on GitHub, in your browser, where you can edit them before you \
+                                submit. Names of hosts, users, folders and files are replaced; sizes, dates, \
+                                permissions and how many items each folder held are kept. Nothing is sent until \
+                                you submit.";
 
 fn act(a: ReportAction) -> Action {
     Action::Report(a)
 }
 
+/// What the sheet says of its recording, if it needs saying.
+fn recording_note(draft: &Draft) -> Option<String> {
+    let r = draft.recorded.as_ref()?;
+    let mut said = Vec::new();
+    if draft.copies.is_some() {
+        said.push(
+            "The recording is too long for the link: Open GitHub also copies it to your clipboard. Paste it into \
+             the form's Recorded fixture field."
+                .to_owned(),
+        );
+    }
+    if r.summarised > 0 {
+        let folders = if r.summarised == 1 { "1 folder was" } else { "folders were" };
+        said.push(format!("{folders} too big to include whole: the items your steps didn't touch are summed up."));
+    }
+    if r.mid_session {
+        said.push(
+            "Recording started with a host already open, so signing in isn't in it: for a sign-in bug, start \
+             recording before you connect."
+                .to_owned(),
+        );
+    }
+    (!said.is_empty()).then(|| said.join(" "))
+}
+
 pub fn sheet(s: &App, p: Paint) -> Option<El> {
     let draft = s.report.draft.as_ref()?;
     let t = p.t;
+    let explain = if draft.recorded.is_some() { EXPLAIN_RECORDED } else { EXPLAIN };
     let body = text(draft.text.clone())
         .key("report-text")
         .font(type_::MONO)
@@ -64,19 +99,25 @@ pub fn sheet(s: &App, p: Paint) -> Option<El> {
         .w_full()
         .wrap()
     });
+    let recording = recording_note(draft)
+        .map(|said| text(said).key("report-recording-note").font(type_::META).color(t.text_2).w_full().wrap());
     let copy = if draft.copied { "Copied" } else { "Copy report" };
-    let actions = vec![
-        button(p, "report-copy", copy, false, act(ReportAction::Copy)),
+    let mut actions = vec![button(p, "report-copy", copy, false, act(ReportAction::Copy))];
+    if draft.recorded.is_none() {
+        actions.push(button(p, "report-record", "Record Steps…", false, act(ReportAction::Record)));
+    }
+    actions.extend([
         row().grow(1.0),
         button(p, "report-cancel", "Cancel", false, act(ReportAction::Cancel)),
         button(p, "report-open", "Open GitHub", true, act(ReportAction::OpenGitHub)),
-    ];
+    ]);
     Some(
         frame(p, "report", TITLE, WIDTH)
             .child(text(TITLE).key("sheet-title").font(type_::TITLE).color(t.text))
-            .child(text(EXPLAIN).key("report-explain").font(type_::BODY).color(t.text_2).w_full().wrap())
+            .child(text(explain).key("report-explain").font(type_::BODY).color(t.text_2).w_full().wrap())
             .child(scroll)
             .children(note)
+            .children(recording)
             .child(buttons(actions)),
     )
 }

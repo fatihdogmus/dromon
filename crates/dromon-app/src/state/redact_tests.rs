@@ -24,7 +24,8 @@ fn a_file_keeps_only_a_short_plain_extension() {
     assert_eq!(p(&mut r, "/var/www/site/index.html"), "<dir>/file-1.html");
     assert_eq!(p(&mut r, "/home/alice/backup-2026.tar.gz"), "<dir>/file-2.gz", "the last extension only");
     assert_eq!(p(&mut r, "/var/www/site/index.html"), "<dir>/file-1.html", "the same file, the same number");
-    assert_eq!(p(&mut r, "/srv/other/index.html"), "<dir>/file-3.html", "another folder's is another file");
+    assert_eq!(p(&mut r, "/srv/other/index.html"), "<dir>/file-1.html", "files are numbered by their name");
+    assert_eq!(p(&mut r, "/srv/other/robots.txt"), "<dir>/file-3.txt");
     assert_eq!(p(&mut r, "/home/alice/.env"), "<path>", "a dot file has no extension");
     assert_eq!(p(&mut r, "/home/alice/Makefile"), "<path>");
     assert_eq!(p(&mut r, "/home/alice/notes.acme-secret"), "<path>", "not a plain extension");
@@ -32,6 +33,24 @@ fn a_file_keeps_only_a_short_plain_extension() {
     assert_eq!(p(&mut r, "/home/alice/projects"), "<path>", "a folder");
     assert_eq!(p(&mut r, "/"), "<path>");
     assert_eq!(p(&mut r, "/srv/photos/IMG_0001.JPG"), "<dir>/file-4.JPG");
+}
+
+#[test]
+fn a_recordings_names_are_names_numbered_alike_with_the_dot_of_a_hidden_one() {
+    let mut r = Redactor::default();
+    assert_eq!(r.name("index.html", false), "file-1.html");
+    assert_eq!(r.name("releases", true), "dir-1");
+    assert_eq!(r.name(".env", false), ".file-2", "hidden stays hidden; a dot file has no extension");
+    assert_eq!(r.name(".ssh", true), ".dir-2");
+    assert_eq!(r.name("Makefile", false), "file-3");
+    assert_eq!(r.name("index.html", false), "file-1.html", "the same name, the same stand-in");
+    assert_eq!(r.remote_path(&RemotePath::new("/srv/releases/.ssh")), "/dir-3/dir-1/.dir-2");
+    assert_eq!(r.remote_path(&RemotePath::root()), "/");
+    assert_eq!(
+        r.path(&RemotePath::new("/anywhere/index.html")),
+        "<dir>/file-1.html",
+        "a report's sentence numbers the file as its recording does"
+    );
 }
 
 #[test]

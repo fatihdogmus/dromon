@@ -470,8 +470,8 @@ impl App {
     }
 
     fn apply_one(&mut self, ev: ServiceEvent) {
-        // A bug report lists the last events by their trace lines (`report.rs`).
-        self.report.recent.event(service::trace_line(&ev));
+        // A bug report lists the last events, and a recording keeps what servers answer (`record.rs`).
+        self.heard(&ev);
         match ev {
             ServiceEvent::FileOp(ev) => self.ops.event(ev),
             ServiceEvent::FolderSize(ev) => self.size_event(ev),
@@ -596,12 +596,11 @@ impl App {
 
     /// Carries out `action`; returns what the view should do next.
     pub fn act(&mut self, action: Action) -> Vec<Effect> {
-        // A bug report lists the last actions by kind; its own sheet's aren't news.
-        if !matches!(action, Action::Report(_)) {
-            self.report.recent.action(action.kind());
-        }
+        // A bug report lists the last actions, and a recording takes their steps (`record.rs`).
+        let seen = self.observe(&action);
         let fx = self.act_one(action);
         self.sync();
+        self.observed(seen);
         fx
     }
 

@@ -18,7 +18,8 @@ README, "Agent tooling"). `--scene NAME` starts that scene from the fixture's ho
 connect to `prod` and `nas`, so they're meant for the demo; the goldens are the demo's).
 
 `scripts/flows.sh` renders the flows in `tests/flows/` this way, and `scripts/repro.sh` does it
-for a bug report made with the repro form (`.github/ISSUE_TEMPLATE/repro.yml`).
+for a bug report made with the repro form (`.github/ISSUE_TEMPLATE/repro.yml`), or with Record
+Steps… in Dromon ([Recorded fixtures](#recorded-fixtures)).
 
 An invalid fixture stops Dromon at once with exit status 2 and a message that names where in the
 file it is wrong, e.g.
@@ -421,6 +422,33 @@ shows there alone, and the host's later prompts go to that window until the conn
 settles; answering in either closes it in both.
 Headless runs (`--snap`, `--script`) have one window: ⌘N does nothing there, so flows can't
 drive two windows; the in-crate tests do (`fixture/windows_tests.rs`, `ui_window_tests.rs`).
+
+## Recorded fixtures
+
+Record Steps… in Dromon writes a fixture and a script of what a user did (`state/record.rs`),
+into the bug form's Recorded fixture and Recorded steps fields as ```` ```json fixture ```` and
+```` ```json script ```` blocks, so `cargo repro <issue>` replays them like any other. The fixture
+holds only what the window saw while recording:
+
+- The hosts the steps used, `host-1`, `host-2` …, with their section (`source`) and no `user`,
+  `hostname` or `port`; prompts then use the defaults (`user@host-1's password: `).
+- Each server's `home`, its first sign-in's steps by kind with placeholder answers (`pw` for a
+  password or passphrase, `123456` for a code; a made-up host-key fingerprint; generic confirm
+  and notice texts), and `fail` with a generic sentence when it never connected for a reason
+  other than the answers.
+- The first listing of every folder listed, and listing errors. Every name is a stand-in,
+  numbered by name across the fixture and the script: folders `dir-N`, files `file-N.ext`
+  keeping a short plain extension, a hidden one's leading dot kept (`.file-4`), paths
+  `/dir-1/dir-2`; entries in each folder are numbered in its name order, so sorting by name
+  keeps it. Sizes, dates, modes and symlink targets are kept; `owner` and `group` are not.
+- A fixture over 40,000 characters sums up its largest folders: the rows no step touched become
+  one generator of as many files (`more-{}`, their size range and date span) and one of as many
+  folders (`more-dir-{}`).
+
+The script is the input that makes each step, at element keys: the replay window is the repro's
+(1080 × 680, Comfortable rows), and a row below the fold is scrolled to with `wheel` events
+first. A recorded script's description starts with "Recorded steps", and `scripts/repro.sh`
+refuses one without its fixture block (exit 3): the fixture wasn't pasted.
 
 ## The built-in demo
 
