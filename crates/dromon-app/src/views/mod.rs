@@ -14,6 +14,7 @@ mod palette;
 mod properties;
 mod quick;
 mod quit;
+mod search;
 mod settings;
 mod sheets;
 mod sidebar;
@@ -29,8 +30,10 @@ use rune::{ChromeInsets, Cx, El, Tx, col, row};
 /// The native context menu for a menu's entries (tests read it).
 #[cfg(test)]
 pub use menu::popup as menu_popup;
-/// The app's poll (the done flourish) and its hookup to the taskbar and notifications.
-pub use transfers::{OsLink, connect_window, poll};
+/// The app's poll (the done flourish, a search waiting to start).
+pub use search::poll;
+/// The hookup to the taskbar and notifications.
+pub use transfers::{OsLink, connect_window};
 
 use crate::service::RuneSink;
 use crate::state::{Action, App, Effect, FileAction, WindowId};

@@ -84,6 +84,41 @@ pub enum Command {
     /// Checking for and installing a newer Dromon (`state/update.rs`); answered with `Update`
     /// events.
     Update(UpdateCommand),
+    /// Search in subfolders (`state/search.rs`): walk `root` on the host's session, as a folder
+    /// size walk does (links never followed), for entries whose name matches `query`
+    /// ([`super::search::Matcher`]); with `show_hidden` off, hidden entries are neither matched
+    /// nor walked into. Answered to the sending window only with `SearchFound` batches (at most
+    /// about ten a second), then `SearchDone`, or `SearchFailed` when the walk can't go on; a
+    /// host that isn't connected answers `SearchFailed` with [`Error::ConnectionLost`] at once.
+    /// The walk stops at [`super::search::CAP`] results.
+    Search { id: SearchId, host: HostId, root: RemotePath, query: String, show_hidden: bool },
+    /// Stop the search `id`. Nothing answers; one that already ended, or an unknown id, is ignored.
+    CancelSearch { id: SearchId, host: HostId },
+}
+
+/// Identifies one search, chosen by the UI (unique per session: each window numbers its own, as
+/// it does its [`SizeId`]s).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct SearchId(pub u64);
+
+/// One search result: the entry, and the folder it is in relative to where the search started
+/// (`assets/img`; `.` for that folder itself).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Found {
+    pub folder: String,
+    pub entry: Entry,
+}
+
+impl Found {
+    /// The folder the entry is in, under the search's `root`.
+    pub fn dir(&self, root: &RemotePath) -> RemotePath {
+        root.join(&self.folder)
+    }
+
+    /// The entry's full path, under the search's `root`.
+    pub fn path(&self, root: &RemotePath) -> RemotePath {
+        self.dir(root).join(&self.entry.name)
+    }
 }
 
 /// Identifies one folder size walk, chosen by the UI (unique per session: each window numbers
@@ -311,6 +346,29 @@ pub enum ServiceEvent {
     },
     /// The updater's news (`state/update.rs`).
     Update(UpdateEvent),
+    /// What the search `id` found since its last batch, in the order found (maybe nothing), and
+    /// how many folders it has searched so far.
+    SearchFound {
+        id: SearchId,
+        host: HostId,
+        entries: Vec<Found>,
+        folders: u64,
+    },
+    /// The search `id` ended: it searched `folders` folders, `unreadable` more couldn't be read,
+    /// and `capped` says it stopped at [`super::search::CAP`] results.
+    SearchDone {
+        id: SearchId,
+        host: HostId,
+        folders: u64,
+        unreadable: u64,
+        capped: bool,
+    },
+    /// The search `id` stopped (the connection was lost); what it found stays found.
+    SearchFailed {
+        id: SearchId,
+        host: HostId,
+        error: Error,
+    },
 }
 
 /// Set to `1` to have [`super::App::apply`] write one [`trace_line`] per event to stderr.
@@ -362,6 +420,13 @@ pub fn trace_line(ev: &ServiceEvent) -> String {
         ServiceEvent::FolderSizeDone { id, host, .. } => format!("FolderSizeDone host={host} id={}", id.0),
         ServiceEvent::FolderSizeFailed { id, host, .. } => format!("FolderSizeFailed host={host} id={}", id.0),
         ServiceEvent::Update(ev) => format!("Update {}", ev.name()),
+        ServiceEvent::SearchFound { id, host, entries, folders } => {
+            format!("SearchFound host={host} id={} entries={} folders={folders}", id.0, entries.len())
+        }
+        ServiceEvent::SearchDone { id, host, folders, unreadable, capped } => {
+            format!("SearchDone host={host} id={} folders={folders} unreadable={unreadable} capped={capped}", id.0)
+        }
+        ServiceEvent::SearchFailed { id, host, .. } => format!("SearchFailed host={host} id={}", id.0),
     }
 }
 
@@ -511,6 +576,44 @@ mod tests {
             ["FolderSizeProgress host=prod id=5", "FolderSizeDone host=prod id=5", "FolderSizeFailed host=prod id=6"]
         );
         assert_eq!(total.items(), 3);
+    }
+
+    #[test]
+    fn search_trace_lines_count_and_never_name_what_was_found() {
+        let host = HostId("prod".into());
+        let entry = Entry {
+            name: "secret.log".into(),
+            kind: dromon_core::EntryKind::File,
+            size: 1,
+            mtime: None,
+            mode: None,
+            owner: None,
+            group: None,
+        };
+        let found = Found { folder: "secret/dir".into(), entry };
+        assert_eq!(found.path(&RemotePath::new("/srv")), RemotePath::new("/srv/secret/dir/secret.log"));
+        assert_eq!(
+            Found { folder: ".".into(), ..found.clone() }.dir(&RemotePath::new("/srv")),
+            RemotePath::new("/srv")
+        );
+        let events = [
+            ServiceEvent::SearchFound { id: SearchId(3), host: host.clone(), entries: vec![found], folders: 12 },
+            ServiceEvent::SearchDone { id: SearchId(3), host: host.clone(), folders: 40, unreadable: 1, capped: false },
+            ServiceEvent::SearchFailed {
+                id: SearchId(4),
+                host,
+                error: Error::PermissionDenied(RemotePath::new("/secret")),
+            },
+        ];
+        let lines: Vec<String> = events.iter().map(trace_line).collect();
+        assert_eq!(
+            lines,
+            [
+                "SearchFound host=prod id=3 entries=1 folders=12",
+                "SearchDone host=prod id=3 folders=40 unreadable=1 capped=false",
+                "SearchFailed host=prod id=4",
+            ]
+        );
     }
 
     #[test]

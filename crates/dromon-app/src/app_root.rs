@@ -39,6 +39,8 @@ mod ui_properties_tests;
 #[cfg(test)]
 mod ui_quick_tests;
 #[cfg(test)]
+mod ui_search_tests;
+#[cfg(test)]
 mod ui_settings_tests;
 #[cfg(test)]
 mod ui_sheet_tests;
