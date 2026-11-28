@@ -196,7 +196,8 @@ pub(crate) fn split_keyword(line: &str) -> Option<(&str, &str)> {
     let (keyword, rest) = line.split_at(end);
     let rest = rest.trim_start_matches([' ', '\t']);
     let rest = rest.strip_prefix('=').unwrap_or(rest);
-    Some((keyword, rest.trim_matches([' ', '\t', '\x0c'])))
+    // ssh strips form feeds from a line's end only.
+    Some((keyword, rest.trim_start_matches([' ', '\t']).trim_end_matches([' ', '\t', '\x0c'])))
 }
 
 /// Splits arguments the way OpenSSH's `argv_split` does: whitespace-separated, `"` and `'`
@@ -277,3 +278,7 @@ fn is_absolute(p: &str) -> bool {
 #[cfg(test)]
 #[path = "config_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "config_props.rs"]
+mod props;

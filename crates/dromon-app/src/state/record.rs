@@ -30,6 +30,9 @@ mod fixture;
 mod script;
 
 #[cfg(test)]
+#[path = "record_props.rs"]
+mod props;
+#[cfg(test)]
 #[path = "record_tests.rs"]
 mod tests;
 

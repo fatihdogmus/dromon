@@ -355,3 +355,7 @@ mod tests {
         assert_eq!(find_prefix(&rows, "bb", Some("b.txt")), Some(1));
     }
 }
+
+#[cfg(test)]
+#[path = "selection_props.rs"]
+mod props;

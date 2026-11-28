@@ -24,6 +24,7 @@ variables) is [test-servers.md](test-servers.md); this guide says how to test wi
 - [Decision: Fixes Come With Tests, and Tests Stay](#decision-fixes-come-with-tests-and-tests-stay)
 - [Reference: Test Layers](#reference-test-layers)
 - [Standard: Where a New Test Goes](#standard-where-a-new-test-goes)
+- [Standard: Property Tests](#standard-property-tests)
 - [Pattern: State Tests](#pattern-state-tests)
 - [Pattern: Headless UI Tests](#pattern-headless-ui-tests)
 - [Standard: End-to-End Tests Against the sshd Fixture](#standard-end-to-end-tests-against-the-sshd-fixture)
@@ -88,6 +89,7 @@ Knowing which layer owns a behaviour.
 | Layer | Where | Owns | Needs |
 | --- | --- | --- | --- |
 | Pure unit | Sibling `*_tests.rs` / `tests.rs`, or a short inline `mod tests` | Parsers, naming, diff, schedules, `step` fns, prompt classification, command-line checks, progress maths, the queue | nothing |
+| Property | Sibling `*_props.rs` / `props.rs` | Rules that hold for every input: round trips, orders, no panics on outside data, no names in reports, state-machine invariants ([Property Tests](#standard-property-tests)) | nothing |
 | State | `crates/dromon-app/src/state/*_tests.rs`, `state/tests.rs` | `App::act` and `App::apply` on the demo fixture; commands sent (`Recorder`) | nothing |
 | Fixture backend | `crates/dromon-app/src/fixture/*tests.rs` | That the fake backend answers like the service | nothing |
 | Service | `crates/dromon-app/src/service/*tests.rs` | The real manager and connection tasks against a fake `ssh` script and OpenSSH's `sftp-server` | Unix, `sftp-server`, `python3` (skips otherwise) |
@@ -131,6 +133,62 @@ Keep tests next to what they test and files small.
 
 - Is the test in the sibling file of the code it covers?
 - Did a new `ui_*_tests.rs` get declared in `app_root.rs`?
+
+## Standard: Property Tests
+
+**Scope:** pure code in every crate
+
+### Purpose
+
+Examples show that a case works; a property says what holds for every input, and
+[Hegel](https://docs.rs/hegeltest) (crate `hegeltest`, used as `hegel`) looks for the input that
+breaks it, then shrinks it to the smallest one. Servers, files and users send names and values
+no one thought of, and the app must not panic on them or leak them.
+
+### Rules
+
+- Write a property where a rule holds for every input, not only an example:
+  - outside data never panics a parser or a check (ssh config, prompts, askpass messages,
+    fixtures, server names and sizes);
+  - round trips: encode then decode, render then parse, quote then read back;
+  - orders: a comparison used for sorting is a total order (Rust's sort may panic otherwise);
+  - privacy: no name survives redaction, in a report, its link or a recording;
+  - state machines: invariants after any sequence of steps (the transfer queue's per-host
+    limit, a selection naming only rows that exist, history bounds, `App::act` never panicking).
+- Properties for `foo.rs` go in `foo_props.rs` beside it, wired after its tests with
+  `#[cfg(test)] #[path = "foo_props.rs"] mod props;` (a `mod.rs` uses `props.rs`). As a child
+  module it reaches private items; never widen visibility for a property.
+  `cargo test -p <crate> props` runs only the properties.
+- A property is a `#[hegel::test] fn …(tc: TestCase)` that draws its inputs with `tc.draw(…)`.
+  A draw may depend on an earlier one (draw the rows, then a row among them); Hegel still
+  shrinks it.
+- Generate data shaped like the real thing (`#[hegel::composite]` generators, `one_of!`,
+  `sampled_from`): names with `/`, dots, unicode, control characters and leading `-`; sizes up
+  to `u64::MAX`; NaN and infinities where an `f64` is taken. Use the plain `gs::text()`,
+  `gs::binary()` or `gs::integers()` where "never panics on anything" is the rule.
+- State that changes over many steps is a `#[hegel::state_machine]`: the system and a small
+  model side by side, `#[rule]`s that act on both, and `#[invariant(always_run)]` checks after
+  every rule. Rules call `tc.assume(…)` first, before changing anything.
+- Hegel runs 100 cases locally and, on CI (its `ci` profile, chosen by itself), the same
+  derandomized cases every run, so CI never fails on a new random input. A test that builds an
+  `App` or runs a process may set fewer (`#[hegel::test(test_cases = N)]`) with a comment
+  saying why. Each props file runs in seconds; `HEGEL_TEST_CASES=10000 cargo test -p <crate>
+  props` searches harder locally.
+- A failure prints the shrunk input by the names it was drawn as. Pin it under the property
+  with `#[hegel::explicit_test_case(name = value, …)]`, which runs before the generated cases
+  every time, so a found bug stays covered and readable. Hegel's own database of failures
+  (`.hegel/`) is local and ignored by git. Fix the code, never the generator to avoid the
+  input; a property that misread the contract is corrected to the contract, and the pull
+  request says so.
+- `hegeltest` is pre-1.0 and pinned to one minor version: a bump is its own change that runs
+  every property.
+- Not for views, goldens, I/O or end-to-end runs: those keep their own layers.
+
+### Agent checklist
+
+- Is the rule one that holds for every input, and is it the code's documented contract?
+- Do the generators reach the hostile values real data has?
+- Is every bug a property found pinned with `#[hegel::explicit_test_case]`?
 
 ## Pattern: State Tests
 
@@ -412,6 +470,7 @@ Running the suite.
 cargo test --workspace                           # everything; sshd tests run when Docker answers
 DROMON_REQUIRE_DOCKER=1 cargo test --workspace   # fail instead of skipping (CI)
 cargo test -p dromon-app --lib ui_keyboard       # one area, by test-name filter
+cargo test -p dromon-transfer props              # a crate's property tests
 cargo test -p dromon-sftp -- --ignored           # the slow copy-data tests
 DROMON_FIXTURE_KEEP=1 cargo test -p dromon-sftp --test fixture -- list_mixed_folder   # keep the server
 DROMON_SERVER_MATRIX=1 cargo test -p dromon-sftp -p dromon-transfer --test matrix

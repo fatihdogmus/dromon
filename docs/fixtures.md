@@ -280,10 +280,10 @@ Many similar entries from one line, the same on every run:
 |---|---|---|
 | `pattern` | required | The name, with one `{}` (the number) or `{0N}` (zero-padded to N digits). |
 | `count` | required | How many (at most 1,000,000). |
-| `start` | optional | The first number (default 1). |
+| `start` | optional | The first number (default 1); the last, `start + count − 1`, must fit a 64-bit unsigned number. |
 | `kind` | optional | Default `"file"`. |
 | `size` | optional | Bytes, or `[min, max]`: drawn for each entry. |
-| `mtime` | optional | A date, or `{"end", "every", "jitter"?}`: entry `i` (from 0) of `count` is `every × (count − i)` seconds before `end`, and up to `jitter` seconds earlier, in whole minutes. |
+| `mtime` | optional | A date, or `{"end", "every", "jitter"?}`: entry `i` (from 0) of `count` is `every × (count − i)` seconds before `end`, and up to `jitter` seconds earlier, in whole minutes (`every` and `jitter` at most 2⁶³ − 1). |
 | `mode` | optional | As for entries. |
 | `seed` | optional | Random draws come from this string; default: the folder's path (`<path>#<n>` for its n-th generator after the first). |
 
@@ -385,7 +385,7 @@ answering a clash) and Clear finished removes the finished ones, but they never 
 | `done`, `total` | optional | Bytes copied and in all (`done` at most `total`). Default 0: the ring and bars sum them. |
 | `files` | optional | `[done, total]` files. |
 | `speed` | optional | Bytes per second, shown while running ("8.1 MB/s"). |
-| `eta` | optional | Seconds left, shown while running ("about 9 s"). |
+| `eta` | optional | Seconds left, shown while running ("about 9 s"); at most about 1.8 × 10¹⁹. |
 | `waiting` | optional | `true`: paused because the connection is away ("Waiting for connection"). |
 | `conflict` | optional | `{"name", "folder", "dir"?, "more"?, "existing"?, "incoming"?}`: the job waits on a name clash (`dir`: the existing item is a folder; `more`: how many clashes follow, for "Apply to all N conflicts"; `existing` and `incoming`: `{"size"?, "mtime"?}` of the item already there and the one coming, a size in bytes and a date as an RFC 3339 string or epoch seconds, shown side by side on the sheet, the later date marked "newer"; a folder has no size; left out, the sheet shows a dash, and no block at all when both are). The conflict sheet asks about the oldest job with one. |
 | `reveal` | optional | Where a click on the finished row goes: a local path (downloads; the file manager is never opened from headless runs) or an absolute server path (uploads). |
@@ -439,8 +439,11 @@ holds only what the window saw while recording:
 - The first listing of every folder listed, and listing errors. Every name is a stand-in,
   numbered by name across the fixture and the script: folders `dir-N`, files `file-N.ext`
   keeping a short plain extension, a hidden one's leading dot kept (`.file-4`), paths
-  `/dir-1/dir-2`; entries in each folder are numbered in its name order, so sorting by name
-  keeps it. Sizes, dates, modes and symlink targets are kept; `owner` and `group` are not.
+  `/dir-1/dir-2`. The fixture's names are numbered first, all of them, in the order sorting by
+  name gives, and a name that sorts before a dot (it starts with a space, `-`, `#`, `(` …)
+  gets a leading `-` (`-file-2`): any folder sorted by name lists its stand-ins in the order
+  it listed its names, and a name in two folders is one stand-in. Sizes, dates, modes and
+  symlink targets are kept; `owner` and `group` are not.
 - A fixture over 40,000 characters sums up its largest folders: the rows no step touched become
   one generator of as many files (`more-{}`, their size range and date span) and one of as many
   folders (`more-dir-{}`).

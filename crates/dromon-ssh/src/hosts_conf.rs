@@ -25,6 +25,10 @@ use crate::quick::check_alias;
 #[path = "hosts_conf_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "hosts_conf_props.rs"]
+mod props;
+
 /// The saved hosts' file name, in the app's config folder.
 pub const HOSTS_CONF: &str = "hosts.conf";
 

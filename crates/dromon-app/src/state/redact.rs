@@ -6,17 +6,23 @@
 //! `/dir-1/dir-2`, and a leading dot stays so hidden files stay hidden ([`Redactor::name`],
 //! [`Redactor::remote_path`]). Files are numbered by their name, folders likewise: the same name
 //! is the same stand-in wherever it is, in one [`Redactor`], which a report and its recording
-//! share.
+//! share. A recording numbers all its names first, in their natural order
+//! ([`Redactor::number_in_order`]), and a name that sorts before a dot gets a leading `-`: any
+//! folder's stand-ins then sort as its names do, so its replay lists it in the same order.
 //!
 //! A host's id is replaced whole, so a quick connect's `user@203.0.113.7:2222` leaves no user,
 //! address or port behind. Errors are rendered from their variant with the stand-in in the
 //! path's place ([`Redactor::error`]), never by searching their text; a variant whose text is
 //! free-form (ssh's reason, an I/O message) is left out with a sentence saying why.
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
-use dromon_core::{Error, HostId, RemotePath};
+use dromon_core::{Error, HostId, RemotePath, natural_cmp};
 
+#[cfg(test)]
+#[path = "redact_props.rs"]
+mod props;
 #[cfg(test)]
 #[path = "redact_tests.rs"]
 mod tests;
@@ -92,18 +98,39 @@ impl Redactor {
         }
     }
 
+    /// Numbers `names` (each with whether it's a folder) in their natural order, the order
+    /// sorting by name gives, before anything else names them: a recording's fixture, so that
+    /// every folder's stand-ins sort as its names do.
+    pub fn number_in_order<'a>(&mut self, names: impl IntoIterator<Item = (&'a str, bool)>) {
+        let (dirs, files): (Vec<_>, Vec<_>) = names.into_iter().partition(|(_, dir)| *dir);
+        for (seen, names) in [(&mut self.dirs, dirs), (&mut self.files, files)] {
+            let mut names: Vec<&str> = names.into_iter().map(|(name, _)| name).collect();
+            names.sort_by(|a, b| natural_cmp(a, b));
+            for name in names {
+                number(seen, name);
+            }
+        }
+    }
+
     /// The stand-in for an entry's `name`: `dir-N` for a folder (`dir`: a folder, or a link to
     /// one), `file-N.ext` for anything else, keeping a short, plain extension; with the leading
-    /// dot of a hidden one (`.file-4`).
+    /// dot of a hidden one (`.file-4`), and a `-` for one that sorts before a dot (`-file-2` for
+    /// `#recycle`), so that stand-ins sort among themselves as their names do.
     pub fn name(&mut self, name: &str, dir: bool) -> String {
-        let dot = if name.starts_with('.') { "." } else { "" };
+        let lead = if name.starts_with('.') {
+            "."
+        } else if natural_cmp(name, ".") == Ordering::Less {
+            "-"
+        } else {
+            ""
+        };
         if dir {
-            return format!("{dot}dir-{}", number(&mut self.dirs, name));
+            return format!("{lead}dir-{}", number(&mut self.dirs, name));
         }
         let n = number(&mut self.files, name);
         match extension(name) {
-            Some(ext) => format!("{dot}file-{n}.{ext}"),
-            None => format!("{dot}file-{n}"),
+            Some(ext) => format!("{lead}file-{n}.{ext}"),
+            None => format!("{lead}file-{n}"),
         }
     }
 

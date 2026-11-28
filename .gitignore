@@ -1,3 +1,5 @@
 /target
 *.dromon-part
 /tests/goldens/*.new.png
+# Hegel's local database of failing examples (a found bug is pinned in the test instead).
+.hegel/

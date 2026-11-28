@@ -6,6 +6,9 @@
 //! before the first. Equal scores keep the order they came in.
 
 #[cfg(test)]
+#[path = "fuzzy_props.rs"]
+mod props;
+#[cfg(test)]
 #[path = "fuzzy_tests.rs"]
 mod tests;
 

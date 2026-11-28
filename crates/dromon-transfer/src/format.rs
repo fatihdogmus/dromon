@@ -259,3 +259,7 @@ mod tests {
         assert!(line.chars().filter(char::is_ascii_digit).count() > 0);
     }
 }
+
+#[cfg(test)]
+#[path = "format_props.rs"]
+mod props;

@@ -42,6 +42,9 @@ pub mod update;
 pub mod windows;
 
 #[cfg(test)]
+#[path = "props.rs"]
+mod props;
+#[cfg(test)]
 mod tests;
 
 use std::collections::{BTreeMap, VecDeque};

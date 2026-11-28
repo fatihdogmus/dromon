@@ -76,7 +76,7 @@ pub fn encode_request(request: &Request) -> io::Result<Vec<u8>> {
 
 /// Parses one request line (newline optional).
 pub fn decode_request(line: &[u8]) -> io::Result<Request> {
-    check_size(line.len())?;
+    check_size(without_newline(line).len())?;
     serde_json::from_slice(line).map_err(malformed)
 }
 
@@ -102,7 +102,7 @@ pub fn encode_reply(reply: &Reply) -> io::Result<Zeroizing<Vec<u8>>> {
 /// Parses one reply line. `{"cancel":true}` wins over any answer, so a confused peer fails
 /// closed.
 pub fn decode_reply(line: &[u8]) -> io::Result<Reply> {
-    check_size(line.len())?;
+    check_size(without_newline(line).len())?;
     let wire: ReplyIn = serde_json::from_slice(line).map_err(malformed)?;
     match (wire.cancel, wire.answer) {
         (true, answer) => {
@@ -139,6 +139,11 @@ fn finish_line(mut buf: Zeroizing<Vec<u8>>) -> io::Result<Zeroizing<Vec<u8>>> {
     Ok(buf)
 }
 
+/// `line` without its one optional newline: the limit is on the message.
+fn without_newline(line: &[u8]) -> &[u8] {
+    line.strip_suffix(b"\n").unwrap_or(line)
+}
+
 fn check_size(len: usize) -> io::Result<()> {
     if len > MAX_MESSAGE_BYTES {
         return Err(invalid("askpass message larger than 64 KiB"));
@@ -157,3 +162,7 @@ fn malformed(e: serde_json::Error) -> io::Error {
         format!("malformed askpass message ({:?} error at column {})", e.classify(), e.column()),
     )
 }
+
+#[cfg(test)]
+#[path = "protocol_props.rs"]
+mod props;

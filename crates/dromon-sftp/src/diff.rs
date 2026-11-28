@@ -153,3 +153,7 @@ mod tests {
         assert!(took.as_secs() < 5, "100k diff took {took:?}");
     }
 }
+
+#[cfg(test)]
+#[path = "diff_props.rs"]
+mod props;

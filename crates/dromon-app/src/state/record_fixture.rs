@@ -1,9 +1,9 @@
 //! A recording's fixture (`docs/fixtures.md`): the hosts its steps used, each server's home, its
 //! sign-in questions by kind with placeholder answers, and the folders it listed, the first time
 //! each was listed, with their errors. Every name goes through the report's [`Redactor`]
-//! (entries in each folder's natural order, so sorting by name keeps its order); sizes, dates
-//! and permissions stay, owners and groups go, and ssh's own words for a failed connection are
-//! left out.
+//! (all numbered first in their natural order, so sorting a folder by name keeps its order);
+//! sizes, dates and permissions stay, owners and groups go, and ssh's own words for a failed
+//! connection are left out.
 //!
 //! The fixture is written one entry a line, to read and to diff. One that would pass [`CAP`]
 //! characters sums up its largest folders first: the rows no step touched become a generator
@@ -146,6 +146,16 @@ impl Node {
 
     fn len(&self) -> usize {
         self.lines().iter().map(|l| l.len() + 2).sum()
+    }
+
+    /// The names it writes, each with whether it's a folder.
+    fn names(&self) -> Vec<(&str, bool)> {
+        let entries: Vec<&Entry> = match self {
+            Node::Entries(all) => all.iter().map(|(e, _)| e).collect(),
+            Node::Summed { kept, .. } => kept.iter().collect(),
+            Node::Error(_) => Vec::new(),
+        };
+        entries.into_iter().map(|e| (e.name.as_str(), e.kind.is_dir_like())).collect()
     }
 }
 
@@ -357,7 +367,12 @@ pub fn build(rec: &Recording, steps: &[Taken], app: &App, r: &mut Redactor, vers
         used_servers.push((host, alias, s));
     }
     model.summarised = fit(&mut folders);
-    // Named now, folder by folder in order, so each folder's stand-ins keep its rows' order.
+    // Every name numbered first, in the order sorting by name gives, so each folder's stand-ins
+    // sort as its rows do and a name in two folders is one stand-in.
+    let homes: Vec<RemotePath> = used_servers.iter().filter_map(|(_, _, s)| s.home.clone()).collect();
+    let mut names: Vec<(&str, bool)> = folders.iter().flat_map(|f| f.node.names()).collect();
+    names.extend(folders.iter().map(|f| &f.path).chain(&homes).flat_map(|p| p.components().map(|c| (c, true))));
+    r.number_in_order(names);
     for f in &mut folders {
         f.node = named(std::mem::replace(&mut f.node, Node::Error("")), r);
         f.key = r.remote_path(&f.path);

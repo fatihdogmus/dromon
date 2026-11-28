@@ -38,6 +38,9 @@ use super::update::{Install, Phase as UpdatePhase};
 use super::{App, EditId, Effect, OpId, Sheet};
 use crate::theme::{self, Access};
 
+#[cfg(test)]
+#[path = "report_props.rs"]
+mod props;
 #[path = "record.rs"]
 pub mod record;
 #[cfg(test)]

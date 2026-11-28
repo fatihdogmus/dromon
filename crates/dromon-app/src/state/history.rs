@@ -141,3 +141,7 @@ mod tests {
         assert_eq!(cur, p("/20"));
     }
 }
+
+#[cfg(test)]
+#[path = "history_props.rs"]
+mod props;
