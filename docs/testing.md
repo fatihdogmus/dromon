@@ -169,11 +169,14 @@ no one thought of, and the app must not panic on them or leak them.
 - State that changes over many steps is a `#[hegel::state_machine]`: the system and a small
   model side by side, `#[rule]`s that act on both, and `#[invariant(always_run)]` checks after
   every rule. Rules call `tc.assume(…)` first, before changing anything.
-- Hegel runs 100 cases locally and, on CI (its `ci` profile, chosen by itself), the same
-  derandomized cases every run, so CI never fails on a new random input. A test that builds an
-  `App` or runs a process may set fewer (`#[hegel::test(test_cases = N)]`) with a comment
-  saying why. Each props file runs in seconds; `HEGEL_TEST_CASES=10000 cargo test -p <crate>
-  props` searches harder locally.
+- Hegel runs 100 fresh random cases on every run, on CI as locally: `hegel.toml` turns off
+  the fixed seed Hegel's `ci` profile would use, so every CI run searches new inputs. A test
+  that builds an `App` or runs a process may set fewer (`#[hegel::test(test_cases = N)]`) with
+  a comment saying why. Each props file runs in seconds; `HEGEL_TEST_CASES=10000 cargo test -p
+  <crate> props` searches harder locally.
+- A property that fails on CI found a real input that breaks it, whatever the pull request
+  touched: never rerun the job to get green. Pin the input it printed and fix the bug (or the
+  property, if it misread the contract), in its own pull request if it's unrelated.
 - A failure prints the shrunk input by the names it was drawn as. Pin it under the property
   with `#[hegel::explicit_test_case(name = value, …)]`, which runs before the generated cases
   every time, so a found bug stays covered and readable. Hegel's own database of failures
