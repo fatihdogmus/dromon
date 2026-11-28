@@ -41,6 +41,8 @@ mod ui_properties_tests;
 #[cfg(test)]
 mod ui_quick_tests;
 #[cfg(test)]
+mod ui_record_tests;
+#[cfg(test)]
 mod ui_remote_edit_tests;
 #[cfg(test)]
 mod ui_report_tests;

@@ -1,13 +1,17 @@
 name: Bug report
 description: Something in Dromon doesn't work as it should.
 labels: ["bug"]
-# The app fills `diagnostics` from the link it opens (`crates/dromon-app/src/state/report.rs`):
-# keep that field's id as it is.
+# The app fills `diagnostics`, and from a recording of steps `fixture` and `script`, from the
+# link it opens (`crates/dromon-app/src/state/report.rs`): keep those fields' ids as they are.
+# `fixture` and `script` have no `render`: they hold their own ```json fixture and ```json script
+# blocks, which `cargo repro` (`scripts/repro.sh`) finds by those exact fences.
 body:
   - type: markdown
     attributes:
       value: |
         Thanks for reporting! The quickest way is from Dromon itself: **Help › Report a Bug…** (on Windows and Linux: **Ctrl+K → "Report a bug…"**; ⌘K on macOS works too). It fills in the diagnostics below for you, with the names of your hosts, users, folders and files replaced. No GitHub account? **Copy report** there puts the same text on your clipboard.
+
+        Can you make the bug happen again? **Record Steps…** (on the report, in the Help menu, or ⌘K / Ctrl+K → "Record steps for a bug report…") records what you do until it shows, so it can be replayed without your servers. The recording fills in the last two fields; with Copy report, paste the whole report into **Recorded steps**.
   - type: textarea
     id: what-happened
     attributes:
@@ -29,3 +33,13 @@ body:
       label: Diagnostics
       description: Filled in by Help › Report a Bug… in Dromon (or pasted from its Copy report). Without it, the Dromon version and your OS.
       render: text
+  - type: textarea
+    id: fixture
+    attributes:
+      label: Recorded fixture
+      description: Filled in by Record Steps… in Dromon (what the servers answered, names replaced). Leave it empty without a recording.
+  - type: textarea
+    id: script
+    attributes:
+      label: Recorded steps
+      description: Filled in by Record Steps… in Dromon (the steps to replay). Leave it empty without a recording.

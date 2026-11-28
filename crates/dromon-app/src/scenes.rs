@@ -772,4 +772,6 @@ pub const SCENES: &[Scene] = &[
     ("update-confirm", update::update_confirm),
     ("report", report::report),
     ("report-light", report::report_light),
+    ("recording", report::recording),
+    ("report-recorded", report::report_recorded),
 ];

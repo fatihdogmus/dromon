@@ -125,7 +125,8 @@ fn typing_a_host_and_return_connects_it() {
     let mut rt = runtime(false);
     chord(&mut rt, 'k', false);
     type_text(&mut rt, "stag");
-    assert_eq!(rows(&rt), ["pal-host-staging"]);
+    // "Record steps for a bug report…" holds s-t-a-g too, after the host.
+    assert_eq!(rows(&rt), ["pal-host-staging", "pal-record-steps"]);
     key(&mut rt, Key::Enter);
     assert!(!shown(&rt, "palette"));
     assert_eq!(rt.state.active, Some(HostId("staging".into())));

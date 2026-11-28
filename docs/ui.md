@@ -101,6 +101,16 @@ Picking the right surface for new UI.
   the report read-only in the mono face, scrolling and selectable: exactly what Copy report
   copies and Open GitHub (the default button) fills into the new-issue form. Escape and Cancel
   close it; it waits behind a prompt sheet, and holds the list's shortcuts as the others do.
+- Record steps (`state/record.rs`) starts from the report sheet's Record Steps… (it closes the
+  sheet), the palette's "Record steps for a bug report…" and the Help menu's "Record Steps…"
+  (macOS). While a window records, a pill above the sidebar's footer says "● Recording · N
+  steps" in the `danger` token, with Stop; it sits in the sidebar so it shows on every page,
+  Settings included. Stop (or 50 steps, or 15 minutes) opens the report sheet with the
+  recording: its steps in words first, then the diagnostics, then the fixture and script blocks,
+  all as they are sent; notes under the text say when Open GitHub will also copy what the link
+  can't hold, when a folder was summed up, and when the recording started on a host already
+  open. Cancel discards the recording; nothing of it is written anywhere. While recording, the
+  palette's item reads "Stop recording steps" and the Help item stops it.
 
 ### Agent note
 
@@ -434,8 +444,8 @@ Writing a script that drives the app.
 | Context menus | `ctx-menu` with items `ctx-<id>` (`ctx-open`, `ctx-edit`, `ctx-download`, `ctx-terminal`, `ctx-copy`, `ctx-cut`, `ctx-paste`, `ctx-copy-path`, `ctx-rename`, `ctx-delete`, `ctx-new-folder`, `ctx-refresh`, `ctx-hidden`); a host's menu `ctx-host-connect`, `ctx-host-disconnect`, `ctx-host-add-to-config`, `ctx-host-edit`, `ctx-host-remove`, `ctx-host-save` |
 | Quick connect | `sb-quick-connect`, `welcome-quick-connect`, `quick`, `quick-<field>-input` and `quick-<field>-error` for `host`, `user`, `port`, `alias`, `identity`, `jump`; `quick-more`, `quick-pick-identity`, `quick-save`, `quick-connect`; the Add to SSH config sheet `add-config` (`-block-text`, `-target`, `-backup`, `-confirm`, `-cancel`) |
 | Filter and search | `tb-filter` (closed), `tb-filter-input`, `tb-filter-clear`, the scope switch `tb-scope` with `tb-scope-folder` and `tb-scope-subfolders`; results `search-grid`, `rows/hit-<n>`, `search-status-text`, `search-unreadable`, `search-empty`; a result's menu items `ctx-download`, `ctx-copy-path`, `ctx-properties` |
-| Palette | `tb-palette`, `palette-input`, `palette-group-hosts`, `palette-group-folders`, `palette-group-actions`, rows `pal-host-<id>`, `pal-go`, `pal-folder-<path>`, `pal-<action>` (`pal-report-bug`); `palette-empty` |
-| Bug report | the sheet `report` with `report-explain`, `report-scroll`, `report-text`, `report-note` (the link left events out), `report-copy`, `report-cancel`, `report-open`; Report buttons `toast-op-<id>-report`, `toast-note-<n>-report`, `toast-update-report`, `state-report` |
+| Palette | `tb-palette`, `palette-input`, `palette-group-hosts`, `palette-group-folders`, `palette-group-actions`, rows `pal-host-<id>`, `pal-go`, `pal-folder-<path>`, `pal-<action>` (`pal-report-bug`, `pal-record-steps`, `pal-stop-recording`); `palette-empty` |
+| Bug report | the sheet `report` with `report-explain`, `report-scroll`, `report-text`, `report-note` (the link left events out), `report-recording-note` (what Open GitHub copies, summed-up folders, a recording started mid-session), `report-copy`, `report-record` (without a recording in it), `report-cancel`, `report-open`; Report buttons `toast-op-<id>-report`, `toast-note-<n>-report`, `toast-update-report`, `state-report`; while recording, the sidebar's pill `record` with `record-text` and `record-stop` |
 | Polling | a refresh's new rows carry `fresh-<n>`; the vanished-folder toast is `toast-note-<n>` (`-text`) |
 | Preview | the panel `preview` (Space: `{"type": "key", "name": " "}`), `preview-title`, `preview-meta`, `preview-download`, `preview-close`; its text `preview-lines` (the region; block `b` is `preview-lines/<b>`, its lines `…/lines`, their numbers `…/n`), the notes `preview-cut` and `preview-long`, `preview-image`, `preview-loading`, `preview-note`, `preview-kind-value` |
 

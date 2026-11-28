@@ -11,9 +11,10 @@
 //! window quits the app, on macOS too. The app menu's "Settings…" (⌘,, macOS) acts in the key
 //! window, as Rune's menu bar holds the key window's items: it shows that window's Settings page
 //! (`state/page.rs`). Its "Check for Updates…" shows that page's General section and checks now.
-//! The Help menu's "Report a Bug…" opens that window's bug report sheet (`state/report.rs`).
+//! The Help menu's "Report a Bug…" opens that window's bug report sheet (`state/report.rs`), and
+//! its "Record Steps…" records that window's steps (`state/record.rs`).
 //! On Windows and Linux Rune has no menu bar, and Ctrl+, reaches `on_key`; Settings' Check now
-//! and the palette's "Report a bug…" are the ways there.
+//! and the palette's "Report a bug…" and "Record steps for a bug report…" are the ways there.
 //!
 //! The taskbar, the Dock badge and notifications are hooked up once for the app
 //! ([`Fleet::connect_os`]); every main window's native window joins that link, and only the
@@ -205,6 +206,7 @@ fn main_window(fleet: &Fleet, id: WindowId, app: RuneApp<App>) -> RuneApp<App> {
         .menu_item(settings_item())
         .menu_item(updates_item())
         .menu_item(report_item())
+        .menu_item(record_item())
 }
 
 fn menu_item(title: &str, id: &str, chord: &str, action: fn(&mut App, &mut Tx)) -> MenuItem<App> {
@@ -248,6 +250,17 @@ fn report_item() -> MenuItem<App> {
 
 fn report_bug(s: &mut App, tx: &mut Tx) {
     views::run(s, Action::Report(ReportAction::Open(None)), tx);
+}
+
+/// The Help menu's "Record Steps…": recording starts in the window it acts in, or, while that
+/// window records, stops and shows the report (`state/record.rs`).
+fn record_item() -> MenuItem<App> {
+    MenuItem::new("Record Steps…", record_steps).id("record-steps").menu("Help")
+}
+
+fn record_steps(s: &mut App, tx: &mut Tx) {
+    let action = if s.recording_steps().is_some() { ReportAction::StopRecording } else { ReportAction::Record };
+    views::run(s, Action::Report(action), tx);
 }
 
 /// The fleet as a window state's peers, and its backend waking the windows (a fixture's); the

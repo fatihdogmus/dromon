@@ -1,6 +1,8 @@
 //! The host sidebar (§6.2): Connected, SSH Config, Saved and Recent, with a quick-connect
-//! button and the Settings gear at the bottom. Its right edge drags to resize it between 200
-//! and 320 pt. It stays while the Settings page is on screen; picking a host leaves the page.
+//! button and the Settings gear at the bottom, and above them, while the window records its
+//! steps, the recording's pill (`record`, `record-text`, `record-stop`). Its right edge drags to
+//! resize it between 200 and 320 pt. It stays while the Settings page is on screen; picking a
+//! host leaves the page.
 
 use dromon_core::{ConnStatus, HostSpec};
 use rune::{Color, Cursor, Drag, El, Phase, ScrollSpec, Tx, col, el, icon, row, text};
@@ -9,6 +11,7 @@ use super::brand::{self, Mark};
 use super::widgets::{Keyboard, dot, icon_button};
 use super::{Paint, menu};
 use crate::icons;
+use crate::state::report::ReportAction;
 use crate::state::{Action, App, MenuKind, RowTarget, Section, hosts};
 use crate::theme::{motion, radius, size, space, type_};
 
@@ -44,8 +47,48 @@ pub fn view(s: &App, p: Paint) -> El {
         .border_sides([0.0, p.hair, 0.0, 0.0], t.border_subtle)
         .child(band(p))
         .child(sections)
+        .children(recording(s, p))
         .child(footer(s, p))
         .child(resize_grip())
+}
+
+/// While the window records its steps (`state/record.rs`): "● Recording · 7 steps", and Stop,
+/// which shows the bug report with them. Above the footer, where it stays in sight on every page.
+fn recording(s: &App, p: Paint) -> Option<El> {
+    let n = s.recording_steps()?;
+    let t = p.t;
+    let words = if n == 1 { "Recording · 1 step".to_owned() } else { format!("Recording · {n} steps") };
+    let stop = row()
+        .key("record-stop")
+        .role("button")
+        .label("Stop recording")
+        .h(24.0)
+        .px(space::S2)
+        .radius(radius::ROW)
+        .center()
+        .border(p.hair, t.border)
+        .hover(t.hover)
+        .press(t.press)
+        .on_press_tx(|s: &mut App, tx: &mut Tx| super::run(s, Action::Report(ReportAction::StopRecording), tx))
+        .tab_press()
+        .child(text("Stop").font(type_::META_STRONG).color(t.text));
+    let pill = row()
+        .key("record")
+        .role("status")
+        .label(words.clone())
+        .w_full()
+        .h(36.0)
+        .pl(space::S3)
+        .pr(space::S1)
+        .gap(space::S2)
+        .center_y()
+        .radius(radius::ROW)
+        .fill(t.danger.alpha(0.12))
+        .border(p.hair, t.danger.alpha(0.45))
+        .child(dot(t.danger, 8.0))
+        .child(text(words).key("record-text").font(type_::META).color(t.text).grow(1.0).truncate())
+        .child(stop);
+    Some(row().w_full().px(space::S2).pb(space::S2).child(pill))
 }
 
 /// The top band, one piece with the toolbar: it drags the window and, on macOS, holds the

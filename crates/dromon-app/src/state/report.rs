@@ -15,6 +15,14 @@
 //!
 //! The link stays under [`URL_BUDGET`] characters: the oldest events are left out of it first,
 //! whole lines, with a line saying how many; the sheet says so too. Copy report has them all.
+//!
+//! A recording of steps (`record.rs`) adds to it: the steps in words after the events, and a
+//! fixture and a script in the form's [`FIXTURE`] and [`SCRIPT`] fields, fenced so `cargo repro`
+//! finds them. The report and its recording share one [`Redactor`], so `host-1` is one host in
+//! all of it. When the link can't hold the fixture (or the script too), Open GitHub also copies
+//! what it leaves out and the field says to paste it; the sheet says so before. With a recording,
+//! the report's text is the whole issue body: the diagnostics in a `text` block, then the two
+//! blocks, so Copy report pastes into one field and still replays.
 
 use std::cell::Cell;
 use std::collections::VecDeque;
@@ -30,9 +38,13 @@ use super::update::{Install, Phase as UpdatePhase};
 use super::{App, EditId, Effect, OpId, Sheet};
 use crate::theme::{self, Access};
 
+#[path = "record.rs"]
+pub mod record;
 #[cfg(test)]
 #[path = "report_tests.rs"]
 mod tests;
+
+use record::{Built, Recording};
 
 /// The repository's new-issue form.
 pub const NEW_ISSUE: &str = "https://github.com/fatihdogmus/dromon/issues/new";
@@ -41,8 +53,19 @@ pub const TEMPLATE: &str = "bug.yml";
 /// The form's field the report goes into, by its `id`: GitHub fills a form's fields from the
 /// link's query by id, so this is a contract with `bug.yml` (a test checks it).
 pub const DIAGNOSTICS: &str = "diagnostics";
+/// The fields a recording's fixture and script go into.
+pub const FIXTURE: &str = "fixture";
+pub const SCRIPT: &str = "script";
 /// Every field id the link fills.
-pub const FIELDS: &[&str] = &[DIAGNOSTICS];
+pub const FIELDS: &[&str] = &[DIAGNOSTICS, FIXTURE, SCRIPT];
+/// What the Fixture field says when Open GitHub copied the fixture instead.
+pub const PASTE_FIXTURE: &str =
+    "Dromon copied the recorded fixture to your clipboard: replace this line with it (⌘V, or Ctrl+V).";
+/// … the fixture and the script.
+pub const PASTE_BOTH: &str =
+    "Dromon copied the recorded fixture and steps to your clipboard: replace this line with them (⌘V, or Ctrl+V).";
+/// What the Script field says when it went with the fixture.
+pub const PASTED_WITH: &str = "(The recorded steps are pasted with the fixture above.)";
 /// The most characters the link may have: GitHub answers longer ones "414 URI Too Long".
 pub const URL_BUDGET: usize = 7_000;
 /// How many service events and actions the window keeps for a report.
@@ -214,12 +237,18 @@ pub enum Subject {
 /// The sheet's buttons, and opening it (`Action::Report`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReportAction {
-    /// "Report a Bug…" (`None`), or an error's Report: the sheet, with that error in it.
+    /// "Report a Bug…" (`None`), or an error's Report: the sheet, with that error in it (and a
+    /// recording going on, which stops).
     Open(Option<Subject>),
     Copy,
     OpenGitHub,
     /// Cancel, Escape.
     Cancel,
+    /// Record Steps… (the sheet, the palette, the Help menu): the sheet closes and the window
+    /// records (`record.rs`).
+    Record,
+    /// The pill's Stop: the sheet, with the recording.
+    StopRecording,
 }
 
 /// One event line of a report, and how many events it stands for.
@@ -229,18 +258,38 @@ struct Line {
     events: u32,
 }
 
-/// A report before it's rendered: everything above the events, and the events oldest first.
+/// A report before it's rendered: everything above the events, the events oldest first, and a
+/// recording's steps in words.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Diagnostics {
     head: Vec<String>,
     events: Vec<Line>,
+    steps: Vec<String>,
+}
+
+/// The new-issue link, and what Open GitHub copies of what it couldn't hold.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Link {
+    pub url: String,
+    /// How many of the oldest event lines it leaves out.
+    pub left_out: usize,
+    pub copies: Option<String>,
 }
 
 impl Diagnostics {
     /// The text with the first `left_out` event lines left out (and a line saying how many
     /// events they were).
     fn render(&self, left_out: usize) -> String {
-        let mut out = self.head.join("\n");
+        // A recording's steps come first: they're what a reader needs most.
+        let mut out = String::new();
+        if !self.steps.is_empty() {
+            out.push_str("Steps you recorded (names replaced):");
+            for line in &self.steps {
+                let _ = write!(out, "\n  {line}");
+            }
+            out.push_str("\n\n");
+        }
+        out.push_str(&self.head.join("\n"));
         out.push_str("\nRecent events, oldest first:");
         let omitted: u32 = self.events[..left_out].iter().map(|l| l.events).sum();
         if omitted > 0 {
@@ -261,13 +310,37 @@ impl Diagnostics {
     }
 
     /// The new-issue link with as much of the report as fits `budget` characters: the oldest
-    /// event lines go first, whole. Also how many lines it left out.
-    pub fn link(&self, budget: usize) -> (String, usize) {
+    /// event lines go first, whole. A recording's `blocks` (fixture, script) go in their fields;
+    /// when they can't fit even so, the fixture (then the script too) is copied instead.
+    pub fn link(&self, budget: usize, blocks: Option<(&str, &str)>) -> Link {
+        let Some((fixture, script)) = blocks else {
+            return self.fitted(budget, issue_url, None);
+        };
+        let both = format!("{fixture}\n\n{script}");
+        let tiers = [
+            (fixture, script, None),
+            (PASTE_FIXTURE, script, Some(fixture.to_owned())),
+            (PASTE_BOTH, PASTED_WITH, Some(both)),
+        ];
+        let mut link = None;
+        for (f, s, copies) in tiers {
+            let l =
+                self.fitted(budget, |text| issue_url_with(&[(DIAGNOSTICS, text), (FIXTURE, f), (SCRIPT, s)]), copies);
+            if l.url.len() <= budget {
+                return l;
+            }
+            link = Some(l);
+        }
+        link.expect("three tiers were tried")
+    }
+
+    /// The link `url` makes of the text, leaving out the oldest events until it fits `budget`.
+    fn fitted(&self, budget: usize, url: impl Fn(&str) -> String, copies: Option<String>) -> Link {
         let mut left_out = 0;
         loop {
-            let url = issue_url(&self.render(left_out));
-            if url.len() <= budget || left_out == self.events.len() {
-                return (url, left_out);
+            let u = url(&self.render(left_out));
+            if u.len() <= budget || left_out == self.events.len() {
+                return Link { url: u, left_out, copies };
             }
             left_out += 1;
         }
@@ -290,7 +363,26 @@ pub fn encode(s: &str) -> String {
 
 /// The new-issue form ([`TEMPLATE`]) with `diagnostics` in its [`DIAGNOSTICS`] field.
 pub fn issue_url(diagnostics: &str) -> String {
-    format!("{NEW_ISSUE}?template={}&{DIAGNOSTICS}={}", encode(TEMPLATE), encode(diagnostics))
+    issue_url_with(&[(DIAGNOSTICS, diagnostics)])
+}
+
+/// The new-issue form ([`TEMPLATE`]) with these fields filled, by id.
+pub fn issue_url_with(fields: &[(&str, &str)]) -> String {
+    let mut url = format!("{NEW_ISSUE}?template={}", encode(TEMPLATE));
+    for (id, value) in fields {
+        let _ = write!(url, "&{id}={}", encode(value));
+    }
+    url
+}
+
+/// What the sheet says of a recording.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Recorded {
+    pub steps: usize,
+    /// How many folders were too big to go whole.
+    pub summarised: usize,
+    /// It started on a host already open: its sign-in isn't in it.
+    pub mid_session: bool,
 }
 
 /// The report on the sheet.
@@ -305,14 +397,20 @@ pub struct Draft {
     pub left_out: usize,
     /// Copy report was pressed: its button says so.
     pub copied: bool,
+    /// What Open GitHub also copies: a recording's blocks the link couldn't hold.
+    pub copies: Option<String>,
+    /// The recording in it, if any.
+    pub recorded: Option<Recorded>,
 }
 
-/// A window's bug report: what it keeps for one, and the sheet.
+/// A window's bug report: what it keeps for one, the sheet, and a recording of steps.
 #[derive(Debug, Default)]
 pub struct Report {
     pub recent: Recent,
     /// The sheet, while it's open.
     pub draft: Option<Draft>,
+    /// The steps being recorded, while they are.
+    pub recording: Option<Recording>,
     /// This copy and the computer, when pinned (scenes, so their pictures don't change with the
     /// machine or the release); else [`About::here`].
     pub about: Option<About>,
@@ -365,9 +463,8 @@ impl App {
     pub(super) fn report_action(&mut self, action: ReportAction, fx: &mut Vec<Effect>) {
         match action {
             ReportAction::Open(subject) => {
-                let diagnostics = self.diagnostics(subject.as_ref());
-                let (url, left_out) = diagnostics.link(URL_BUDGET);
-                self.report.draft = Some(Draft { text: diagnostics.text(), url, left_out, copied: false });
+                let recording = self.report.recording.take();
+                self.open_report(subject.as_ref(), recording.as_ref());
             }
             ReportAction::Copy => {
                 if let Some(d) = &mut self.report.draft {
@@ -377,16 +474,61 @@ impl App {
             }
             ReportAction::OpenGitHub => {
                 if let Some(d) = self.report.draft.take() {
+                    fx.extend(d.copies.map(Effect::Copy));
                     fx.push(Effect::OpenUrl(d.url));
                 }
             }
             ReportAction::Cancel => self.report.draft = None,
+            ReportAction::Record => {
+                if self.report.recording.is_none() {
+                    self.report.draft = None;
+                    self.report.recording = Some(Recording::start(self));
+                }
+            }
+            ReportAction::StopRecording => {
+                if let Some(recording) = self.report.recording.take() {
+                    self.open_report(None, Some(&recording));
+                }
+            }
         }
     }
 
-    /// The report of what this window knows now, about `subject` when it started from an error.
-    pub fn diagnostics(&self, subject: Option<&Subject>) -> Diagnostics {
+    /// The sheet, with the report of what this window knows now (about `subject` when it
+    /// started from an error) and `recording` in it.
+    fn open_report(&mut self, subject: Option<&Subject>, recording: Option<&Recording>) {
         let mut r = Redactor::default();
+        let built: Option<Built> = recording.map(|rec| rec.build(self, &mut r));
+        let mut diagnostics = self.diagnostics(subject, &mut r);
+        let Some(built) = built else {
+            let link = diagnostics.link(URL_BUDGET, None);
+            let text = diagnostics.text();
+            self.report.draft = Some(Draft {
+                text,
+                url: link.url,
+                left_out: link.left_out,
+                copied: false,
+                copies: None,
+                recorded: None,
+            });
+            return;
+        };
+        diagnostics.steps = built.steps;
+        let link = diagnostics.link(URL_BUDGET, Some((&built.fixture, &built.script)));
+        let text = format!("```text\n{}\n```\n\n{}\n\n{}\n", diagnostics.text(), built.fixture, built.script);
+        let recorded = Recorded { steps: built.count, summarised: built.summarised, mid_session: built.mid_session };
+        self.report.draft = Some(Draft {
+            text,
+            url: link.url,
+            left_out: link.left_out,
+            copied: false,
+            copies: link.copies,
+            recorded: Some(recorded),
+        });
+    }
+
+    /// The report of what this window knows now, about `subject` when it started from an error,
+    /// names replaced through `r`.
+    pub fn diagnostics(&self, subject: Option<&Subject>, r: &mut Redactor) -> Diagnostics {
         let about = self.report.about.clone().unwrap_or_else(About::here);
         let mut head = vec![
             format!("Dromon {} (installed as: {})", about.version, installed(self.update.install.as_ref())),
@@ -396,7 +538,7 @@ impl App {
         head.extend(self.display_lines());
         head.push(format!("Windows open: {}", self.windows_open()));
         head.push(format!("On screen: {}", self.on_screen().join("; ")));
-        if let Some(error) = subject.and_then(|s| self.failure(s, &mut r)) {
+        if let Some(error) = subject.and_then(|s| self.failure(s, r)) {
             head.push(String::new());
             head.push("Error the report started from:".to_owned());
             head.extend(error.into_iter().map(|l| format!("  {l}")));
@@ -417,7 +559,7 @@ impl App {
             .iter()
             .map(|(line, n)| Line { text: counted(&r.trace(line, &known), *n), events: *n })
             .collect();
-        Diagnostics { head, events }
+        Diagnostics { head, events, steps: Vec::new() }
     }
 
     /// How the window draws: the display, the settings, the display preferences.

@@ -211,6 +211,73 @@ fn no_name_survives_in_the_report_or_the_link() {
     assert!(text.contains("Status host=host-2 status=Failed"), "{text}");
 }
 
+/// The value of the link's field `id`, decoded.
+fn field_of(url: &str, id: &str) -> Option<String> {
+    let query = url.split_once('?')?.1;
+    query.split('&').find_map(|kv| kv.strip_prefix(&format!("{id}="))).map(decode)
+}
+
+/// A server full of the same names, a password among them.
+const NAMED: &str = r#"{"version": 1, "now": 1795615200,
+  "hosts": [{"alias": "acme-prod-db", "source": "saved", "user": "zelda", "hostname": "db.acme-corp.example", "port": 48213}],
+  "servers": {"acme-prod-db": {"home": "/home/zelda",
+    "auth": [{"password": {"prompt": "zelda@db.acme-corp.example's password: ", "accept": "hunter2-kitchen"}}],
+    "tree": {
+      "/home/zelda": [
+        {"name": "secret-plans", "kind": "dir", "owner": "zelda", "group": "acme-corp"},
+        {"name": "q3-payroll.xlsx", "kind": "file", "size": 48100, "owner": "zelda"},
+        {"name": ".kitchen-notes", "kind": "file", "size": 12}],
+      "/home/zelda/secret-plans": [{"name": "kitchen.txt", "kind": "file", "size": 9}]}}}}"#;
+
+#[test]
+fn no_name_survives_in_a_recording_or_its_link_fields_or_what_is_copied() {
+    fn still() -> i64 {
+        0
+    }
+    let mut s = fixture::app(std::sync::Arc::new(fixture::parse(NAMED).unwrap()));
+    s.wall_ms = still;
+    s.act(Action::Report(ReportAction::Record));
+    s.act(Action::SelectHost(HostId("acme-prod-db".into())));
+    s.ui.sheets.edit_mut().text = "hunter2-kitchen".into();
+    s.act(Action::SubmitPrompt);
+    s.act(Action::Open("secret-plans".into()));
+    s.act(Action::Back);
+    s.act(Action::Click { name: "q3-payroll.xlsx".into(), extend: false, toggle: false });
+    s.act(Action::File(crate::state::FileAction::Rename));
+    s.files.edit.field_mut().expect("the name field").edit = rune::TextEdit::new("zelda-acme-corp-merger.xlsx");
+    s.act(Action::File(crate::state::FileAction::EditSubmit));
+    s.act(Action::Palette(PaletteAction::OpenPath));
+    s.ui.palette.edit = rune::TextEdit::new("/home/zelda/secret-plans");
+    s.act(Action::Palette(PaletteAction::Edited));
+    s.act(Action::Palette(PaletteAction::Run));
+    let paths = vec![std::path::PathBuf::from("/home/zelda/Desktop/kitchen-q3-payroll.pdf")];
+    s.act(Action::Upload { paths, folder: None });
+    s.act(Action::Report(ReportAction::StopRecording));
+    let d = draft(&s).clone();
+    assert!(d.text.contains("```json fixture") && d.text.contains("```json script"), "{}", d.text);
+    let fields: Vec<String> = FIELDS.iter().filter_map(|id| field_of(&d.url, id)).collect();
+    assert_eq!(fields.len(), 3, "the link fills every field");
+    let mut secrets = SECRETS.to_vec();
+    secrets.extend(["hunter2", "merger", "Desktop", "notes"]);
+    for secret in secrets {
+        assert!(!d.text.contains(secret), "{secret} in the report:\n{}", d.text);
+        assert!(!d.url.contains(secret), "{secret} in the link");
+        for f in &fields {
+            assert!(!f.contains(secret), "{secret} in a field:\n{f}");
+        }
+        assert!(!d.copies.as_deref().unwrap_or("").contains(secret), "{secret} in what's copied");
+    }
+    // The steps are there, by their stand-ins, and the upload by what it was.
+    for said in [
+        "Answered the password (what you typed isn't recorded)",
+        "Named it file-",
+        "Went to /dir-",
+        "Uploaded files (not replayed)",
+    ] {
+        assert!(d.text.contains(said), "{said:?} in {}", d.text);
+    }
+}
+
 #[test]
 fn an_errors_report_says_its_kind_and_a_message_without_names() {
     let mut s = full_of_names();
@@ -253,6 +320,32 @@ fn the_link_fits_its_budget_by_leaving_out_the_oldest_events_whole() {
     let fx = s.act(Action::Report(ReportAction::Copy));
     assert_eq!(fx, [Effect::Copy(d.text.clone())]);
     assert!(d.text.contains("entries=0 ") && !d.text.contains("omitted"));
+}
+
+#[test]
+fn a_recording_the_link_cant_hold_is_copied_the_fixture_first_then_the_script_too() {
+    let d =
+        Diagnostics { head: vec!["Dromon 9.9.0".into()], events: Vec::new(), steps: vec!["1. Opened host-1".into()] };
+    let block = |what: &str, n: usize| format!("```json {what}\n{}\n```", "x".repeat(n));
+    let small = d.link(URL_BUDGET, Some((&block("fixture", 100), &block("script", 100))));
+    assert_eq!(small.copies, None);
+    assert_eq!(field_of(&small.url, FIXTURE).as_deref(), Some(block("fixture", 100).as_str()));
+    let fixture = block("fixture", URL_BUDGET);
+    let big = d.link(URL_BUDGET, Some((&fixture, &block("script", 100))));
+    assert!(big.url.len() <= URL_BUDGET);
+    assert_eq!(big.copies.as_deref(), Some(fixture.as_str()));
+    assert_eq!(field_of(&big.url, FIXTURE).as_deref(), Some(PASTE_FIXTURE));
+    assert_eq!(field_of(&big.url, SCRIPT).as_deref(), Some(block("script", 100).as_str()));
+    let script = block("script", URL_BUDGET);
+    let both = d.link(URL_BUDGET, Some((&fixture, &script)));
+    assert!(both.url.len() <= URL_BUDGET);
+    assert_eq!(both.copies, Some(format!("{fixture}\n\n{script}")));
+    assert_eq!(field_of(&both.url, SCRIPT).as_deref(), Some(PASTED_WITH));
+    assert!(
+        field_of(&both.url, DIAGNOSTICS)
+            .unwrap()
+            .starts_with("Steps you recorded (names replaced):\n  1. Opened host-1\n\n")
+    );
 }
 
 #[test]

@@ -99,7 +99,7 @@ fn an_empty_query_lists_hosts_then_actions() {
     // Nothing on screen: only what works without a host.
     assert_eq!(
         actions(&s),
-        ["pal-quick-connect", "pal-show-transfers", "pal-hidden", "pal-settings", "pal-report-bug"]
+        ["pal-quick-connect", "pal-show-transfers", "pal-hidden", "pal-settings", "pal-report-bug", "pal-record-steps"]
     );
     let qc = items.iter().find(|i| i.key == "pal-quick-connect").unwrap();
     assert_eq!((qc.title.as_str(), qc.shortcut), ("Quick connect…", Some("mod+shift+k")));

@@ -177,6 +177,8 @@ In Dromon, choose **Help › Report a Bug…** (on Windows and Linux: <kbd>Ctrl+
 
 The report says which Dromon you run and how it was installed, your OS, display and accessibility settings, what kind of screen was up, the error you reported from, and the last things you did and Dromon heard, by kind only. The names of your hosts, users, addresses, folders and files are replaced (`host-1`, `<dir>/file-2.txt`), and it never holds passwords or what your files contain.
 
+Can you make it happen again? Choose **Record Steps…** (on the report, in the Help menu, or <kbd>Ctrl+K</kbd> → "Record steps for a bug report…"), do what makes the bug show, and press **Stop** on the "Recording" pill at the bottom of the sidebar. The report then also holds your steps and what your servers answered (folder listings, errors, which sign-in questions were asked), with every name replaced (`dir-3`, `file-7.log`) and sizes, dates and permissions kept, so the bug can be replayed without your servers. What you type to sign in is never recorded. You see all of it before anything is sent; if it's too long for the link, Open GitHub copies the rest for you to paste into the form.
+
 Contributors: the [repro form](https://github.com/fatihdogmus/dromon/issues/new?template=repro.yml) takes a fixture and a script that `cargo repro <issue>` replays headless (see [`docs/fixtures.md`](docs/fixtures.md)).
 
 ## 🛠️ Contributing
