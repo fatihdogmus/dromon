@@ -189,3 +189,7 @@ mod tests {
         assert_eq!(natural_cmp("x99999999999999999999999", "x100000000000000000000000"), Ordering::Less);
     }
 }
+
+#[cfg(test)]
+#[path = "natural_props.rs"]
+mod props;

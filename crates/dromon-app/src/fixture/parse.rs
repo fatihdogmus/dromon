@@ -15,6 +15,10 @@ use serde_json::{Map, Value};
 use super::generate::{Generator, MAX_COUNT, Mtime, Pattern, Size};
 use super::{Change, FIXTURE_JOBS, Fixture, Item, Node, Server, Step, TreeError, VERSION, default_mode, default_size};
 
+#[cfg(test)]
+#[path = "parse_props.rs"]
+mod props;
+
 /// A fixture that can't be used, and where.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParseError {
@@ -268,7 +272,12 @@ fn transfers(v: &Value, at: &At, hosts: &[HostSpec]) -> R<Vec<JobView>> {
             }
         };
         let speed = seconds("speed")?;
-        let eta = seconds("eta")?.map(Duration::from_secs_f64);
+        let eta = match seconds("eta")? {
+            None => None,
+            Some(s) => Some(
+                Duration::try_from_secs_f64(s).or_else(|_| at.key("eta").err(format!("{s} seconds is too long")))?,
+            ),
+        };
         let waiting = match optional(m, "waiting") {
             None => false,
             Some(v) => v
@@ -669,6 +678,9 @@ fn generator(v: &Value, at: &At) -> R<Generator> {
         return at.key("count").err(format!("{count} is more than {MAX_COUNT}"));
     }
     let start = optional(m, "start").map(|v| uint(v, &at.key("start"))).transpose()?.unwrap_or(1);
+    if count > 0 && start.checked_add(count - 1).is_none() {
+        return at.key("start").err(format!("{start}: {count} numbers from it run past {}", u64::MAX));
+    }
     let kind = match optional(m, "kind") {
         Some(v) => self::kind(v, &at.key("kind"))?,
         None => EntryKind::File,
@@ -695,8 +707,12 @@ fn generator(v: &Value, at: &At) -> R<Generator> {
             let at = at.key("mtime");
             known(s, &["end", "every", "jitter"], &at)?;
             let end = time(required(s, "end", &at)?, &at.key("end"))?;
-            let every = uint(required(s, "every", &at)?, &at.key("every"))? as i64;
-            let jitter = optional(s, "jitter").map(|v| uint(v, &at.key("jitter"))).transpose()?.unwrap_or(0) as i64;
+            let seconds = |v: &Value, at: &At| -> R<i64> {
+                let n = uint(v, at)?;
+                i64::try_from(n).or_else(|_| at.err(format!("{n} is more than {}", i64::MAX)))
+            };
+            let every = seconds(required(s, "every", &at)?, &at.key("every"))?;
+            let jitter = optional(s, "jitter").map(|v| seconds(v, &at.key("jitter"))).transpose()?.unwrap_or(0);
             Mtime::Series { end, every, jitter }
         }
         Some(v) => Mtime::Fixed(time(v, &at.key("mtime"))?),

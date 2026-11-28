@@ -155,3 +155,7 @@ fn is_password(line: &str) -> bool {
 #[cfg(test)]
 #[path = "prompt_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "prompt_props.rs"]
+mod props;

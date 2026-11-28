@@ -38,7 +38,7 @@ pub fn base_interval(entries: usize, vis: Visibility) -> Option<Duration> {
 
 /// Backoff on top of [`base_interval`]: a poll that took more than a quarter of the interval
 /// doubles the interval (up to [`PollSchedule::MAX_FACTOR`] times the base); a poll that would
-/// still be under a quarter of the halved interval halves it again, back down to the base.
+/// still be at most a quarter of the halved interval halves it again, back down to the base.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PollSchedule {
     factor: u32,
@@ -185,3 +185,7 @@ mod tests {
         assert_eq!(s.factor(), 1);
     }
 }
+
+#[cfg(test)]
+#[path = "poll_props.rs"]
+mod props;

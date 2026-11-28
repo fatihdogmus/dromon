@@ -182,3 +182,7 @@ mod tests {
         assert!(is_part_file(&upload_part_name("x.bin")));
     }
 }
+
+#[cfg(test)]
+#[path = "naming_props.rs"]
+mod props;

@@ -98,15 +98,15 @@ impl Generator {
                 // Drawn in this order (size, then the date) so a listing never changes.
                 let size = match self.size {
                     Size::Fixed(s) => s,
-                    Size::Range(min, max) => min + rng.below(max - min + 1),
+                    Size::Range(min, max) => min + rng.upto(max - min),
                 };
                 let mtime = match self.mtime {
                     Mtime::None => None,
                     Mtime::Fixed(t) => Some(t),
                     Mtime::Series { end, every, jitter } => {
-                        let back = (self.count - i) as i64 * every;
+                        let back = ((self.count - i) as i64).saturating_mul(every);
                         let jitter = if jitter > 0 { rng.below(jitter as u64 / 60 + 1) as i64 * 60 } else { 0 };
-                        Some(end - back - jitter)
+                        Some(end.saturating_sub(back).saturating_sub(jitter))
                     }
                 };
                 Entry {
@@ -143,5 +143,13 @@ impl Rng {
 
     pub fn below(&mut self, n: u64) -> u64 {
         self.next() % n.max(1)
+    }
+
+    /// A number from 0 to `max`, `max` included (any number, for `u64::MAX`).
+    pub fn upto(&mut self, max: u64) -> u64 {
+        match max.checked_add(1) {
+            Some(n) => self.below(n),
+            None => self.next(),
+        }
     }
 }

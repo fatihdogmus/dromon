@@ -159,3 +159,7 @@ mod tests {
         assert!(!RemotePath::new("/varnish").starts_with(&RemotePath::new("/var")));
     }
 }
+
+#[cfg(test)]
+#[path = "path_props.rs"]
+mod props;

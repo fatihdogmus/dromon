@@ -224,3 +224,7 @@ mod tests {
         assert!(!e("env", EntryKind::File, 0, 0).hidden());
     }
 }
+
+#[cfg(test)]
+#[path = "entry_props.rs"]
+mod props;

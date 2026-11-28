@@ -117,12 +117,17 @@ impl Job {
         }
     }
 
+    // Sums of what a server reports, which can pass u64::MAX: they stop there.
     pub(super) fn files_found(&self) -> u64 {
-        self.items.iter().map(|i| i.found).sum()
+        self.items.iter().fold(0, |sum, i| sum.saturating_add(i.found))
     }
 
     pub(super) fn bytes_done(&self) -> u64 {
-        self.files.iter().map(|f| f.done).sum()
+        self.files.iter().fold(0, |sum, f| sum.saturating_add(f.done))
+    }
+
+    pub(super) fn bytes_total(&self) -> u64 {
+        self.files.iter().fold(0, |sum, f| sum.saturating_add(f.plan.size()))
     }
 
     pub(super) fn all_settled(&self) -> bool {

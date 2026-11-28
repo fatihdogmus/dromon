@@ -168,3 +168,7 @@ mod tests {
         assert_eq!(dbg, "PasswordStore { passwords: 1, passphrases: 1 }");
     }
 }
+
+#[cfg(test)]
+#[path = "passwords_props.rs"]
+mod props;

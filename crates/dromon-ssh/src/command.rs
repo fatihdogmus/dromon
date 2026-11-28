@@ -353,7 +353,8 @@ fn config_option(keyword: &'static str, value: &str, percent: Percent) -> Result
 ///
 /// OpenSSH 8.7+ splits the value like a shell (`"`, `'`, `\` escapes, `#` comments); 8.4–8.6
 /// (Windows 11's inbox client) only knows double quotes and splits on `=`. Values with spaces,
-/// tabs, `#`, `'` or `=` are double-quoted, which both parsers read the same. Values containing
+/// tabs, form feeds (which ssh strips from a line's end), `#`, `'` or `=` are double-quoted,
+/// which both parsers read the same. Values containing
 /// `"` or a backslash sequence the newer parser would unescape are rejected, since no form reads
 /// back the same in both. `%` follows [`Percent`]; `${` (environment expansion in newer
 /// versions, with no escape) is rejected.
@@ -367,7 +368,7 @@ pub(crate) fn config_value(keyword: &'static str, value: &str, percent: Percent)
         return Err(CommandError::Unquotable(keyword));
     }
     let value = if percent == Percent::Escape { value.replace('%', "%%") } else { value.to_owned() };
-    if value.contains([' ', '\t', '#', '\'', '=']) {
+    if value.contains([' ', '\t', '\x0c', '#', '\'', '=']) {
         if value.ends_with('\\') {
             return Err(CommandError::Unquotable(keyword));
         }
@@ -395,3 +396,7 @@ pub fn ssh_program() -> PathBuf {
 #[cfg(test)]
 #[path = "command_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "command_props.rs"]
+mod props;

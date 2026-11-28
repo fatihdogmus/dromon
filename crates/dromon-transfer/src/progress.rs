@@ -277,3 +277,7 @@ mod tests {
         assert_eq!(aggregate(&items), Progress { done: u64::MAX, total: u64::MAX });
     }
 }
+
+#[cfg(test)]
+#[path = "progress_props.rs"]
+mod props;

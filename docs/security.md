@@ -404,8 +404,11 @@ recording is never written to disk: it lives in the window and goes with it.
   connect's `user@address:port` id goes whole). In the report's sentences a folder's path is
   `<path>` and a file's `<dir>/file-3.txt`, with only a short plain extension kept. A recording
   needs names that still work as names: folders `dir-4`, files `file-3.txt`, paths
-  `/dir-1/dir-2`, with a hidden one's leading dot. Files and folders are numbered by name, so
-  the same name is the same stand-in everywhere; one redactor serves the whole report, its
+  `/dir-1/dir-2`, with a hidden one's leading dot, and a `-` for a name that sorts before a dot
+  (it starts with a space, `-`, `#`, `(` …), so a replay lists a folder in the order it was
+  seen; that is all a stand-in keeps of a name besides a short extension. Files and folders
+  are numbered by name, a recording's all first in the order sorting by name gives, so the
+  same name is the same stand-in everywhere; one redactor serves the whole report, its
   diagnostics, fixture, script and steps.
 - Errors are rendered from their variant with the stand-in in the path's place, never by
   searching their text. Free-form messages (ssh's reasons, I/O errors, an update's failure)

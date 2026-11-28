@@ -454,12 +454,12 @@ impl Queue {
     }
 
     fn make_view(&self, j: &Job, now: Duration) -> JobView {
-        let total: u64 = j.files.iter().map(|f| f.plan.size()).sum();
+        let total = j.bytes_total();
         let done = j.bytes_done();
         let (speed, eta) = if j.state == TaskState::Running {
             let speed = j.meter.bytes_per_sec();
             let elapsed = j.first_progress.map_or(Duration::ZERO, |t| now.saturating_sub(t));
-            (speed, eta(total - done, speed, elapsed))
+            (speed, eta(total.saturating_sub(done), speed, elapsed))
         } else {
             (None, None)
         };
@@ -497,3 +497,7 @@ mod tests;
 #[cfg(test)]
 #[path = "queue_remote_tests.rs"]
 mod remote_tests;
+
+#[cfg(test)]
+#[path = "queue_props.rs"]
+mod props;

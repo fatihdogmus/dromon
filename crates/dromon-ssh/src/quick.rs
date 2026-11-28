@@ -11,6 +11,10 @@ use crate::command::{CommandError, Percent, check_arg, config_value};
 #[path = "quick_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "quick_props.rs"]
+mod props;
+
 /// The quick-connect popover's fields.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum QuickField {
@@ -79,7 +83,7 @@ pub struct Address {
 pub fn split_address(text: &str) -> Option<Address> {
     let mut t = text.trim();
     let mut uri = false;
-    if t.len() >= 6 && t[..6].eq_ignore_ascii_case("ssh://") {
+    if t.get(..6).is_some_and(|scheme| scheme.eq_ignore_ascii_case("ssh://")) {
         t = t[6..].trim_end_matches('/');
         uri = true;
     }

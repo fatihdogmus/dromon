@@ -1,0 +1,5 @@
+# Hegel's settings for the property tests (docs/testing.md, "Property Tests").
+# CI draws fresh random inputs on every run, as a local run does; Hegel's own `ci` profile would
+# replay the same ones each time.
+[profiles.ci]
+derandomize = false

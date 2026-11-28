@@ -69,3 +69,7 @@ mod tests {
         assert_eq!(b.attempt(), u32::MAX);
     }
 }
+
+#[cfg(test)]
+#[path = "backoff_props.rs"]
+mod props;
